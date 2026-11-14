@@ -9,8 +9,10 @@ then polls the API about every 1.5 s:
   GET /pay/quote/{scan_id}   hours changed (and held for ~2 s) -> "Okay, 3 hours, 0.03 SOL." + new
                              live view (the old one is hung up first: never two at once)
   GET /pay/status/{scan_id}  state "paid" -> "Paid. 3 hours on meter 42. ..." + the Paid screen
-The agent NEVER pays: only the app's Pay button (POST /pay, approved: true) does. "Stop" stops
-all of it, including speech the polling would have triggered.
+The agent never pays on its own: the app's Pay button (POST /pay, approved: true) does, or a
+voice-confirmed intent (chert/voice_pay.py: exact readback, then the caller's "yes, pay"); either
+way the status poll below announces it. "Stop" stops all of it, including speech the polling
+would have triggered.
 
 Linked Dogwood account (POST /operators/dogwood/app-session says linked: true): the agent says it
 will use the official Dogwood app instead of the sticker, and the live view is the sandbox
@@ -232,17 +234,20 @@ class MeterPayFlow:
                  sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
                  view_url: Optional[Callable[[int], str]] = None,
                  paid_text: Optional[Callable[[int], str]] = None,
-                 paid_grace_s: float = 0.0) -> None:
+                 paid_grace_s: float = 0.0,
+                 on_hours: Optional[Callable[[int], Any]] = None) -> None:
         """view_url(hours): what the live view opens (default: the meter page with ?hours=N).
         paid_text(hours): the line said once paid (default: paid_line).
         paid_grace_s: once paid, let the live view finish by itself for up to this long (the
-        Dogwood app shows its receipt), then hang it up."""
+        Dogwood app shows its receipt), then hang it up.
+        on_hours(hours): called when the app's hours changed (voice pay cancels a stale readback)."""
         self.meter = meter
         self.scan_id = meter["scan_id"]
         self._say, self._show_live, self._show_paid = say, show_live, show_paid
         self._view_url = view_url or (lambda h: meter_view_url(self.meter["meter_url"], h))
         self._paid_text = paid_text or (lambda h: paid_line(h, str(self.meter.get("meter_id") or "")))
         self.paid_grace_s = paid_grace_s
+        self.on_hours = on_hours
         self._fetch_quote = fetch_quote or self._get("/pay/quote/")
         self._fetch_status = fetch_status or self._get("/pay/status/")
         self.alive, self.poll_s, self.max_s = alive, poll_s, max_s
@@ -348,6 +353,11 @@ class MeterPayFlow:
                 n = f.due(self.clock())
                 if n is not None and not self.stopped:
                     log.info("meter: hours changed to %d", n)
+                    if self.on_hours is not None:
+                        try:
+                            self.on_hours(n)
+                        except Exception:  # noqa: BLE001 - never stop following the app over it
+                            log.exception("meter: on_hours failed")
                     self._spawn(self.render(n))
                     self._spawn(self.say(hours_line(n, amount_for(self.meter, n))))
                 status = f.on_status(await self._fetch_status(self.scan_id)) if not self.stopped else None

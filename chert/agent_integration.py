@@ -41,7 +41,7 @@ from livekit import rtc
 from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunContext, cli,
                             function_tool, room_io)
 
-from chert import imessage, meter_pay
+from chert import imessage, meter_pay, voice_pay
 from chert.qr_reader import read_qr
 from chert.scansafe_tools import (CodeDebouncer, dogwood_app_session, operate_stream,
                                   sandbox_configured, scan_url_stream, speech_for)
@@ -241,6 +241,8 @@ class ScanSafeCall:
     """State for one FaceTime call: video watcher, debounce, cache, iMessage follow-up."""
 
     meter_flow: Optional["meter_pay.MeterPayFlow"] = None   # parking meter calls only
+    voice_pay: Optional["voice_pay.VoicePay"] = None        # meter calls with AGENT_INTERNAL_KEY
+    heard: Optional["voice_pay.Heard"] = None               # caller's latest final transcript
     ignore_codes: frozenset = frozenset()                   # codes the camera loop skips
 
     def __init__(self, session: AgentSession, room: rtc.Room) -> None:
@@ -259,6 +261,8 @@ class ScanSafeCall:
         self.code_before_greeting = False
         self._speech_lock = asyncio.Lock()
         self.meter_flow = None
+        self.voice_pay = None
+        self.heard = voice_pay.Heard()
         self.ignore_codes = set()
 
     async def say(self, text: str) -> None:
@@ -281,6 +285,8 @@ class ScanSafeCall:
         busy = bool(self._inflight) or self.video.state == "checking"
         if self.meter_flow is not None:
             self.meter_flow.stop()  # no more polling, live views or meter speech
+        if self.voice_pay is not None:
+            self.voice_pay.cancel_now()   # a payment waiting for "yes, pay" is cancelled too
         for task in self._inflight.values():
             task.cancel()          # its stream thread sees the new generation and hangs up
         self._inflight.clear()
@@ -521,6 +527,62 @@ class ScanSafeAgent(Agent):
                 "picture, so it's safe to look at. If the check said not to use it, remind them gently.")
 
 
+class MeterPayAgent(ScanSafeAgent):
+    """Parking meter calls with a verified meter scan: ScanSafeAgent plus voice-confirmed payment
+    (chert/voice_pay.py). Ordinary calls use ScanSafeAgent and never see these tools. Paying still
+    needs the caller's own "yes, pay" right after the exact readback, checked here and on the server."""
+
+    def _vp(self) -> Optional["voice_pay.VoicePay"]:
+        return self.call.voice_pay if self.call is not None else None
+
+    @function_tool
+    async def prepare_payment(self, context: RunContext, hours: Optional[int] = None,
+                              pay_with: Optional[str] = None) -> str:
+        """Get the parking payment ready for the caller to approve by voice. Use this when they
+        ask you to pay or add time. hours: the number of hours, only if they said one. pay_with:
+        "card" or "sol", only if they asked for one. Returns the exact line to read to them."""
+        vp = self._vp()
+        if vp is None:
+            return "You can't pay on this call. Tell them to pick the hours and tap Pay in the ScanSafe app."
+        return await vp.prepare(hours, pay_with)
+
+    @function_tool
+    async def confirm_payment(self, context: RunContext) -> str:
+        """Pay the parking payment you just read out. Call this ONLY right after the caller
+        answered your payment line by saying "yes, pay". Never call it otherwise."""
+        vp = self._vp()
+        if vp is None:
+            return "You can't pay on this call. Tell them to tap Pay in the ScanSafe app."
+        out = await vp.confirm()
+        if not out.get("ok"):
+            return out["say"]
+        flow = self.call.meter_flow
+        if flow is not None and not flow.stopped:
+            # The meter flow's status poll says the "Paid..." line and shows the Paid banner (and
+            # the Dogwood app shows its receipt), the same as when they tap Pay in the app.
+            return ("The payment went through. Say only: Okay. Then wait quietly: the receipt line "
+                    "comes next. Don't say anything else about the payment.")
+        st, intent = out.get("status") or {}, out.get("intent") or {}
+        try:
+            hours = int(st.get("hours") or intent.get("hours"))
+        except (TypeError, ValueError):
+            hours = 1
+        amount = st.get("amount_sol") or meter_pay.amount_for(vp.meter, hours)
+        vp.on_paid()
+        self.call.video.set_paid(hours, float(amount))
+        return "Tell the caller exactly this: " + meter_pay.paid_line(hours, str(vp.meter.get("meter_id") or ""))
+
+    @function_tool
+    async def cancel_payment(self, context: RunContext) -> str:
+        """Cancel the payment you offered. Use this when the caller says no, not now, cancel, or
+        changes their mind about paying."""
+        vp = self._vp()
+        if vp is not None:
+            vp.cancel_now()
+        return ("Say: Okay, I won't pay. You can still tap Pay in the ScanSafe app whenever you're "
+                "ready. Then wait.")
+
+
 # --- Entrypoint --------------------------------------------------------------------------------
 
 def make_model():
@@ -533,6 +595,9 @@ def make_model():
         api_key=os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"),
         # google-genai 3.x defaults to an API version Gemini Live doesn't serve (every model 404s).
         api_version=os.getenv("GEMINI_LIVE_API_VERSION", "v1beta"),
+        # Transcribe the caller: voice payments (chert/voice_pay.py) only go ahead on their own
+        # transcribed "yes, pay" (user_input_transcribed events). 1.8.12 defaults it on; be explicit.
+        input_audio_transcription=gtypes.AudioTranscriptionConfig(),
         # Less jumpy barge-in: moving the phone (rustle, handling noise) was cutting the verdict
         # off mid-sentence. Low start sensitivity plus 300 ms of speech before it counts means
         # real words like "stop" still interrupt, bumps and taps don't.
@@ -704,7 +769,8 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
                          dogwood: Optional[asyncio.Task] = None) -> None:
     """Parking meter call, once FaceTime is up: greet, show the meter page live for the hours the
     app has picked, then follow the app's quotes and payment (chert/meter_pay.py). The agent
-    never pays; the app's Pay button does.
+    never pays on its own: the app's Pay button does, or (chert/voice_pay.py) the caller's own
+    "yes, pay" right after the server's exact readback.
 
     ``dogwood``: the fetch_dogwood_session task, started when the call was placed. If it says
     the person linked Dogwood, the live view is the official Dogwood app operated in the sandbox
@@ -719,21 +785,32 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
             return bool(room.isconnected())
         except Exception:   # noqa: BLE001 - unknown: keep going (MAX_FLOW_S still ends it)
             return True
+    vp = attach_voice_pay(call, meter)
+
+    def show_paid(hours: int, amount: float) -> None:
+        if vp is not None:
+            vp.on_paid()                        # nothing left to say "yes, pay" to
+        call.video.set_paid(hours, amount)
+    on_hours = vp.on_hours_changed if vp is not None else None
     session = await _dogwood_session(dogwood)
     if session:
         log.info("meter: linked Dogwood account; operating the official app")
         view = meter_pay.DogwoodView(session, meter, operate_live=call.dogwood_live,
                                      meter_live=call.meter_live, say=call.say)
         flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=view.show,
-                                      show_paid=call.video.set_paid, alive=connected,
+                                      show_paid=show_paid, alive=connected,
                                       view_url=view.view_url, paid_text=view.paid_text,
-                                      paid_grace_s=DOGWOOD_PAID_GRACE_S)
+                                      paid_grace_s=DOGWOOD_PAID_GRACE_S, on_hours=on_hours)
         first_line = meter_pay.linked_greeting()
+        if vp is not None:
+            vp.plate = lambda: view.plate       # shown in the readback (the server's own plate wins)
     else:
         flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=call.meter_live,
-                                      show_paid=call.video.set_paid, alive=connected)
+                                      show_paid=show_paid, alive=connected, on_hours=on_hours)
         first_line = meter_pay.greeting(meter)
     call.meter_flow = flow
+    if vp is not None:
+        vp.default_hours = lambda: flow.follower.shown    # the hours the app has picked (and we show)
     greet = asyncio.create_task(call.say(first_line))   # the first thing said
     await asyncio.sleep(0)                      # let it take the speech lock
     hours = await flow.initial_hours()
@@ -741,6 +818,41 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
     await greet
     call.greeted.set()
     await flow.run()
+
+
+def attach_voice_pay(call: ScanSafeCall, meter: dict) -> Optional["voice_pay.VoicePay"]:
+    """Voice-confirmed payment for this meter call, if the agent has AGENT_INTERNAL_KEY (the API
+    refuses intents without it). The consent line goes on our video while a payment waits."""
+    if not voice_pay.VoicePay.enabled():
+        return None
+    if call.heard is None:
+        call.heard = voice_pay.Heard()
+    call.voice_pay = voice_pay.VoicePay(meter, call.heard, show=call.video.set_consent)
+    return call.voice_pay
+
+
+def wire_transcripts(session: AgentSession, heard: "voice_pay.Heard") -> None:
+    """Keep the caller's latest FINAL transcript (Gemini Live input transcription) and when the
+    agent / caller were speaking. livekit-agents 1.8: user_input_transcribed (transcript,
+    is_final), agent_state_changed / user_state_changed (new_state)."""
+    def _transcribed(ev) -> None:
+        heard.on_transcript(getattr(ev, "transcript", ""), bool(getattr(ev, "is_final", False)))
+
+    def _agent_state(ev) -> None:
+        heard.on_agent_state(getattr(ev, "new_state", None))
+
+    def _user_state(ev) -> None:
+        heard.on_user_state(getattr(ev, "new_state", None))
+    session.on("user_input_transcribed", _transcribed)
+    session.on("agent_state_changed", _agent_state)
+    session.on("user_state_changed", _user_state)
+
+
+def agent_for(call: ScanSafeCall, meter: Optional[dict]) -> "ScanSafeAgent":
+    """Meter calls get the payment tools only when voice payments are configured."""
+    if meter and voice_pay.VoicePay.enabled():
+        return MeterPayAgent(call, voice_pay.INSTRUCTIONS)
+    return ScanSafeAgent(call, meter_pay.INSTRUCTIONS if meter else "")
 
 
 # 2-vCPU box: video encode + QR decode push CPU past the 0.7 default during a call, which marks
@@ -757,6 +869,7 @@ async def entrypoint(ctx: JobContext) -> None:
     dogwood = asyncio.create_task(fetch_dogwood_session(meter)) if meter else None
     session = AgentSession(llm=make_model())
     call = ScanSafeCall(session, ctx.room)
+    wire_transcripts(session, call.heard)     # before start, so the first words are kept too
     call.watcher.start()                      # before connect, so no track event is missed
 
     def _participant(p: rtc.RemoteParticipant) -> None:
@@ -766,12 +879,14 @@ async def entrypoint(ctx: JobContext) -> None:
 
     async def _cleanup() -> None:
         await call.watcher.aclose()
+        if call.voice_pay is not None:
+            await call.voice_pay.aclose()
         call.video.close()
     ctx.add_shutdown_callback(_cleanup)
 
     await session.start(
         room=ctx.room,
-        agent=ScanSafeAgent(call, meter_pay.INSTRUCTIONS if meter else ""),
+        agent=agent_for(call, meter),
         # Also lets Gemini see the caller (it implements push_video). TODO(verify): RoomIO only
         # forwards camera/screenshare-source tracks; if Chert's bridge track has another source,
         # Gemini won't see video, but our QRWatcher still reads every video track.

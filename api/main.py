@@ -22,6 +22,7 @@ from api.routes_data import router as data_router
 from api.routes_call import router as call_router
 from api.routes_pay import router as pay_router
 from api.routes_result import router as result_router
+from api.routes_voicepay import router as voicepay_router
 from api.scan import (SandboxStreamError, failed_result, parse_solana_pay, sandbox_result, scan,
                       stream_sandbox, with_location)
 from chert.imessage import router as chert_router
@@ -39,6 +40,7 @@ app.include_router(call_router)   # /call-me (Chert FaceTimes the person, agent 
 app.include_router(result_router) # /result/{scan_id} (the page linked from follow-up texts)
 app.include_router(accounts_router)  # /me, /me/linked, /link/dogwood/* (saved accounts)
 app.include_router(dogwood_router)   # /operators/dogwood/* (DEMO: fictional operator's OAuth + API)
+app.include_router(voicepay_router)  # /pay/intent* (FaceTime agent: voice-confirmed payments)
 
 
 class ScanRequest(BaseModel):
