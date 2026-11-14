@@ -15,9 +15,11 @@ from api import routes_call  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _no_chert_texts(monkeypatch):
-    """By default no phone has texted the line (and never hit Chert from tests)."""
-    monkeypatch.setattr(routes_call, "recently_texted_last4", lambda: set())
+def _no_chert_texts(monkeypatch, tmp_path):
+    """No texts have arrived (never hit Chert from tests); consent/tokens go to a temp file."""
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [])
+    monkeypatch.setattr(routes_call, "CONSENT_FILE", str(tmp_path / "consent.json"))
+    routes_call._code_slots.clear()
 
 PHONE = "+14045550123"
 _real_sleep = asyncio.sleep
@@ -231,25 +233,27 @@ def test_no_call_id_gives_up(monkeypatch):
 
 
 
-def test_phone_that_texted_the_line_is_allowed(monkeypatch):
-    monkeypatch.setattr(routes_call, "recently_texted_last4", lambda: {"0123"})
-    monkeypatch.setattr(routes_call, "allowed_phones", lambda: set())
-    url, phone = routes_call.validate(routes_call.CallRequest(url="https://example.com", phone="+14045550123"))
-    assert phone == "+14045550123"
-    with pytest.raises(routes_call.HTTPException) as e:
-        routes_call.validate(routes_call.CallRequest(url="https://example.com", phone="+14045559999"))
-    assert e.value.status_code == 403 and "text ScanSafe first" in e.value.detail
+def test_phone_sign_in_then_call_uses_token_phone(fakes, monkeypatch):
+    stranger = "+13125550123"                       # not on the allowlist
+    code = client.post("/auth/phone/start", json={"phone": stranger}).json()["code"]
+    assert client.post("/auth/phone/verify", json={"phone": stranger}).json() == {"verified": False}
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"HI SCANSAFE! MY SIGN-IN CODE IS {code}")])
+    v = client.post("/auth/phone/verify", json={"phone": stranger}).json()
+    assert v["verified"] is True and v["phone"] == stranger and v["token"]
+    # The body asks to call someone else; the token's phone wins.
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
+                    headers={"Authorization": f"Bearer {v['token']}"})
+    assert r.status_code == 200
 
 
-def test_recently_texted_reads_inbound_messages_from_last_day(monkeypatch):
-    from datetime import datetime, timedelta, timezone
-    now = datetime.now(timezone.utc)
-    items = [{"direction": "inbound", "masked_recipient": "•••9861", "created_at": (now - timedelta(hours=1)).isoformat()},
-             {"direction": "outbound", "masked_recipient": "•••1111", "created_at": now.isoformat()},
-             {"direction": "inbound", "masked_recipient": "•••2222", "created_at": (now - timedelta(days=2)).isoformat()}]
-    monkeypatch.undo()   # use the real function
-    routes_call._texted_cache.update(at=0.0, last4=set())
-    monkeypatch.setattr(routes_call.httpx, "get",
-                        lambda *a, **k: httpx.Response(200, json={"data": {"items": items}},
-                                                       request=httpx.Request("GET", "https://x")))
-    assert routes_call.recently_texted_last4() == {"9861"}
+def test_code_from_a_different_phone_does_not_sign_in(monkeypatch):
+    victim = "+13125550123"
+    code = client.post("/auth/phone/start", json={"phone": victim}).json()["code"]
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("9999", f"MY SIGN-IN CODE IS {code}")])
+    assert client.post("/auth/phone/verify", json={"phone": victim}).json() == {"verified": False}
+
+
+def test_bad_token_falls_back_to_allowlist_only(fakes):
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
+                    headers={"Authorization": "Bearer not-a-real-token"})
+    assert r.status_code == 403
