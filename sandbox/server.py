@@ -100,7 +100,7 @@ def run_stream(req: RunRequest, authorization: str = Header(default="")) -> Stre
                 except ValueError:
                     tail = (tail + [line])[-5:]          # Playwright/Chrome noise on stderr
                     continue
-                if isinstance(obj, dict) and obj.get("type") in ("frame", "nav"):
+                if isinstance(obj, dict) and obj.get("type") in ("frame", "nav", "step"):
                     yield line + "\n"
                 else:
                     result = obj                          # the final plain result JSON
