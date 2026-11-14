@@ -138,7 +138,7 @@ export default function DeskHome() {
           <p className={s.lead}>Red pins are codes people reported. Click one to see what it was.</p>
           {/* The wheel scrolls the page until the map is clicked; leaving the map hands the wheel back. */}
           <div className={s.mapBox} onMouseLeave={() => setMapActive(false)}>
-            <div className={s.mapInner} style={{ pointerEvents: mapActive ? "auto" : "none" }}>
+            <div className={s.mapInner} data-lenis-prevent style={{ pointerEvents: mapActive ? "auto" : "none" }}>
               <ScamMap center={ATLANTA} pins={pins} focus={null} />
             </div>
             {!mapActive && (
