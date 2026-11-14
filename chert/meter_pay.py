@@ -26,6 +26,7 @@ takes its speech, video and HTTP as plain callables.
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import time
 from typing import Any, Awaitable, Callable, Optional
@@ -420,7 +421,7 @@ class DogwoodView:
             self.installed = True
         if result.get("status") == "failed" and "pay" not in steps:
             log.info("dogwood app failed before Pay (%s); meter page from now on",
-                     str(result.get("error") or "")[:120])
+                     re.sub(r"https?://\S+", "<url>", str(result.get("error") or ""))[:120])
             self.fallen_back = True
             await self._say(APP_FALLBACK_LINE)
             return await self._meter_live(meter_view_url(self.meter["meter_url"], hours), hours, amount)
