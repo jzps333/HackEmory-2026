@@ -20,6 +20,8 @@ def _no_chert_texts(monkeypatch, tmp_path):
     monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [])
     monkeypatch.setattr(routes_call, "CONSENT_FILE", str(tmp_path / "consent.json"))
     routes_call._code_slots.clear()
+    routes_call._ip_starts.clear()
+    routes_call._start_times.clear()
 
 PHONE = "+14045550123"
 _real_sleep = asyncio.sleep
@@ -269,7 +271,7 @@ def test_code_from_a_different_phone_does_not_sign_in(monkeypatch):
 def test_second_start_does_not_cancel_the_first(monkeypatch):
     phone = "+13125550123"
     first = client.post("/auth/phone/start", json={"phone": phone}).json()
-    routes_call._code_slots.clear()
+    routes_call._code_slots.clear()      # skip the 10 s per-phone wait
     client.post("/auth/phone/start", json={"phone": phone})
     monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"CODE {first['code']}")])
     assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": first["request_id"]}).json()["verified"]
@@ -279,3 +281,15 @@ def test_bad_token_falls_back_to_allowlist_only(fakes):
     r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
                     headers={"Authorization": "Bearer not-a-real-token"})
     assert r.status_code == 403
+
+
+
+def test_one_device_cannot_lock_out_everyone():
+    for i in range(5):
+        assert client.post("/auth/phone/start", json={"phone": f"+1312555010{i}"},
+                           headers={"X-Forwarded-For": "6.6.6.6"}).status_code == 200
+    assert client.post("/auth/phone/start", json={"phone": "+13125550109"},
+                       headers={"X-Forwarded-For": "6.6.6.6"}).status_code == 429
+    # A different person is unaffected.
+    assert client.post("/auth/phone/start", json={"phone": "+13125550110"},
+                       headers={"X-Forwarded-For": "7.7.7.7"}).status_code == 200

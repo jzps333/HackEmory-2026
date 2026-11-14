@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api import config  # noqa: F401  (loads .env and the LiveKit fallback file)
@@ -77,13 +77,14 @@ def _save_consent(data: dict) -> None:
     os.replace(tmp, CONSENT_FILE)
 
 
-MAX_PENDING = 500
-START_LIMIT_PER_MIN = 30
+MAX_PENDING = 2000
+START_LIMIT_PER_MIN = 300          # global ceiling, well above any one client
+START_LIMIT_PER_IP_MIN = 5
+REQUEST_TTL_S = 15 * 60            # a pending sign-in must be texted within 15 minutes
 
 
 def _prune(data: dict, now: float) -> None:
-    ttl = CONSENT_TTL.total_seconds()
-    data["requests"] = {k: v for k, v in data.get("requests", {}).items() if now - v["at"] < ttl}
+    data["requests"] = {k: v for k, v in data.get("requests", {}).items() if now - v["at"] < REQUEST_TTL_S}
     data["tokens"] = {k: v for k, v in data.get("tokens", {}).items() if now - v["at"] < TOKEN_TTL_S}
     data.pop("codes", None)
     data.pop("verified", None)       # old format: verification no longer hands out tokens later
@@ -99,8 +100,9 @@ def start_sign_in(phone: str) -> tuple[str, str]:
     with _consent_lock:
         data = _load_consent()
         _prune(data, now)
-        if len(data["requests"]) >= MAX_PENDING:
-            raise HTTPException(status_code=503, detail="too many sign-ins in progress; try again soon")
+        while len(data["requests"]) >= MAX_PENDING:          # evict the oldest, never lock people out
+            oldest = min(data["requests"], key=lambda k: data["requests"][k]["at"])
+            del data["requests"][oldest]
         data["requests"][hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now}
         _save_consent(data)
     return code, request_id
@@ -191,11 +193,11 @@ def phone_for_token(token: str) -> Optional[str]:
 
 
 @router.post("/auth/phone/start")
-def phone_start(req: PhoneRequest) -> dict:
+def phone_start(req: PhoneRequest, request: Request) -> dict:
     """Sign in with your phone, step 1: get a code to text to the ScanSafe line from this phone.
     (Reverse OTP: the user texts us, so no SMS provider is needed, and it also lets Chert reach them.)"""
     phone = _norm_phone(req.phone)
-    _take_code_slot(phone)
+    _take_code_slot(phone, _client_ip(request))
     code, request_id = start_sign_in(phone)
     return {"code": code, "request_id": request_id, "line": "+16504444331",
             "sms_body": f"Hi ScanSafe! My sign-in code is {code}"}
@@ -216,21 +218,36 @@ def phone_verify(req: PhoneRequest) -> dict:
 
 _code_slots: dict[str, float] = {}
 _start_times: list[float] = []
+_ip_starts: dict[str, list[float]] = {}
 
 
-def _take_code_slot(phone: str) -> None:
-    """Per phone: one start every 10 s. Global: at most START_LIMIT_PER_MIN starts a minute."""
+def _take_code_slot(phone: str, client: str = "") -> None:
+    """Per client (IP): START_LIMIT_PER_IP_MIN starts a minute. Per phone: one every 10 s.
+    Global ceiling only as a backstop, set far above what one client can reach."""
     now = time.monotonic()
     with _rate_lock:
+        recent = [t for t in _ip_starts.get(client, []) if now - t < 60]
+        if len(recent) >= START_LIMIT_PER_IP_MIN:
+            raise HTTPException(status_code=429, detail="too many sign-ins from this device; try again in a minute")
+        if now - _code_slots.get(phone, -1e9) < 10:
+            raise HTTPException(status_code=429, detail="please wait a few seconds")
         _start_times[:] = [t for t in _start_times if now - t < 60]
         if len(_start_times) >= START_LIMIT_PER_MIN:
             raise HTTPException(status_code=429, detail="too many sign-ins right now; try again in a minute")
-        if now - _code_slots.get(phone, -1e9) < 10:
-            raise HTTPException(status_code=429, detail="please wait a few seconds")
         for k in [k for k, t in _code_slots.items() if now - t > 60]:
             del _code_slots[k]
+        for k in [k for k, ts in _ip_starts.items() if not ts or now - ts[-1] > 60]:
+            del _ip_starts[k]
+        recent.append(now)
+        _ip_starts[client] = recent
         _code_slots[phone] = now
         _start_times.append(now)
+
+
+def _client_ip(request: Request) -> str:
+    """Behind Caddy (port 8000 is firewalled), the last X-Forwarded-For entry is the real client."""
+    xff = request.headers.get("x-forwarded-for", "")
+    return (xff.split(",")[-1].strip() if xff else (request.client.host if request.client else "")) or "?"
 
 
 def allowed_phones() -> set[str]:
