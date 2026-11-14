@@ -3,12 +3,17 @@
 Each request starts a fresh container, waits for its JSON, and the container is deleted (--rm).
 This server holds no API keys except SANDBOX_TOKEN, which only lets the backend call it.
 
+POST /operate/stream {"url", "plate", "hours"} is operator mode (see operate.py), a separate path
+from scanning: it ONLY accepts https://scansafe-demo-sites.vercel.app/dogwood/... (else 400) and
+streams the container's browser while it drives the made-up official Dogwood Parking app.
+
 Run on the sandbox VM:
     pip install fastapi uvicorn
     SANDBOX_TOKEN=... uvicorn server:app --host 0.0.0.0 --port 8080
 """
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import os
@@ -17,9 +22,11 @@ import sys
 import threading
 import time
 import uuid
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from netguard import url_allowed  # noqa: E402  (pure module, no Playwright)
+from operate import check_operate_request, clean_plate  # noqa: E402  (pure module too)
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -33,6 +40,8 @@ TIMEOUT_S = 45
 NETWORK = os.environ.get("SANDBOX_NETWORK", "")
 MAX_OUTPUT = 3_000_000   # bytes of container stdout we accept
 MAX_STREAM_OUTPUT = 40_000_000   # /run/stream: frames included
+OPERATE_TIMEOUT_S = 180          # /operate/stream: steps + up to 120 s waiting for approval
+MAX_OPERATE_OUTPUT = 80_000_000
 
 app = FastAPI(title="ScanSafe sandbox")
 
@@ -41,25 +50,35 @@ class RunRequest(BaseModel):
     url: str
 
 
+class OperateRequest(BaseModel):
+    url: str
+    plate: Any = None      # checked by operate.check_operate_request (400, not 422)
+    hours: Any = None
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True}
 
 
-def _container_cmd(name: str, url: str, *extra: str) -> list[str]:
+def _container_cmd(name: str, *args: str) -> list[str]:
     return [
         "docker", "run", "--rm", "--init", "--name", name,
         *(["--network", NETWORK] if NETWORK else []),
         "--memory", "1g", "--cpus", "1", "--pids-limit", "256",
         "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/home/pwuser/.cache",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-        IMAGE, url, *extra,   # passed as separate arguments, never through a shell
+        IMAGE, *args,   # passed as separate arguments, never through a shell
     ]
 
 
-def _check(req: RunRequest, authorization: str) -> None:
+def _check_token(authorization: str) -> None:
     if not TOKEN or not hmac.compare_digest(authorization.encode(), f"Bearer {TOKEN}".encode()):
         raise HTTPException(status_code=401, detail="bad token")
+
+
+def _check(req: RunRequest, authorization: str) -> None:
+    _check_token(authorization)
     ok, reason = url_allowed(req.url)
     if not ok:
         raise HTTPException(status_code=400, detail=f"url not allowed: {reason}")
@@ -72,25 +91,60 @@ def run_stream(req: RunRequest, authorization: str = Header(default="")) -> Stre
     then exactly one {"type":"result","data":{...same as /run...}} or {"type":"error","detail":...}."""
     _check(req, authorization)
     name = f"scansafe-{uuid.uuid4().hex[:12]}"
-    proc = subprocess.Popen(_container_cmd(name, req.url, "--stream"), stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    return _stream_container(name, _container_cmd(name, req.url, "--stream"), TIMEOUT_S,
+                             MAX_STREAM_OUTPUT, "scan")
+
+
+@app.post("/operate/stream")
+def operate_stream(req: OperateRequest, authorization: str = Header(default="")) -> StreamingResponse:
+    """Operator mode (operate.py), NOT a scan. Only https://scansafe-demo-sites.vercel.app/dogwood/...
+    (anything else: 400). Same NDJSON as /run/stream: frame / nav / step lines while the browser
+    taps Install, Open, types the plate, taps hours-N and Pay (which only asks for approval in
+    ScanSafe), then watches up to 120 s for the receipt; last line {"type":"result","data":{...}}
+    with {"mode":"operate","status":"paid"|"waiting"|"failed","paid",...}."""
+    _check_token(authorization)
+    ok, reason = check_operate_request(req.url, req.plate, req.hours)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    ok, reason = url_allowed(req.url)          # the usual network guard on top
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"url not allowed: {reason}")
+    name = f"scansafe-op-{uuid.uuid4().hex[:12]}"
+    cmd = _container_cmd(name, "--operate", req.url, clean_plate(req.plate), str(int(req.hours)))
+    return _stream_container(name, cmd, OPERATE_TIMEOUT_S, MAX_OPERATE_OUTPUT, "operate")
+
+
+def _stream_container(name: str, cmd: list[str], timeout_s: float, max_output: int,
+                      what: str) -> StreamingResponse:
+    """Run one container and forward its frame/nav/step lines as NDJSON, then one result/error
+    line. The container is removed on timeout, on too much output, or as soon as the client
+    hangs up (an async generator: Starlette cancels it on disconnect even while we wait for the
+    next line, so an operate run whose hours changed never keeps driving the page)."""
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     timed_out = threading.Event()
+
+    def _remove() -> None:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
 
     def _kill() -> None:
         timed_out.set()
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
+        _remove()
         proc.kill()
-    watchdog = threading.Timer(TIMEOUT_S, _kill)
+    watchdog = threading.Timer(timeout_s, _kill)
     watchdog.start()
 
-    def gen():
+    async def gen():
         result, tail, total = None, [], 0
+        loop = asyncio.get_running_loop()
         try:
-            for line in proc.stdout:
+            while True:
+                line = await loop.run_in_executor(None, proc.stdout.readline)
+                if not line:
+                    break
                 total += len(line)
-                if total > MAX_STREAM_OUTPUT:
-                    _kill()
-                    yield json.dumps({"type": "error", "detail": "scan output too large"}) + "\n"
+                if total > max_output:
+                    await loop.run_in_executor(None, _kill)
+                    yield json.dumps({"type": "error", "detail": f"{what} output too large"}) + "\n"
                     return
                 line = line.strip()
                 if not line:
@@ -104,18 +158,18 @@ def run_stream(req: RunRequest, authorization: str = Header(default="")) -> Stre
                     yield line + "\n"
                 else:
                     result = obj                          # the final plain result JSON
-            proc.wait(timeout=15)
+            await loop.run_in_executor(None, lambda: proc.wait(timeout=15))
             if timed_out.is_set():
-                yield json.dumps({"type": "error", "detail": "scan timed out"}) + "\n"
+                yield json.dumps({"type": "error", "detail": f"{what} timed out"}) + "\n"
             elif isinstance(result, dict):
                 yield json.dumps({"type": "result", "data": result}) + "\n"
             else:
-                yield json.dumps({"type": "error", "detail": f"scan failed: {' | '.join(tail)[-300:]}"}) + "\n"
+                yield json.dumps({"type": "error", "detail": f"{what} failed: {' | '.join(tail)[-300:]}"}) + "\n"
         finally:
             watchdog.cancel()
-            if proc.poll() is None:                       # client went away mid-scan
-                subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
+            if proc.poll() is None:                       # client went away mid-run
                 proc.kill()
+                threading.Thread(target=_remove, daemon=True).start()
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 

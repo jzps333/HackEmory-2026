@@ -1,6 +1,10 @@
 """Runs INSIDE a throwaway Docker container. Opens one URL, records what happened, prints JSON.
 
 Usage (inside the container): python run_scan.py <url> [--stream]
+                              python run_scan.py --operate <url> <plate> <hours>
+--operate is operator mode (operate.py), a separate, fenced path that is NOT a scan: it drives
+the made-up official Dogwood Parking app on our demo site (Install, Open, type the plate, tap
+the hours, tap Pay, watch for the receipt), streaming frames like --stream. Scans never type.
 --stream: also print the browser's screen as it changes, one JSON line per frame
 ({"type":"frame","jpeg":...}) plus {"type":"nav","url":...} lines, before the final result line.
 The LAST line is always the plain result JSON, with or without --stream.
@@ -27,11 +31,16 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import unicodedata
 from urllib.parse import urlparse
 
 from netguard import CachingGuard, is_public_ip
+from operate import (PHASE_JS, STEPS_FROM_APP, clean_plate, hours_selector, operate_request_allowed,
+                     operate_status, operate_url_allowed, page_phase, plan_steps, step_text,
+                     valid_hours)
+from operate import SEL as OP_SEL
 
 MAX_TEXT = 4000            # page_text characters
 MAX_HIDDEN = 1500          # hidden_text characters
@@ -56,8 +65,18 @@ MAX_CLICK_FRAMES = 5       # same-site iframes looked into besides the main fram
 MAX_LABEL = 60             # characters of a clicked label kept in the result
 
 
+_out_lock = threading.Lock()
+
+
+def _emit_line(line: str) -> None:
+    """One whole line on stdout. Locked: the screencast's trailing-frame timer prints too."""
+    with _out_lock:
+        sys.stdout.write(line + "\n")
+        sys.stdout.flush()
+
+
 def _emit(obj: dict) -> None:
-    print(json.dumps(obj), flush=True)
+    _emit_line(json.dumps(obj))
 
 # Best-effort hidden-text finder for prompt-injection evidence. Text the user can't see but a
 # model reading the DOM could: display:none, visibility:hidden, opacity 0, tiny font,
@@ -702,6 +721,87 @@ def _now_ms(t0: float) -> int:
     return int((time.monotonic() - t0) * 1000)
 
 
+# Same throwaway phone browser for scans and operator mode.
+BROWSER_ARGS = ["--disable-dev-shm-usage", "--dns-prefetch-disable",
+                "--disable-background-networking", "--no-pings",
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                "--webrtc-ip-handling-policy=disable_non_proxied_udp"]
+CONTEXT_OPTS = dict(accept_downloads=False, java_script_enabled=True, service_workers="block",
+                    viewport={"width": 390, "height": 844}, device_scale_factor=2,  # phone-sized, sharp on FaceTime
+                    is_mobile=True, has_touch=True)
+
+
+def _launch(p, on_route):
+    """Browser + context with every request (popups and iframes too) going through on_route."""
+    browser = p.chromium.launch(
+        chromium_sandbox=os.environ.get("CHROMIUM_SANDBOX") == "1",
+        executable_path=os.environ.get("CHROMIUM_PATH") or None,   # local testing only
+        args=BROWSER_ARGS)
+    context = browser.new_context(**CONTEXT_OPTS)
+    context.route("**/*", on_route)   # context-wide: also covers popups and iframes
+    try:
+        # A routed WebSocket never reaches the server unless the handler calls
+        # connect_to_server(), so a no-op handler blocks them all. (Calling ws.close() in
+        # here deadlocked the sync API at 100% CPU on some pages, e.g. Cloudflare checks.)
+        context.route_web_socket("**/*", lambda ws: None)
+    except AttributeError:            # older Playwright: no WebSocket routing
+        pass
+    return browser, context
+
+
+def start_screencast(context, page, t0: float, pace: dict) -> bool:
+    """Chrome's own screen stream (CDP screencast): a new JPEG whenever the page changes, printed
+    as {"type":"frame",...} lines that the sandbox server forwards live. ``pace`` is
+    {"gap": min seconds between frames, "max": frame cap}; the caller may change "gap" later.
+    False if the screencast couldn't start."""
+    # Chrome only sends a frame when the page changes, so a frame dropped for coming too soon
+    # may be the last one (a tapped button, then nothing moves). Keep the newest dropped frame
+    # and send it once the gap has passed, unless a newer frame went out first.
+    sent = {"n": 0, "last": 0.0, "pending": None, "timer": None}
+    lock = threading.Lock()
+    cdp = context.new_cdp_session(page)
+
+    def send(data: str) -> None:              # with lock held
+        sent["n"] += 1
+        sent["last"] = time.monotonic()
+        _emit({"type": "frame", "jpeg": data, "t_ms": _now_ms(t0)})
+
+    def flush() -> None:
+        with lock:
+            data, sent["pending"], sent["timer"] = sent["pending"], None, None
+            if data is not None and sent["n"] < pace["max"]:
+                send(data)
+
+    def on_frame(ev) -> None:
+        try:
+            cdp.send("Page.screencastFrameAck", {"sessionId": ev["sessionId"]})
+        except Exception:
+            pass
+        with lock:
+            if sent["n"] >= pace["max"]:
+                return
+            wait = pace["gap"] - (time.monotonic() - sent["last"])
+            if wait <= 0:
+                sent["pending"] = None
+                send(ev["data"])
+                return
+            sent["pending"] = ev["data"]
+            if sent["timer"] is None:
+                timer = threading.Timer(wait, flush)
+                timer.daemon = True
+                sent["timer"] = timer
+                timer.start()
+
+    cdp.on("Page.screencastFrame", on_frame)
+    try:
+        cdp.send("Page.startScreencast", {"format": "jpeg", "quality": STREAM_QUALITY,
+                                          "maxWidth": 540, "maxHeight": 1170,
+                                          "everyNthFrame": 1})
+        return True
+    except Exception:
+        return False
+
+
 def scan(url: str, stream: bool = False) -> dict:
     t0 = time.monotonic()
     out = {"url": url, "final_url": None, "domain": None, "redirect_chain": [],
@@ -756,25 +856,7 @@ def scan(url: str, stream: bool = False) -> dict:
     from playwright.sync_api import sync_playwright   # here so tests can import the helpers
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            chromium_sandbox=os.environ.get("CHROMIUM_SANDBOX") == "1",
-            executable_path=os.environ.get("CHROMIUM_PATH") or None,   # local testing only
-            args=["--disable-dev-shm-usage", "--dns-prefetch-disable",
-                  "--disable-background-networking", "--no-pings",
-                  "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-                  "--webrtc-ip-handling-policy=disable_non_proxied_udp"])
-        context = browser.new_context(
-            accept_downloads=False, java_script_enabled=True, service_workers="block",
-            viewport={"width": 390, "height": 844}, device_scale_factor=2,  # phone-sized, sharp on FaceTime
-            is_mobile=True, has_touch=True)
-        context.route("**/*", on_route)   # context-wide: also covers popups and iframes
-        try:
-            # A routed WebSocket never reaches the server unless the handler calls
-            # connect_to_server(), so a no-op handler blocks them all. (Calling ws.close() in
-            # here deadlocked the sync API at 100% CPU on some pages, e.g. Cloudflare checks.)
-            context.route_web_socket("**/*", lambda ws: None)
-        except AttributeError:            # older Playwright: no WebSocket routing
-            pass
+        browser, context = _launch(p, on_route)
         page = context.new_page()
         out["timings"]["browser_ready_ms"] = _now_ms(t0)
 
@@ -787,30 +869,9 @@ def scan(url: str, stream: bool = False) -> dict:
                     _emit({"type": "nav", "url": frame.url[:300]})
 
         if stream:
-            # Chrome's own screen stream (CDP screencast): a new JPEG whenever the page changes.
-            # Frames come out on stdout as they happen; the sandbox server forwards them live.
-            sent = {"n": 0, "last": 0.0}
-            cdp = context.new_cdp_session(page)
-
-            def on_frame(ev) -> None:
-                try:
-                    cdp.send("Page.screencastFrameAck", {"sessionId": ev["sessionId"]})
-                except Exception:
-                    pass
-                now = time.monotonic()
-                if sent["n"] >= STREAM_MAX_FRAMES or now - sent["last"] < STREAM_MIN_GAP_S:
-                    return
-                sent["n"] += 1
-                sent["last"] = now
-                _emit({"type": "frame", "jpeg": ev["data"], "t_ms": _now_ms(t0)})
-
-            cdp.on("Page.screencastFrame", on_frame)
-            try:
-                cdp.send("Page.startScreencast", {"format": "jpeg", "quality": STREAM_QUALITY,
-                                                  "maxWidth": 540, "maxHeight": 1170,
-                                                  "everyNthFrame": 1})
-            except Exception:
-                stream = False      # no screencast: the scan still works, just without frames
+            # no screencast: the scan still works, just without frames
+            stream = start_screencast(context, page, t0,
+                                      {"gap": STREAM_MIN_GAP_S, "max": STREAM_MAX_FRAMES})
 
         def on_response(resp) -> None:
             req = resp.request
@@ -909,18 +970,236 @@ def scan(url: str, stream: bool = False) -> dict:
     return out
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
+# ---------- operator mode (run_scan.py --operate): NOT a scan, see operate.py ----------
+#
+# Drives the made-up official Dogwood Parking app on our own demo site for a person who linked
+# their Dogwood account: Install -> Open -> type the plate -> tap hours-N -> tap Pay (which only
+# asks for approval in ScanSafe) -> watch for the receipt. Only fixed data-testid selectors are
+# clicked and only the checked plate is typed. Scans never come through here.
+
+OPERATE_WAIT_S = 120.0       # after tapping Pay: watch this long for the receipt
+OPERATE_MAX_REQUESTS = 600   # the app polls the ScanSafe API every 1.5 s
+OPERATE_STEP_MS = 15000      # each selector wait / click
+OPERATE_WAIT_GAP_S = 0.5     # ~2 frames/s while only waiting for approval (keeps the stream small)
+OPERATE_MAX_FRAMES = 900
+TYPE_DELAY_MS = 90           # typed one key at a time so the caller sees it happen
+
+
+class OperateError(Exception):
+    """A step that can't go on; the message goes into the result's ``error``."""
+
+
+def operate(url: str, plate: str, hours: int | None) -> dict:
+    t0 = time.monotonic()
+    out = {"mode": "operate", "url": url, "final_url": None, "plate": None, "hours": None,
+           "status": "failed", "paid": False, "steps": [], "error": None,
+           "blocked_requests": [], "screenshots": [], "timings": {}}
+    ok, why = operate_url_allowed(url)
+    plan = plan_steps(url) if ok else ()
+    clean, h = clean_plate(plate), valid_hours(hours)
+    if not ok or not plan or clean is None or h is None:
+        out["error"] = "blocked: " + (why if not ok else "not a Dogwood install or app page" if not plan
+                                      else "bad plate" if clean is None else "bad hours")
+        out["timings"]["total_ms"] = _now_ms(t0)
+        return out
+    out["plate"], out["hours"] = clean, h
+    guard = CachingGuard()
+    ok, why = guard.check(url)
+    if not ok:
+        out["error"] = f"blocked: {why}"
+        out["timings"]["total_ms"] = _now_ms(t0)
+        return out
+
+    counters = {"requests": 0}
+    done: list[str] = out["steps"]
+    phase = "unknown"
+
+    def block(route, req_url: str, why: str, stay: bool) -> None:
+        if len(out["blocked_requests"]) < MAX_BLOCKED:
+            out["blocked_requests"].append({"url": req_url[:300], "reason": why,
+                                            "type": route.request.resource_type})
+        if stay:
+            route.fulfill(status=204, body="")   # a page we won't open: stay where we are
+        else:
+            route.abort("blockedbyclient")
+
+    def on_route(route) -> None:
+        req = route.request
+        counters["requests"] += 1
+        if counters["requests"] > OPERATE_MAX_REQUESTS:
+            return block(route, req.url, "request budget exceeded", stay=False)
+        if req.url.startswith(("data:", "blob:")):
+            return route.continue_()
+        try:
+            top_nav = req.is_navigation_request() and req.frame.parent_frame is None
+        except Exception:
+            top_nav = False
+        allowed, why = operate_request_allowed(req.url, top_nav)
+        if allowed:
+            allowed, why = guard.check(req.url)   # the usual network guard, every request
+        if not allowed:
+            return block(route, req.url, why, stay=top_nav)
+        route.continue_()
+
+    def say_step(name: str) -> None:
+        _emit({"type": "step", "text": step_text(name, clean, h), "step": name})
+
+    def mark(name: str) -> None:
+        done.append(name)
+        out["timings"][f"{name}_ms"] = _now_ms(t0)
+
+    def current_phase() -> str:
+        try:
+            return page_phase(page.evaluate(PHASE_JS))
+        except Exception:      # mid-navigation
+            return "unknown"
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser, context = _launch(p, on_route)
+        page = context.new_page()
+        out["timings"]["browser_ready_ms"] = _now_ms(t0)
+        pace = {"gap": STREAM_MIN_GAP_S, "max": OPERATE_MAX_FRAMES}
+        start_screencast(context, page, t0, pace)
+        last_nav = {"url": ""}
+
+        def on_nav(frame) -> None:
+            if frame == page.main_frame and frame.url not in ("about:blank", last_nav["url"]):
+                last_nav["url"] = frame.url
+                _emit({"type": "nav", "url": frame.url[:300]})
+
+        def on_download(d) -> None:
+            try:
+                d.cancel()
+            except Exception:
+                pass
+
+        def on_popup(pg) -> None:
+            try:
+                pg.close()
+            except Exception:
+                pass
+
+        page.on("framenavigated", on_nav)
+        page.on("download", on_download)
+        page.on("popup", on_popup)
+
+        try:
+            say_step("open")
+            page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+            mark("open")
+            if "install" in plan:
+                page.wait_for_selector(OP_SEL["install"], state="visible", timeout=OPERATE_STEP_MS)
+                page.wait_for_timeout(800)                    # let the caller see the store page
+                say_step("install")
+                page.click(OP_SEL["install"], timeout=OPERATE_STEP_MS)
+                mark("install")
+                page.wait_for_selector(OP_SEL["open"], state="visible", timeout=OPERATE_STEP_MS)
+                page.wait_for_timeout(500)
+                say_step("open_app")
+                page.click(OP_SEL["open"], timeout=OPERATE_STEP_MS)
+                page.wait_for_url(lambda u: plan_steps(u) == STEPS_FROM_APP,
+                                  wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+                if not operate_url_allowed(page.url)[0]:
+                    raise OperateError("Open didn't lead to the Dogwood app")
+                mark("open_app")
+            app_ready = ", ".join(OP_SEL[k] for k in ("plate", "waiting", "receipt", "no_session"))
+            page.wait_for_selector(app_ready, state="visible", timeout=OPERATE_STEP_MS)
+            phase = current_phase()
+            if phase == "waiting":
+                # Already waiting from an earlier run (the hours changed): back to the form.
+                page.click(OP_SEL["change"], timeout=OPERATE_STEP_MS)
+                page.wait_for_selector(OP_SEL["plate"], state="visible", timeout=OPERATE_STEP_MS)
+                phase = current_phase()
+            if phase == "no_session":
+                raise OperateError("the Dogwood app says this session isn't valid")
+            if phase == "app":
+                say_step("plate")
+                box = page.locator(OP_SEL["plate"])
+                box.click(timeout=OPERATE_STEP_MS)
+                box.fill("", timeout=OPERATE_STEP_MS)
+                box.press_sequentially(clean, delay=TYPE_DELAY_MS, timeout=OPERATE_STEP_MS)
+                if box.input_value().strip().upper() != clean:
+                    raise OperateError("the plate didn't go in as typed")
+                mark("plate")
+                page.wait_for_timeout(400)
+                say_step("hours")
+                page.click(hours_selector(h), timeout=OPERATE_STEP_MS)
+                mark("hours")
+                page.wait_for_timeout(900)                    # total updates, the caller sees it
+                say_step("pay")
+                page.click(OP_SEL["pay"], timeout=OPERATE_STEP_MS)
+                page.wait_for_selector(f'{OP_SEL["waiting"]}, {OP_SEL["receipt"]}', state="visible",
+                                       timeout=OPERATE_STEP_MS)
+                mark("pay")
+            if phase != "paid":
+                say_step("wait")
+                pace["gap"] = OPERATE_WAIT_GAP_S
+                deadline = time.monotonic() + OPERATE_WAIT_S
+                while time.monotonic() < deadline:
+                    phase = current_phase()
+                    if phase in ("paid", "no_session"):
+                        break
+                    page.wait_for_timeout(500)
+            if phase == "no_session":
+                raise OperateError("the Dogwood session ended")
+            if phase == "paid":
+                pace["gap"] = STREAM_MIN_GAP_S
+                say_step("paid")
+                mark("paid")
+                page.wait_for_timeout(1500)                   # let the receipt reach the stream
+        except OperateError as e:
+            out["error"] = str(e)
+        except Exception as e:                                # timeouts, blocked page, crash
+            out["error"] = str(e).splitlines()[0][:300] if str(e) else type(e).__name__
+        out["final_url"] = page.url
+        try:
+            shot = page.screenshot(full_page=False, type="jpeg", quality=SHOT_QUALITY, timeout=5000)
+            out["screenshots"].append("data:image/jpeg;base64," + base64.b64encode(shot).decode())
+        except Exception:
+            pass
+        browser.close()
+    out["status"] = operate_status(done, phase, out["error"])
+    out["paid"] = out["status"] == "paid"
+    out["timings"]["total_ms"] = _now_ms(t0)
+    return out
+
+
+USAGE = "usage: run_scan.py <url> [--stream] | run_scan.py --operate <url> <plate> <hours>"
+
+
+def main(args: list[str]) -> int:
+    if args[:1] == ["--operate"]:
+        if len(args) != 4:
+            _emit_line(json.dumps({"error": USAGE}))
+            return 1
+        try:
+            hours = int(args[3])
+        except ValueError:
+            hours = None
+        try:
+            result = operate(args[1], args[2], hours)
+        except Exception:
+            _emit_line("null")   # never let a "step" line pass for the result
+            raise
+        _emit_line(json.dumps(result))
+        return 0
     stream = "--stream" in args[1:]
-    if not args or len(args) > 2 or (len(args) == 2 and not stream):
-        print(json.dumps({"error": "usage: run_scan.py <url> [--stream]"}))
-        sys.exit(1)
+    if not args or len(args) > 2 or (len(args) == 2 and not stream) or args[0].startswith("--"):
+        _emit_line(json.dumps({"error": USAGE}))
+        return 1
     try:
         result = scan(args[0], stream=stream)
     except Exception:
         if stream:
             # server.py keeps the last non-frame/nav JSON line as the result: make sure that
             # is never a "step" line. null = no result, so the scan is reported as failed.
-            print("null", flush=True)
+            _emit_line("null")
         raise
-    print(json.dumps(result), flush=True)
+    _emit_line(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

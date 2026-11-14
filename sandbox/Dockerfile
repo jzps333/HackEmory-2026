@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir playwright==1.55.0
 # Run as the image's unprivileged user, never root.
 USER pwuser
 WORKDIR /home/pwuser
-COPY --chown=pwuser run_scan.py netguard.py ./
+COPY --chown=pwuser run_scan.py netguard.py operate.py ./
 
 ENTRYPOINT ["python", "run_scan.py"]

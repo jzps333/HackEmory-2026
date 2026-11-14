@@ -64,6 +64,8 @@ Add to `chert/scansafe-agent/.env.local` (agent server) or the repo `.env`. Neve
 | `SCANSAFE_DEMO_PHONE` | agent (texts) | optional; demo phone in E.164 (`+1404...`) to text after the call |
 | `CHERT_WEBHOOK_SECRET` | API | the subscription `secret` returned once when you create the webhook |
 | `GEMINI_LIVE_MODEL`, `GEMINI_LIVE_VOICE` | agent | optional; default `gemini-2.5-flash-native-audio-preview-12-2025`, `Kore` |
+| `AGENT_INTERNAL_KEY` | agent + API | shared key for `POST /operators/dogwood/app-session` (header `X-Agent-Key`); without it the agent always uses the meter flow |
+| `SANDBOX_URL`, `SANDBOX_TOKEN` | agent + API | the agent calls the sandbox's `/operate/stream` directly for the Dogwood app (the backend doesn't proxy it yet); same values as the API's |
 
 Optional: `SCANSAFE_RESULT_BASE` (default `https://scansafe.nyc/r`), `CHERT_API_BASE`.
 
@@ -154,3 +156,17 @@ Verified (docs read, or the installed package inspected):
   reader still does).
 - Webhook payloads for call events; where to create the webhook subscription with an `ftk_` key.
 - Image attachments: shared-messages has no media field, so screenshots go as links.
+
+## Parking meter + linked Dogwood account (official app instead of the sticker)
+
+On a parking meter call (`chert/meter_pay.py`), the agent asks the backend
+`POST {SCANSAFE_API_URL}/operators/dogwood/app-session {scan_id}` (header `X-Agent-Key`) as soon as
+the call is placed. If it answers `{"linked": true, "app_url", "plate"}`, the agent says "You've
+linked your Dogwood Parking account. I'll use the official Dogwood app instead of the sticker." and
+the live view is the sandbox operating the made-up Dogwood Parking app (`/operate/stream` on
+`SANDBOX_URL`: install, open, plate, hours, "Pay with linked ScanSafe account", waiting). Hours
+changes from `/pay/quote` before payment re-run it (straight to the app, no second install). When
+`/pay/status` says paid: "Paid. 3 hours on meter 42 for plate GA 4821K. Your receipt is in the
+Dogwood app." and the Paid banner over the app's receipt. The agent still never pays: the person
+taps Pay in ScanSafe. Not linked, no key, app-session error, or the app run failing before Pay
+(e.g. the sandbox isn't redeployed yet) -> today's meter flow. "Stop" stops all of it.

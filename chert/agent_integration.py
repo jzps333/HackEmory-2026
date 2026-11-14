@@ -43,7 +43,8 @@ from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunCon
 
 from chert import imessage, meter_pay
 from chert.qr_reader import read_qr
-from chert.scansafe_tools import CodeDebouncer, scan_url_stream, speech_for
+from chert.scansafe_tools import (CodeDebouncer, dogwood_app_session, operate_stream,
+                                  sandbox_configured, scan_url_stream, speech_for)
 
 log = logging.getLogger("scansafe.agent")
 
@@ -103,6 +104,8 @@ OUTBOUND_GREETING = ("Hi, this is ScanSafe. You just scanned a code in our app. 
 CHERT_FACETIME_API = os.getenv("CHERT_FACETIME_API", "https://facetime.trychert.com/api/v1").rstrip("/")
 CALL_DONE = {"ended", "failed", "rejected"}
 OUTBOUND_ANSWER_TIMEOUT_S = 150.0
+DOGWOOD_SESSION_WAIT_S = 4.0   # once FaceTime is up, how long the app-session answer may still take
+DOGWOOD_PAID_GRACE_S = 4.0     # paid: let the Dogwood app's receipt reach the video first
 
 
 # --- Video helpers -----------------------------------------------------------------------------
@@ -328,9 +331,51 @@ class ScanSafeCall:
         Nothing is spoken and nothing is texted; the page's verdict isn't used. When cancelled
         (hours changed, or stop) it hangs up the stream and waits for that thread to finish
         before giving up, so two live views never run at once."""
+        def run(showing, stop) -> Optional[dict]:
+            return scan_url_stream(
+                url,
+                on_frame=lambda jpeg: showing() and self.video.set_live_frame(jpeg),
+                on_nav=lambda u: showing() and self.video.note_nav(u),
+                should_stop=stop,
+            )
+        return await self._live_view(url, hours, amount, run)
+
+    async def dogwood_live(self, url: str, plate: str, hours: int, amount: float,
+                           on_step=None) -> Optional[dict]:
+        """Linked Dogwood account: the sandbox operates the official Dogwood Parking app (operator
+        mode: Install, Open, plate, hours, "Pay with linked ScanSafe account", which only asks
+        for approval in ScanSafe) and its screen plays live on our video, the current step under
+        the header. Then the app's last picture (the receipt once paid) under the hours banner.
+        Same hang-up rules as meter_live. The agent still never pays."""
+        def run(showing, stop) -> Optional[dict]:
+            def step(text: str, step_id: str) -> None:
+                if showing():
+                    self.video.note_step(text)
+                if on_step is not None:
+                    on_step(text, step_id)
+            return operate_stream(
+                url, plate, hours,
+                on_frame=lambda jpeg: showing() and self.video.set_live_frame(jpeg),
+                on_nav=lambda u: showing() and self.video.note_nav(u),
+                on_step=step,
+                should_stop=stop,
+            )
+        return await self._live_view(url, hours, amount, run)
+
+    async def _live_view(self, url: str, hours: int, amount: float, run) -> Optional[dict]:
+        """One live view on our video: run(showing, should_stop) streams in a worker thread.
+        Frames only land while this view is still the one on screen."""
         gen, cancel = self.generation, threading.Event()
         self.video.begin_meter_view(url, hours, amount)
-        fut = asyncio.ensure_future(asyncio.to_thread(self._meter_scan, url, gen, cancel))
+
+        def showing() -> bool:
+            return (gen == self.generation and not cancel.is_set()
+                    and self.video.state == "checking" and self.video.code == url)
+
+        def should_stop() -> bool:
+            return gen != self.generation or cancel.is_set()
+
+        fut = asyncio.ensure_future(asyncio.to_thread(run, showing, should_stop))
         try:
             result = await asyncio.shield(fut)
         except asyncio.CancelledError:
@@ -345,17 +390,6 @@ class ScanSafeCall:
         if self.video.state == "checking" and self.video.code == url:
             self.video.set_meter_view(result, hours, amount)
         return result
-
-    def _meter_scan(self, url: str, gen: int, cancel: threading.Event) -> Optional[dict]:
-        def showing() -> bool:
-            return (gen == self.generation and not cancel.is_set()
-                    and self.video.state == "checking" and self.video.code == url)
-        return scan_url_stream(
-            url,
-            on_frame=lambda jpeg: showing() and self.video.set_live_frame(jpeg),
-            on_nav=lambda u: showing() and self.video.note_nav(u),
-            should_stop=lambda: gen != self.generation or cancel.is_set(),
-        )
 
     async def _on_code(self, code: str) -> None:
         """Auto path: the video loop saw a code."""
@@ -646,10 +680,35 @@ async def prepublish_audio(session: AgentSession, timeout: float = 5.0) -> bool:
     return getattr(out, "_publication", None) is not None
 
 
-async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room) -> None:
+async def fetch_dogwood_session(meter: dict) -> Optional[dict]:
+    """POST /operators/dogwood/app-session for this meter scan: {"app_url", "plate"} when the
+    person linked their Dogwood account (and the sandbox is configured), else None."""
+    if not sandbox_configured():
+        return None
+    return await asyncio.to_thread(dogwood_app_session, meter["scan_id"])
+
+
+async def _dogwood_session(task: Optional[asyncio.Task]) -> Optional[dict]:
+    if task is None:
+        return None
+    try:
+        return await asyncio.wait_for(task, DOGWOOD_SESSION_WAIT_S)
+    except asyncio.TimeoutError:
+        log.info("meter: no app-session answer in time; using the meter flow")
+    except Exception:   # noqa: BLE001 - any failure means today's meter flow
+        log.exception("meter: app-session check failed; using the meter flow")
+    return None
+
+
+async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
+                         dogwood: Optional[asyncio.Task] = None) -> None:
     """Parking meter call, once FaceTime is up: greet, show the meter page live for the hours the
     app has picked, then follow the app's quotes and payment (chert/meter_pay.py). The agent
-    never pays; the app's Pay button does."""
+    never pays; the app's Pay button does.
+
+    ``dogwood``: the fetch_dogwood_session task, started when the call was placed. If it says
+    the person linked Dogwood, the live view is the official Dogwood app operated in the sandbox
+    (DogwoodView) instead of the meter page; if not, or it fails, today's meter flow."""
     call.ignore_codes.add(meter["scan_url"])    # the person may be standing at that very sticker
     label = " · ".join(x for x in (f"Meter {meter['meter_id']}" if meter.get("meter_id") else "",
                                    meter.get("merchant") or "") if x)
@@ -660,10 +719,22 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room) -> Non
             return bool(room.isconnected())
         except Exception:   # noqa: BLE001 - unknown: keep going (MAX_FLOW_S still ends it)
             return True
-    flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=call.meter_live,
-                                  show_paid=call.video.set_paid, alive=connected)
+    session = await _dogwood_session(dogwood)
+    if session:
+        log.info("meter: linked Dogwood account; operating the official app")
+        view = meter_pay.DogwoodView(session, meter, operate_live=call.dogwood_live,
+                                     meter_live=call.meter_live, say=call.say)
+        flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=view.show,
+                                      show_paid=call.video.set_paid, alive=connected,
+                                      view_url=view.view_url, paid_text=view.paid_text,
+                                      paid_grace_s=DOGWOOD_PAID_GRACE_S)
+        first_line = meter_pay.linked_greeting()
+    else:
+        flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=call.meter_live,
+                                      show_paid=call.video.set_paid, alive=connected)
+        first_line = meter_pay.greeting(meter)
     call.meter_flow = flow
-    greet = asyncio.create_task(call.say(meter_pay.greeting(meter)))   # the first thing said
+    greet = asyncio.create_task(call.say(first_line))   # the first thing said
     await asyncio.sleep(0)                      # let it take the speech lock
     hours = await flow.initial_hours()
     await flow.render(hours)                    # live view starts while the greeting plays
@@ -682,6 +753,8 @@ async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
     out = outbound_job(ctx.job.metadata)
     meter = meter_pay.meter_job(out)          # a parking meter payment call (from /call-me)
+    # Linked Dogwood account? Ask now, so the answer is in before the person picks up.
+    dogwood = asyncio.create_task(fetch_dogwood_session(meter)) if meter else None
     session = AgentSession(llm=make_model())
     call = ScanSafeCall(session, ctx.room)
     call.watcher.start()                      # before connect, so no track event is missed
@@ -717,10 +790,12 @@ async def entrypoint(ctx: JobContext) -> None:
         log.info("outbound call: waiting for the person to answer")
         if not await wait_for_outbound_answer(ctx.room):
             log.info("outbound call not answered or ended; leaving")
+            if dogwood is not None:
+                dogwood.cancel()
             ctx.shutdown(reason="outbound call not answered")
             return
         if meter:
-            await run_meter_call(call, meter, ctx.room)
+            await run_meter_call(call, meter, ctx.room, dogwood)
             return
         check = asyncio.create_task(call.check_now(out["scan_url"]))   # live view starts now
         await call.say(OUTBOUND_GREETING)    # takes the speech lock first, so it's said first
