@@ -83,6 +83,9 @@
   position: relative;
   aspect-ratio: 390 / 844;
   height: min(60vh, 640px);
+  /* --chrome is the rest of the card (set by LiveCheck.tsx): the frame takes the height left on screen so
+     the step text below stays visible. svh = the screen with Safari's toolbars showing. Falls back above. */
+  height: clamp(240px, calc(100svh - var(--chrome, 0px) - 8px), min(60vh, 640px));
   max-width: 100%;
   margin: 0 auto;
   border: 8px solid var(--ink);
@@ -177,6 +180,19 @@
   color: var(--muted);
   font-size: 1rem;
   margin: 0;
+}
+
+/* Phones: tighter spacing and type so the frame can stay big and the steps stay on screen. */
+@media (max-width: 480px) {
+  .card { padding: 1rem 0.85rem 1.1rem; margin: 0 0 0.5rem; }
+  .title { font-size: 1.35rem; margin-bottom: 0.35rem; }
+  .sub { font-size: 1rem; margin-bottom: 0.5rem; }
+  .now { font-size: 1.05rem; margin-bottom: 0.65rem; }
+  .progress { margin-top: 0.85rem; }
+  .bar { margin-bottom: 0.55rem; }
+  /* Room for two lines, so a longer step name doesn't make the frame jump. */
+  .status { font-size: 1.15rem; line-height: 1.3; min-height: 2.6em; margin-bottom: 0.35rem; }
+  .hint { font-size: 0.95rem; line-height: 1.45; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -318,3 +318,36 @@ export function screenshotSrc(s: string): string {
   if (DEMO_MODE) return `/${name}`;
   return `${API}/screenshots/${name}`;
 }
+
+
+// ---------- Typesense search over every check (Tiger Data scan log) ----------
+
+export interface ScanHit {
+  id: string;
+  url: string | null;
+  final_url: string | null;
+  domain: string | null;
+  verdict: "safe" | "suspicious" | "malicious";
+  scam_type: string;
+  jev_score: number | null;
+  explanation: string | null;
+  page_title: string | null;
+  scanned_at: number;
+  reported: boolean;
+  /** Typesense highlight HTML: escaped by the server, only <mark> tags. */
+  highlight?: Record<string, string>;
+}
+
+export interface ScanSearchResult {
+  found: number;
+  hits: ScanHit[];
+  facets: { verdict: Record<string, number>; scam_type: Record<string, number> };
+}
+
+/** GET /scans/search: typo-tolerant search over every scan (Typesense, fed from Tiger Data). */
+export async function searchScans(q: string, verdict?: string): Promise<ScanSearchResult> {
+  if (DEMO_MODE) return { found: 0, hits: [], facets: { verdict: {}, scam_type: {} } };
+  const params = new URLSearchParams({ q, per_page: "20" });
+  if (verdict) params.set("verdict", verdict);
+  return request<ScanSearchResult>(`/scans/search?${params.toString()}`, undefined, 15000);
+}

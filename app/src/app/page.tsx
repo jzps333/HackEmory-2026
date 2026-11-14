@@ -31,6 +31,7 @@ export default function ScanPage() {
   // undefined = still reading this phone's saved profile; null = first visit, show onboarding.
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const statusRef = useRef<HTMLDivElement>(null);
+  const linkRef = useRef<HTMLInputElement>(null);
   // The scan in flight, so a new scan (or leaving the page) stops the old live stream.
   const scanAbort = useRef<AbortController | null>(null);
 
@@ -49,8 +50,11 @@ export default function ScanPage() {
   async function finishOnboarding(data: OnboardingData) {
     const saved = saveProfile(data);
     setShareLocation(!!saved.location);
-    // Let the "You're all set" message show for a moment, then open the scanner.
-    window.setTimeout(() => setProfile(saved), 1200);
+    // Let the "You're all set" message show for a moment, then open the scanner (from the top).
+    window.setTimeout(() => {
+      setProfile(saved);
+      window.scrollTo({ top: 0 });
+    }, 1200);
   }
 
   function editDetails() {
@@ -68,7 +72,13 @@ export default function ScanPage() {
     const feed = createLiveFeed(url);
     setPhase({ kind: "checking", url, feed });
     window.scrollTo({ top: 0 });
-    requestAnimationFrame(() => statusRef.current?.focus());
+    // Focus the step text for screen readers without letting focus scroll only it into view, then show
+    // the whole checking card (title, live view and steps), which LiveCheck sizes to fit the screen.
+    requestAnimationFrame(() => {
+      const el = statusRef.current;
+      el?.focus({ preventScroll: true });
+      el?.closest("section")?.scrollIntoView({ block: "nearest" });
+    });
     const saved = profile?.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null;
     const loc = shareLocation ? (await getLocation()) ?? saved : null;
     if (ctrl.signal.aborted) return;
@@ -76,9 +86,12 @@ export default function ScanPage() {
       const result = await scanUrlLive(url, loc, feed.handlers, ctrl.signal);
       if (ctrl.signal.aborted) return;
       setPhase({ kind: "result", result });
+      // The checking screen may have scrolled the header away; start the verdict at the top.
+      window.scrollTo({ top: 0 });
     } catch {
       if (ctrl.signal.aborted) return;
       setPhase({ kind: "error", url, msg: "We couldn't check this link right now. Please don't open it yet. Try again in a moment." });
+      window.scrollTo({ top: 0 });
     }
   }
 
@@ -116,7 +129,13 @@ export default function ScanPage() {
         </div>
       )}
 
-      <Scanner onResult={check} />
+      <Scanner
+        onResult={check}
+        onPasteInstead={() => {
+          linkRef.current?.focus();
+          linkRef.current?.scrollIntoView({ block: "center" });
+        }}
+      />
 
       <div className="divider" aria-hidden="true">or</div>
 
@@ -125,8 +144,10 @@ export default function ScanPage() {
         <label htmlFor="link-input">Link or QR code text</label>
         <input
           id="link-input"
+          ref={linkRef}
           type="text"
           inputMode="url"
+          enterKeyHint="go"
           autoComplete="off"
           autoCapitalize="off"
           spellCheck={false}
@@ -141,12 +162,13 @@ export default function ScanPage() {
 
       <section className="card" aria-labelledby="loc-h" style={{ marginTop: "1.5rem" }}>
         <h2 id="loc-h" className="sr-only">Location</h2>
-        <label className="toggle" htmlFor="loc-toggle" style={{ marginBottom: 0 }}>
-          <span>Share my rough location<span className="hint" style={{ display: "block", fontWeight: 400 }}>Helps warn people nearby about scam QR codes. Rounded to about 100 meters. Off unless you turn it on.</span></span>
-          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+        <label className="toggle stacked" htmlFor="loc-toggle" style={{ marginBottom: 0 }}>
+          <span className="toggle-title">Share my rough location</span>
+          <span className="toggle-control">
             <span className="toggle-state" aria-hidden="true">{shareLocation ? "On" : "Off"}</span>
             <input id="loc-toggle" type="checkbox" role="switch" checked={shareLocation} onChange={(e) => toggleLocation(e.target.checked)} />
           </span>
+          <span className="hint toggle-desc">Helps warn people nearby about scam QR codes. Rounded to about 100 meters. Off unless you turn it on.</span>
         </label>
       </section>
 
