@@ -10,6 +10,6 @@ exact wallet. A sticker with the same label but another wallet is an impostor.
 from __future__ import annotations
 
 KNOWN_MERCHANTS: dict[str, str] = {
-    "Peachtree Parking Co.": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL",
+    "Dogwood Lot & Meter Co.": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL",
     "Magnolia Diner": "9qAFfuxQcEsTwPirRu24BGh7UzKeJA5ayXKghufTDqXX",
 }

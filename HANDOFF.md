@@ -11,7 +11,7 @@ This is the single entry point for a new Claude session or teammate. **No secret
 2. Ask the user which piece they want you on (section 7), and which machine you're on (only the user's Mac has SSH keys for the servers; a new machine needs its own key added).
 3. **Rules (non-negotiable):**
    - Never commit, print, paste or log secrets (API keys, tokens, passwords, connection strings, the sandbox token, phone numbers). They live only in `.env` files on the servers (section 4).
-   - Made-up brands only (Peachtree Parking Co., Magnolia Diner, Morrow Coffee, Trail Notes, Orbit Post, Pixel Palace). Never copy real companies' pages or real meters.
+   - Made-up brands only (Dogwood Lot & Meter Co., Magnolia Diner, Morrow Coffee, Trail Notes, Orbit Post, Pixel Palace). Never copy real companies' pages or real meters.
    - Sandbox browser: never bypass CAPTCHAs, never type into login forms. Treat them as evidence.
    - Ask the user before outward actions: placing calls, pushing to `main`, merging, posting, deleting, changing DNS/firewall.
    - Don't change the `ScanResult` shape (`api/schema.py`, `shared/scan_result.example.json`) without telling the whole team.
@@ -175,7 +175,7 @@ screen shows the live stream (falls back to `/scan`); results with verdict, expl
 | 3 | Done: branches merged into `main`. Still to do: make the server checkouts `git pull` main instead of scp'd files | Claude | server `git status` clean on `main` |
 | 4 | Outbound call answer issue (section 6) | user tests, Claude debugs | A `/call-me` call is answered and the live walkthrough plays |
 | 5 | Finish/deploy the in-progress items (section 6): app report messages, click-past (rebuild sandbox image), demo sites + QR sheet | Claude | Deployed; demo QR codes give the intended verdicts |
-| 6 | Devnet wallet: replace the placeholder Peachtree wallet in `api/scan.py` `KNOWN_MERCHANTS`, regenerate QR codes (`scripts/README.md`, `scripts/make_demo_qr.py`) | user makes wallet, Claude edits | Solana Pay demo code verifies and a devnet payment goes through with approval |
+| 6 | Devnet wallet: replace the placeholder Dogwood wallet in `api/scan.py` `KNOWN_MERCHANTS`, regenerate QR codes (`scripts/README.md`, `scripts/make_demo_qr.py`) | user makes wallet, Claude edits | Solana Pay demo code verifies and a devnet payment goes through with approval |
 | 7 | Chert webhook (optional) at `https://api.scansafe.nyc/chert/webhook`; save its secret as `CHERT_WEBHOOK_SECRET` | Claude + user | Signed test event accepted |
 | 8 | Checkpoints: 3 AM feature freeze; **5 AM record the 2-minute demo** (app scan with live view + FaceTime call + scam map) | team | Video uploaded, link in Devpost and on `/about` (`DEMO_VIDEO_URL` in `app/src/app/about/page.tsx`) |
 | 9 | Devpost write-up + TEAM.md checklist (Security track; opt into Chert, Coder, Typesense, Gemini, Vultr, Entire, A-Team, Tiger Data, Solana, GoDaddy, DEV; name every tool; screenshots) | Claude drafts, user submits | Submitted by 7 AM |

@@ -10,7 +10,7 @@ value). Before it signs anything the server:
 - refuses unless the user approved (`approved: true`) and the QR's label + wallet match
   `KNOWN_MERCHANTS` in `api/merchants.py` (it never trusts the client's `merchant_verified`).
 
-Every business here is made up (Peachtree Parking Co., Magnolia Diner).
+Every business here is made up (Dogwood Lot & Meter Co., Magnolia Diner).
 
 ## What is set up on the API server (root@144.202.25.65)
 
@@ -19,7 +19,7 @@ Keypairs (Solana CLI JSON format, made with `solders`, `chmod 600`, never in git
 | File | Role | Public address |
 |---|---|---|
 | `/root/solana/devnet-payer.json` | payer (the "customer"; `/pay` spends from it) | `DyFY4o9utLvfwAg7Nep246iM1Jd3trCRjBUrZvmavkk9` |
-| `/root/solana/merchant-peachtree.json` | Peachtree Parking Co. | `6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL` |
+| `/root/solana/merchant-peachtree.json` | Dogwood Lot & Meter Co. | `6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL` |
 | `/root/solana/merchant-magnolia.json` | Magnolia Diner | `9qAFfuxQcEsTwPirRu24BGh7UzKeJA5ayXKghufTDqXX` |
 
 Only the public addresses are in code (`api/merchants.py`). The merchant keypairs are only kept so
@@ -61,7 +61,7 @@ fresh `reference` key every run):
 
 | File | Pays | Expected |
 |---|---|---|
-| `fixtures/qr/real_meter.png` | Peachtree Parking Co., 0.01 SOL, "Meter 42" | safe, payable |
+| `fixtures/qr/real_meter.png` | Dogwood Lot & Meter Co., 0.01 SOL, "Meter 42" | safe, payable |
 | `fixtures/qr/magnolia_table.png` | Magnolia Diner, 0.005 SOL, "Table 7" | safe, payable |
 | `fixtures/qr/fake_sticker.png` | an unknown wallet, same label/amount/message as `real_meter` | malicious (impersonation), `/pay` refuses |
 
@@ -84,7 +84,7 @@ By hand:
 curl -s https://api.scansafe.nyc/pay -H 'content-type: application/json' -d '{
   "scan_id": "demo", "approved": true,
   "payment": {"recipient": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL", "amount_sol": 0.01,
-              "label": "Peachtree Parking Co.", "message": "Meter 42"}}'
+              "label": "Dogwood Lot & Meter Co.", "message": "Meter 42"}}'
 ```
 
 Deploying: copy the changed files to `~/HackEmory-2026` on the server and restart the `api` tmux

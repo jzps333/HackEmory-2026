@@ -95,7 +95,7 @@ Both must stay running. After code changes, restart both (Ctrl+C `chert dev` fir
 ## 5. Test
 
 1. Backend up: `curl $SCANSAFE_API_URL/health`.
-2. Print a QR code: `python3 -c "import qrcode; qrcode.make('https://bit.ly/peachtree-park-42').save('/tmp/qr.png')"`
+2. Print a QR code: `python3 -c "import qrcode; qrcode.make('https://bit.ly/dogwood-meter-42').save('/tmp/qr.png')"`
    (any URL; in mock mode the backend returns the mock verdicts).
 3. **FaceTime Video** +1 650-444-4331 from the verified iPhone.
 4. The agent greets you within ~10 s. The agent's video shows a "ScanSafe" card.

@@ -12,13 +12,13 @@ from api import solana_pay
 from api.routes_pay import router
 from api.scan import KNOWN_MERCHANTS, parse_solana_pay
 
-MERCHANT = KNOWN_MERCHANTS["Peachtree Parking Co."]
+MERCHANT = KNOWN_MERCHANTS["Dogwood Lot & Meter Co."]
 SCAMMER = str(Keypair().pubkey())
 REFERENCE = str(Keypair().pubkey())
 FAKE_SIG = "5" * 88
 
 
-def body(recipient=MERCHANT, amount=0.02, approved=True, verified=True, label="Peachtree Parking Co."):
+def body(recipient=MERCHANT, amount=0.02, approved=True, verified=True, label="Dogwood Lot & Meter Co."):
     return {"scan_id": "abc123", "approved": approved, "payment": {
         "recipient": recipient, "amount_sol": amount, "label": label, "message": "Meter 42",
         "reference": REFERENCE, "merchant_verified": verified}}
@@ -95,7 +95,7 @@ def test_refuses_over_cap(client, wallet, rpc):
 
 
 def test_send_payment_refuses_unverified_directly(wallet, rpc):
-    p = parse_solana_pay(f"solana:{SCAMMER}?amount=0.02&label=Peachtree%20Parking%20Co.")
+    p = parse_solana_pay(f"solana:{SCAMMER}?amount=0.02&label=Dogwood%20Lot%20%26%20Meter%20Co.")
     with pytest.raises(solana_pay.PaymentError) as e:
         solana_pay.send_payment(p)
     assert e.value.code == "merchant_not_verified"

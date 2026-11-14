@@ -16,7 +16,7 @@ changing the keys in `.env`, run `data.setup` + `data.sync_scans` and restart th
   `api/schema.py`, `shared/scan_result.example.json`.
 - **Hard rules:** never commit `.env` and never print, log or paste keys or connection strings (use placeholders).
   Don't change the ScanResult shape or the Typesense/Tiger schemas without telling the team first. Location stays
-  rounded to ~100 m (3 decimals). The demo uses made-up businesses only (Peachtree Parking Co., Magnolia Diner).
+  rounded to ~100 m (3 decimals). The demo uses made-up businesses only (Dogwood Lot & Meter Co., Magnolia Diner).
 - **Run:** `pip install -r requirements.txt`, then `python3 -m data.setup` and `python3 -m data.sync_scans` (need keys,
   section 3) and the offline tests `python3 -m pytest -q tests` (no keys or network needed).
 - **Live backend:** `https://api.scansafe.nyc` (endpoints in section 5).
@@ -230,7 +230,7 @@ only need the backfill once per cluster, or after Typesense was down for a while
 
 **Pointing at real services:** put the three vars in your local `.env` and run `uvicorn api.main:app --reload`.
 Careful: the Tiger service *is* the demo dashboard. Every local scan lands on it, including mock-mode scans of the
-fake Peachtree page, and rows have no scan_id or environment column to filter them out later. For throwaway work, use Docker:
+fake Dogwood page, and rows have no scan_id or environment column to filter them out later. For throwaway work, use Docker:
 ```bash
 docker run -d --name ts -p 8108:8108 typesense/typesense:27.1 --data-dir /tmp --api-key=<local-dev-key>
 docker run -d --name tsdb -p 5432:5432 -e POSTGRES_PASSWORD=<local-password> timescale/timescaledb:latest-pg16
@@ -294,7 +294,7 @@ curl -s "$BASE/stats/summary"
 curl -s "$BASE/stats/hourly?hours=24"
 curl -s "$BASE/pins?lat=33.79&lng=-84.32&radius_km=5"
 curl -s -G "$BASE/search" --data-urlencode "q=parking"
-# Adds a REAL pin to the live map (the fake Peachtree example, id mock-mal-001; running it again upserts the same pin)
+# Adds a REAL pin to the live map (the fake Dogwood example, id mock-mal-001; running it again upserts the same pin)
 curl -s -X POST "$BASE/report" -H 'Content-Type: application/json' -d @shared/scan_result.example.json
 ```
 
@@ -322,7 +322,7 @@ curl -s -G "$S" -H "$H" --data-urlencode 'q=*' --data-urlencode 'query_by=domain
   --data-urlencode 'filter_by=location:(33.79, -84.32, 5 km)' --data-urlencode 'sort_by=location(33.79, -84.32):asc'   # nearby
 curl -s -G "$S" -H "$H" --data-urlencode 'q=parkng' --data-urlencode 'query_by=explanation,domain,url'               # text, typo ok
 curl -s -G "$S" -H "$H" --data-urlencode 'q=*' --data-urlencode 'query_by=domain' --data-urlencode 'per_page=0' \
-  --data-urlencode 'filter_by=domain:=`peachtree-parking-pay.xyz`'                                                  # flagged count
+  --data-urlencode 'filter_by=domain:=`dogwood-meter-pay.xyz`'                                                  # flagged count
 curl -s "$TS/collections/scam_pins" -H "$H"                                   # schema + num_documents
 curl -s "$TS/collections/scam_pins/documents/export" -H "$H"                  # every pin, JSONL
 curl -s -X DELETE "$TS/collections/scam_pins/documents/<scan_id>" -H "$H"     # remove one pin

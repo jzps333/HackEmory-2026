@@ -1,6 +1,6 @@
 {
   "scan_id": "mock-safe-001",
-  "url": "solana:6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL?amount=0.02&label=Peachtree%20Parking%20Co.&message=Meter%2042&reference=4Zs6N8Wm2uqv3kG8ePp1oZ5hJ7cXy9tBnRdLfQaVwE2s",
+  "url": "solana:6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL?amount=0.02&label=Dogwood%20Lot%20%26%20Meter%20Co.&message=Meter%2042&reference=4Zs6N8Wm2uqv3kG8ePp1oZ5hJ7cXy9tBnRdLfQaVwE2s",
   "final_url": null,
   "redirect_chain": [],
   "domain": null,
@@ -8,7 +8,7 @@
   "verdict": "safe",
   "jev_score": 0.06,
   "scam_type": "none",
-  "explanation": "This looks safe. It's a payment of 0.02 test SOL, about three dollars and fifty cents, to Peachtree Parking Co., and the wallet matches their verified wallet.",
+  "explanation": "This looks safe. It's a payment of 0.02 test SOL, about three dollars and fifty cents, to Dogwood Lot & Meter Co., and the wallet matches their verified wallet.",
   "checks": {
     "impersonates": "none",
     "impersonates_p": 0.88,
@@ -22,7 +22,7 @@
   "payment": {
     "recipient": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL",
     "amount_sol": 0.02,
-    "label": "Peachtree Parking Co.",
+    "label": "Dogwood Lot & Meter Co.",
     "message": "Meter 42",
     "reference": "4Zs6N8Wm2uqv3kG8ePp1oZ5hJ7cXy9tBnRdLfQaVwE2s",
     "merchant_verified": true,

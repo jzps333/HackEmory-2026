@@ -67,9 +67,9 @@ Same body. Response is `application/x-ndjson`, one JSON object per line, in this
 
 ### ScanResult (shared/scan_result.example.json)
 ```json
-{"scan_id": "3f9a1c2b7d4e", "url": "https://bit.ly/peachtree-park-42",
- "final_url": "https://peachtree-parking-pay.xyz/meter/42", "redirect_chain": ["https://bit.ly/...", "..."],
- "domain": "peachtree-parking-pay.xyz", "page_title": "Peachtree Parking Co. - Pay Your Meter",
+{"scan_id": "3f9a1c2b7d4e", "url": "https://bit.ly/dogwood-meter-42",
+ "final_url": "https://dogwood-meter-pay.xyz/meter/42", "redirect_chain": ["https://bit.ly/...", "..."],
+ "domain": "dogwood-meter-pay.xyz", "page_title": "Dogwood Lot & Meter Co. - Pay Your Meter",
  "verdict": "malicious", "jev_score": 0.94, "scam_type": "fake_parking_or_toll",
  "explanation": "Don't pay this. ...",
  "checks": {"impersonates": "fake_parking_or_toll", "impersonates_p": 0.91, "asks_password_p": 0.08,
@@ -129,7 +129,7 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
                "https://www.ftc.gov/system/files/ftc_gov/pdf/csn-annual-data-book-2024.pdf"]},
  "payments_refused": {"count": 2, "sol_total": 0.02,
    "note": "Solana Pay codes refused because the wallet didn't match the merchant. Devnet test SOL, not converted to USD."},
- "repeat_scams": [{"domain": "peachtree-parking-pay.xyz", "times_checked": 5, "times_flagged": 5,
+ "repeat_scams": [{"domain": "dogwood-meter-pay.xyz", "times_checked": 5, "times_flagged": 5,
                    "first_seen": "2026-11-14T15:02:11+00:00", "last_seen": "2026-11-14T19:41:05+00:00",
                    "scam_type": "fake_parking_or_toll"}],
  "generated_at": "2026-11-14T20:43:39.363453+00:00"}
@@ -142,7 +142,7 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 
 ### GET /stats/domain/{domain} (new): the "checked N times" line
 ```json
-{"domain": "peachtree-parking-pay.xyz", "times_checked": 5, "times_flagged": 5,
+{"domain": "dogwood-meter-pay.xyz", "times_checked": 5, "times_flagged": 5,
  "first_seen": "2026-11-14T15:02:11+00:00", "last_seen": "2026-11-14T19:41:05+00:00",
  "verdicts": {"safe": 0, "suspicious": 1, "malicious": 4}}
 ```
@@ -175,7 +175,7 @@ curl -s -X POST $B/call-me -H "Authorization: Bearer $TOKEN" -H 'Content-Type: a
 curl -s $B/stats/summary
 curl -s "$B/stats/hourly?hours=24"
 curl -s $B/stats/impact
-curl -s $B/stats/domain/peachtree-parking-pay.xyz
+curl -s $B/stats/domain/dogwood-meter-pay.xyz
 curl -s -G $B/scans/search --data-urlencode q=wikipedia
 curl -s "$B/pins?lat=33.79&lng=-84.32&radius_km=5"
 curl -s -G $B/search --data-urlencode q=parking

@@ -149,7 +149,7 @@ def test_log_scan_inserts_row(monkeypatch):
     tiger_store.log_scan(malicious(scan_ms=4200))
     sql, params = executed[0]
     assert sql.startswith("INSERT INTO scans")
-    assert params[1:] == ("peachtree-parking-pay.xyz", "malicious", "fake_parking_or_toll", 0.94, 4200)
+    assert params[1:] == ("dogwood-meter-pay.xyz", "malicious", "fake_parking_or_toll", 0.94, 4200)
 
 
 # ---------- routes ----------
