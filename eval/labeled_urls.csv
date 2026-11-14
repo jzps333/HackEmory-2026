@@ -1,0 +1,36 @@
+url,label,note
+https://scansafe-demo-sites.vercel.app/websites/cafe/rewards,scam,demo: free-coffee offer asking for card
+https://scansafe-demo-sites.vercel.app/websites/arcade/prize,scam,demo: prize offer asking for card
+https://scansafe-demo-sites.vercel.app/websites/scams/hidden-ai-note,scam,demo: checkout with hidden prompt injection
+https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll,scam,demo: fake toll notice with card form
+https://scansafe-demo-sites.vercel.app/websites/scams/package-fee,scam,demo: fake parcel fee
+https://scansafe-demo-sites.vercel.app/websites/scams/wifi-login,scam,demo: wi-fi page asking for email password
+https://scansafe-demo-sites.vercel.app/websites/scams/menu-app,scam,demo: menu that downloads an app
+https://scansafe-demo-sites.vercel.app/websites/scams/robot-check,scam,demo: fake robot check gate
+https://scansafe-demo-sites.vercel.app/websites/scams/wallet-giveaway,scam,demo: crypto airdrop asking for recovery phrase
+https://scansafe-demo-sites.vercel.app/r/a,scam,demo: redirect chain to the toll scam
+https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html,scam,demo: fake parking meter payment
+https://scansafe-demo-sites.vercel.app/websites,safe,demo: site index
+https://scansafe-demo-sites.vercel.app/websites/cafe,safe,demo: fictional cafe
+https://scansafe-demo-sites.vercel.app/websites/trails,safe,demo: fictional trails
+https://scansafe-demo-sites.vercel.app/websites/orbit,safe,demo: fictional orbit
+https://scansafe-demo-sites.vercel.app/websites/arcade,safe,demo: fictional arcade
+https://scansafe-demo-sites.vercel.app/cities,safe,demo: cities page
+https://scansafe-demo-sites.vercel.app/websites/safe/library-wifi,safe,demo: library wi-fi that asks for nothing
+https://scansafe-demo-sites.vercel.app/fixtures/safe/index.html,safe,demo: real restaurant menu
+https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html,safe,demo: real parking meter
+https://github.com/login,safe,real: login form
+https://www.paypal.com/signin,safe,real: payments login
+https://accounts.google.com,safe,real: login
+https://www.amazon.com,safe,real: shopping
+https://www.wikipedia.org,safe,real: donation banner
+https://www.usps.com,safe,real: delivery brand
+https://www.irs.gov,safe,real: government payments
+https://www.cdc.gov,safe,real: government
+https://www.bbc.com,safe,real: news with cookie banner
+https://www.lemonde.fr,safe,real: news with cookie banner (French)
+https://www.nytimes.com,safe,real: news with paywall/login
+https://www.apple.com,safe,real: shopping
+https://www.chase.com,safe,real: bank login
+https://www.emory.edu,safe,real: university
+https://example.com,safe,real: minimal page

@@ -31,3 +31,7 @@ screenshots/
 # Solana keypairs (they live only on the API server in /root/solana/)
 devnet-payer.json
 merchant-*.json
+
+# Eval runs (scripts/eval_detection.py); eval/baseline.json is kept on purpose
+eval/results-*.json
+eval/rescored-*.json

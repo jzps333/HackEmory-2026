@@ -37,7 +37,7 @@ def env(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "")
     monkeypatch.setattr(jev, "check_page",
                         lambda sandbox: JevChecks(impersonates="fake_bank", malicious_p=0.92))
-    monkeypatch.setattr(api_scan, "explain", lambda sandbox, verdict, scam_type: f"EXPLAINED {verdict}")
+    monkeypatch.setattr(api_scan, "explain", lambda sandbox, verdict, scam_type, sig=None: f"EXPLAINED {verdict}")
     monkeypatch.setattr(api_main, "flagged_before", lambda result: 3)
     monkeypatch.setattr(api_main, "record_scan", lambda result: seen["recorded"].append(result))
     monkeypatch.setattr(api_main, "FRAME_MIN_GAP_S", 0)   # forward every frame unless a test says not

@@ -89,3 +89,17 @@ curl -s https://api.scansafe.nyc/pay -H 'content-type: application/json' -d '{
 
 Deploying: copy the changed files to `~/HackEmory-2026` on the server and restart the `api` tmux
 session (see HANDOFF.md).
+
+## Detection eval (`eval_detection.py`, not payments)
+
+Labeled URLs live in `eval/labeled_urls.csv` (`scam` = should be malicious or suspicious, `safe` =
+should be safe). Each live run is one sequential scan per URL against the shared sandbox, so keep runs
+small while the demo is live.
+
+```bash
+python3 scripts/eval_detection.py                                 # live: POST https://api.scansafe.nyc/scan
+python3 scripts/eval_detection.py --rescore eval/baseline.json -v # offline: this checkout's rule on a saved run
+```
+
+`eval/baseline.json` is the run from before `api/signals.py` (33/35). Live runs are saved as
+`eval/results-<timestamp>.json` (gitignored).
