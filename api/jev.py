@@ -47,6 +47,13 @@ class JevError(Exception):
     """Anything that goes wrong with Jev. The caller falls back to Gemini."""
 
 
+def _bot_check(bc) -> dict:
+    """The sandbox's robot-check finding, reduced to {"detected", "kind"}."""
+    if not isinstance(bc, dict):
+        return {"detected": False, "kind": None}
+    return {"detected": bool(bc.get("detected")), "kind": bc.get("kind") or None}
+
+
 def build_payload(sandbox: dict) -> dict:
     """Build one Jev request from what the sandbox saw (see sandbox/run_scan.py output)."""
     state = {
@@ -64,6 +71,12 @@ def build_payload(sandbox: dict) -> dict:
         "hidden_text": (sandbox.get("hidden_text") or "")[:1500],
         "blocked_requests": [b.get("reason", "") for b in (sandbox.get("blocked_requests") or [])][:10],
         "status_codes": [h.get("status") for h in (sandbox.get("status_codes") or [])],
+        # What the scanner did to see the page: harmless buttons it clicked (cookie banners,
+        # "Continue", close), and barriers it found and left alone. Labels are page content.
+        "scanner_clicked": [{"label": str(c.get("label", ""))[:60], "kind": c.get("kind", "")}
+                            for c in (sandbox.get("clicked") or []) if isinstance(c, dict)][:5],
+        "bot_check": _bot_check(sandbox.get("bot_check")),
+        "login_wall": bool(sandbox.get("login_wall")),
     }
     questions = {
         "impersonates": {
