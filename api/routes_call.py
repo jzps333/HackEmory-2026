@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api import config  # noqa: F401  (loads .env and the LiveKit fallback file)
@@ -49,7 +49,7 @@ _last_call_at = 0.0
 
 class CallRequest(BaseModel):
     url: str
-    phone: str
+    phone: str = ""                   # ignored when signed in (the token's phone is used)
     lat: Optional[float] = None
     lng: Optional[float] = None
 
@@ -231,6 +231,27 @@ def phone_verify(req: PhoneRequest) -> dict:
     if not token:
         return {"verified": False}
     return {"verified": True, "phone": phone, "token": token}
+
+
+def bearer_token(authorization: str) -> str:
+    """The token from an `Authorization: Bearer <token>` header ("" if there isn't one)."""
+    scheme, _, value = (authorization or "").strip().partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
+def mask_phone(phone: str) -> str:
+    """Only the last 4 digits, the way Chert shows numbers: "+14045559861" -> "•••9861"."""
+    return "\u2022\u2022\u2022" + re.sub(r"\D", "", phone)[-4:]
+
+
+@router.get("/auth/me")
+def auth_me(response: Response, authorization: str = Header(default="")) -> dict:
+    """Is this sign-in token still good? Never returns the full phone number."""
+    response.headers["Cache-Control"] = "no-store"
+    phone = phone_for_token(bearer_token(authorization))
+    if not phone:
+        return {"signed_in": False}
+    return {"signed_in": True, "phone_masked": mask_phone(phone)}
 
 
 _code_slots: dict[str, float] = {}
@@ -417,7 +438,7 @@ async def call_me(req: CallRequest, authorization: str = Header(default="")) -> 
     """Ring the person on FaceTime; our agent opens `url` in the sandbox and shows it live.
     Who gets called comes from the phone sign-in token (Authorization: Bearer <token>), not from
     the request body. Without a token only the server's own allowlist (the demo phone) works."""
-    token = authorization.removeprefix("Bearer ").strip()
+    token = bearer_token(authorization)
     signed_in = await asyncio.to_thread(phone_for_token, token) if token else None
     if signed_in:
         req = req.model_copy(update={"phone": signed_in})

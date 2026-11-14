@@ -16,6 +16,17 @@ load_dotenv()
 
 CONNECT_TIMEOUT = 5
 
+# Scam payment requests ScanSafe refused (wallet doesn't match the merchant). One row per scan_id.
+# Also created on first use by log_payment_refusal, so a server that ran setup before this
+# table existed doesn't need setup again.
+PAYMENT_REFUSALS_SQL = """CREATE TABLE IF NOT EXISTS payment_refusals (
+    time       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    scan_id    TEXT PRIMARY KEY,
+    reason     TEXT NOT NULL,
+    amount_sol DOUBLE PRECISION,
+    source     TEXT NOT NULL
+)"""
+
 SCHEMA_SQL = [
     """CREATE TABLE IF NOT EXISTS scans (
         time      TIMESTAMPTZ NOT NULL,
@@ -42,7 +53,13 @@ SCHEMA_SQL = [
         end_offset        => INTERVAL '1 minute',
         schedule_interval => INTERVAL '5 minutes',
         if_not_exists     => TRUE)""",
+    # /stats/domain/{domain} and repeat_scams look scans up by domain. Additive; queries work without it.
+    "CREATE INDEX IF NOT EXISTS scans_domain_time_idx ON scans (domain, time DESC)",
+    PAYMENT_REFUSALS_SQL,
 ]
+
+FLAGGED = ["malicious", "suspicious"]
+VERDICTS = ("safe", "suspicious", "malicious")
 
 
 class NotConfigured(RuntimeError):
@@ -131,4 +148,97 @@ def summary() -> dict:
         "scans_24h": avg.get("total", 0),
         "avg_scan_ms_24h": float(avg["avg_scan_ms"]) if avg.get("avg_scan_ms") is not None else None,
         "avg_score_24h": float(avg["avg_score"]) if avg.get("avg_score") is not None else None,
+    }
+
+
+# ---------- impact (/stats/impact, /stats/domain/{domain}) ----------
+
+_refusals_table_ready = False
+
+
+def log_payment_refusal(scan_id: str, reason: str, amount_sol: float | None, source: str) -> None:
+    """One refused scam payment request. A scan_id is counted once (ON CONFLICT DO NOTHING)."""
+    global _refusals_table_ready
+    with _connect() as conn:
+        if not _refusals_table_ready:
+            conn.execute(PAYMENT_REFUSALS_SQL)
+            _refusals_table_ready = True
+        conn.execute(
+            "INSERT INTO payment_refusals (scan_id, reason, amount_sol, source) VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (scan_id) DO NOTHING",
+            (scan_id, reason, amount_sol, source),
+        )
+
+
+def impact_counts(repeat_limit: int = 10) -> dict:
+    """Numbers behind /stats/impact. All-time verdict totals come from the scans_hourly continuous
+    aggregate; the exact 24 h count uses the time index; repeat scams need the raw rows (domain)."""
+    repeat_limit = max(1, min(int(repeat_limit), 50))
+    with _connect() as conn:
+        by_verdict = conn.execute(
+            "SELECT verdict, sum(total)::bigint AS total FROM scans_hourly GROUP BY verdict").fetchall()
+        last_24h = conn.execute(
+            "SELECT count(*) AS total FROM scans WHERE time >= now() - INTERVAL '24 hours'").fetchone() or {}
+        # A domain counts as a repeat scam when it was checked more than once and most of its
+        # checks were flagged, so one false alarm on a popular site doesn't put it on the list.
+        repeats = conn.execute(
+            "SELECT domain, count(*) AS times_checked, "
+            "count(*) FILTER (WHERE verdict = ANY(%(flagged)s)) AS times_flagged, "
+            "min(time) AS first_seen, max(time) AS last_seen, "
+            "mode() WITHIN GROUP (ORDER BY scam_type) "
+            "  FILTER (WHERE verdict = ANY(%(flagged)s) AND scam_type IS NOT NULL AND scam_type <> 'none') "
+            "  AS scam_type "
+            "FROM scans WHERE domain IS NOT NULL AND domain <> '' "
+            "GROUP BY domain "
+            "HAVING count(*) > 1 AND 2 * count(*) FILTER (WHERE verdict = ANY(%(flagged)s)) > count(*) "
+            "ORDER BY times_checked DESC, last_seen DESC, domain LIMIT %(limit)s",
+            {"flagged": FLAGGED, "limit": repeat_limit},
+        ).fetchall()
+        present = conn.execute(
+            "SELECT to_regclass('payment_refusals') IS NOT NULL AS present").fetchone() or {}
+        refused = {}
+        if present.get("present"):
+            refused = conn.execute(
+                "SELECT count(*) AS count, coalesce(sum(amount_sol), 0) AS sol_total "
+                "FROM payment_refusals").fetchone() or {}
+    totals = {v: 0 for v in VERDICTS}
+    for r in by_verdict:
+        if r.get("verdict") is not None:
+            totals[r["verdict"]] = int(r["total"] or 0)
+    repeat_rows = []
+    for r in _jsonable(repeats):
+        repeat_rows.append({"domain": r["domain"], "times_checked": int(r["times_checked"]),
+                            "times_flagged": int(r["times_flagged"]), "first_seen": r["first_seen"],
+                            "last_seen": r["last_seen"], "scam_type": r.get("scam_type") or "other"})
+    return {
+        "by_verdict": totals,
+        "scans_total": sum(totals.values()),
+        "scans_24h": int(last_24h.get("total") or 0),
+        "repeat_scams": repeat_rows,
+        "payments_refused": {"count": int(refused.get("count") or 0),
+                             "sol_total": round(float(refused.get("sol_total") or 0), 9)},
+    }
+
+
+def domain_stats(domain: str) -> dict:
+    """How often one (already validated, lowercase) domain was checked, and with which verdicts."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT count(*) AS times_checked, "
+            "count(*) FILTER (WHERE verdict = 'safe') AS safe, "
+            "count(*) FILTER (WHERE verdict = 'suspicious') AS suspicious, "
+            "count(*) FILTER (WHERE verdict = 'malicious') AS malicious, "
+            "min(time) AS first_seen, max(time) AS last_seen "
+            "FROM scans WHERE domain = %s",
+            (domain,),
+        ).fetchone() or {}
+    row = _jsonable([row])[0] if row else {}
+    verdicts = {v: int(row.get(v) or 0) for v in VERDICTS}
+    return {
+        "domain": domain,
+        "times_checked": int(row.get("times_checked") or 0),
+        "times_flagged": verdicts["suspicious"] + verdicts["malicious"],
+        "first_seen": row.get("first_seen"),
+        "last_seen": row.get("last_seen"),
+        "verdicts": verdicts,
     }
