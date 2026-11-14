@@ -53,7 +53,7 @@ export default function DashboardClient() {
         </div>
       </section>
 
-      <section aria-labelledby="hourly-h">
+      <section className="card" aria-labelledby="hourly-h">
         <h2 id="hourly-h">Last 24 hours</h2>
         <p>{totalScans} checks, {totalScams} of them scams.</p>
         <div className="legend" aria-hidden="true"><span className="l-scam">Scams</span><span className="l-ok">Other checks</span></div>
@@ -93,7 +93,7 @@ export default function DashboardClient() {
       </section>
 
       {summary.top_scam_types.length > 0 && (
-        <section aria-labelledby="types-h">
+        <section className="card" aria-labelledby="types-h">
           <h2 id="types-h">Most common scams</h2>
           <ul className="hbar" style={{ listStyle: "none", padding: 0 }}>
             {summary.top_scam_types.map((t) => (

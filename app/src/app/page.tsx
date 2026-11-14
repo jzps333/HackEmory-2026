@@ -1,12 +1,16 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Scanner from "@/components/Scanner";
 import ResultView from "@/components/ResultView";
-import { DEMO_MODE, scanUrl } from "@/lib/api";
+import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
+import { clearProfile, loadProfile, saveProfile, type Profile } from "@/lib/profile";
+import type { OnboardingData } from "@/lib/onboarding";
+import LiveCheck, { createLiveFeed, type LiveFeed } from "@/components/LiveCheck";
+import { DEMO_MODE, scanUrlLive } from "@/lib/api";
 import type { ScanResult } from "@/lib/types";
 
-type Phase = { kind: "idle" } | { kind: "checking"; url: string } | { kind: "result"; result: ScanResult } | { kind: "error"; url: string; msg: string };
+type Phase = { kind: "idle" } | { kind: "checking"; url: string; feed: LiveFeed } | { kind: "result"; result: ScanResult } | { kind: "error"; url: string; msg: string };
 
 function getLocation(): Promise<[number, number] | null> {
   return new Promise((resolve) => {
@@ -24,24 +28,56 @@ export default function ScanPage() {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [link, setLink] = useState("");
   const [shareLocation, setShareLocation] = useState(false);
+  // undefined = still reading this phone's saved profile; null = first visit, show onboarding.
+  const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const statusRef = useRef<HTMLDivElement>(null);
+  // The scan in flight, so a new scan (or leaving the page) stops the old live stream.
+  const scanAbort = useRef<AbortController | null>(null);
 
-  // Location is off every time the page loads; the user has to turn it on.
+  useEffect(() => {
+    const saved = loadProfile();
+    setProfile(saved);
+    // Location stays off unless they chose to share it during onboarding.
+    if (saved?.location) setShareLocation(true);
+    return () => scanAbort.current?.abort();
+  }, []);
+
   function toggleLocation(on: boolean) {
     setShareLocation(on);
+  }
+
+  async function finishOnboarding(data: OnboardingData) {
+    const saved = saveProfile(data);
+    setShareLocation(!!saved.location);
+    // Let the "You're all set" message show for a moment, then open the scanner.
+    window.setTimeout(() => setProfile(saved), 1200);
+  }
+
+  function editDetails() {
+    clearProfile();
+    setProfile(null);
+    reset();
   }
 
   async function check(raw: string) {
     const url = raw.trim();
     if (!url) return;
-    setPhase({ kind: "checking", url });
+    scanAbort.current?.abort();
+    const ctrl = new AbortController();
+    scanAbort.current = ctrl;
+    const feed = createLiveFeed(url);
+    setPhase({ kind: "checking", url, feed });
     window.scrollTo({ top: 0 });
     requestAnimationFrame(() => statusRef.current?.focus());
-    const loc = shareLocation ? await getLocation() : null;
+    const saved = profile?.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null;
+    const loc = shareLocation ? (await getLocation()) ?? saved : null;
+    if (ctrl.signal.aborted) return;
     try {
-      const result = await scanUrl(url, loc);
+      const result = await scanUrlLive(url, loc, feed.handlers, ctrl.signal);
+      if (ctrl.signal.aborted) return;
       setPhase({ kind: "result", result });
     } catch {
+      if (ctrl.signal.aborted) return;
       setPhase({ kind: "error", url, msg: "We couldn't check this link right now. Please don't open it yet. Try again in a moment." });
     }
   }
@@ -52,20 +88,22 @@ export default function ScanPage() {
   }
 
   if (phase.kind === "checking") {
-    return (
-      <div className="progress" role="status" aria-live="polite" tabIndex={-1} ref={statusRef}>
-        <div className="spinner" aria-hidden="true" />
-        <p>Opening it safely on our server…</p>
-        <p className="hint" style={{ fontSize: "1rem", fontWeight: 400 }}>Nothing opens on your phone. This usually takes a few seconds.</p>
-      </div>
-    );
+    return <LiveCheck feed={phase.feed} statusRef={statusRef} />;
   }
 
-  if (phase.kind === "result") return <ResultView result={phase.result} onDone={reset} />;
+  if (profile === undefined) return null;
+  if (profile === null) return <OnboardingFlow onComplete={finishOnboarding} />;
+
+  if (phase.kind === "result") {
+    const facetime = profile.facetimeOk && profile.phoneE164
+      ? { phone: profile.phoneE164, location: shareLocation && profile.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null }
+      : null;
+    return <ResultView result={phase.result} onDone={reset} facetime={facetime} />;
+  }
 
   return (
     <>
-      <h1>Check a QR code before you open it</h1>
+      <h1>{profile.fullName ? `Hi ${profile.fullName.split(" ")[0]}. ` : ""}Check a QR code before you open it</h1>
       <p>We open the link on our own server, look for scams, and tell you in plain words if it&apos;s safe.</p>
       {DEMO_MODE && (
         <p className="notice"><span className="demo-badge">Demo mode</span> No server is connected, so results are sample data. Paste a link starting with &quot;solana:&quot; to see a safe payment, or anything else to see a scam.</p>
@@ -111,6 +149,11 @@ export default function ScanPage() {
           </span>
         </label>
       </section>
+
+      <p className="hint" style={{ marginTop: "1.5rem", textAlign: "center" }}>
+        Set up as {profile.fullName || "you"}.{" "}
+        <button type="button" className="link-button" onClick={editDetails}>Change my details</button>
+      </p>
     </>
   );
 }
