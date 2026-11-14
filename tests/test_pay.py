@@ -41,6 +41,9 @@ def rpc(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
         req = json.loads(request.content)
         calls.append((str(request.url), req))
+        if req["method"] == "getGenesisHash":
+            return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1,
+                                             "result": solana_pay.DEVNET_GENESIS_HASH})
         if req["method"] == "getLatestBlockhash":
             return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {
                 "context": {"slot": 1},
@@ -112,12 +115,12 @@ def test_happy_path(client, wallet, rpc):
     assert j["signature"] == FAKE_SIG
     assert j["explorer_url"] == f"https://explorer.solana.com/tx/{FAKE_SIG}?cluster=devnet"
     assert j["payment"]["tx_signature"] == FAKE_SIG
-    assert [c[1]["method"] for c in rpc] == ["getLatestBlockhash", "sendTransaction"]
+    assert [c[1]["method"] for c in rpc] == ["getGenesisHash", "getLatestBlockhash", "sendTransaction"]
     assert all("devnet" in c[0] for c in rpc)
 
     # The sent transaction: transfer of 0.02 SOL with the reference as a read-only non-signer key.
     import base64
-    tx = Transaction.from_bytes(base64.b64decode(rpc[1][1]["params"][0]))
+    tx = Transaction.from_bytes(base64.b64decode(rpc[-1][1]["params"][0]))
     keys = [str(k) for k in tx.message.account_keys]
     ref_i = keys.index(REFERENCE)
     assert MERCHANT in keys

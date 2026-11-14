@@ -24,7 +24,14 @@ from api import config  # noqa: F401  (loads .env)
 from api.schema import Payment
 
 DEFAULT_RPC_URL = "https://api.devnet.solana.com"
-MAX_SOL = 0.5                       # demo safety cap
+# Devnet's genesis hash. Every payment first asks the RPC for its genesis hash and refuses
+# unless it is this one, so a mainnet (or any other cluster) endpoint can never be used, even
+# one whose hostname contains "devnet".
+DEVNET_GENESIS_HASH = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
+MAX_SOL = 0.05                      # demo safety cap (demo QR codes ask for 0.01)
+# Preflight errors that mean the payer wallet has no (or too little) devnet SOL.
+UNFUNDED_ERRORS = ("may not be used to pay transaction fees", "no record of a prior credit",
+                   "insufficient lamports", "insufficient funds")
 LAMPORTS_PER_SOL = 1_000_000_000
 MEMO_PROGRAM_ID = Pubkey.from_string("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")
 
@@ -42,9 +49,10 @@ def rpc_url() -> str:
 
 
 def check_devnet(url: str) -> None:
-    """Hard guard: refuse anything that isn't a devnet RPC host."""
-    host = (urlparse(url).hostname or "").lower()
-    if "devnet" not in host:
+    """Hard guard: refuse anything that isn't an https devnet RPC host (see also check_genesis)."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or "devnet" not in host or "mainnet" in host:
         raise PaymentError(403, "not_devnet",
                            "Payments are devnet only. SOLANA_RPC_URL must be a devnet endpoint.")
 
@@ -118,6 +126,13 @@ def _rpc(client: httpx.Client, url: str, method: str, params: list) -> dict:
     return body["result"]
 
 
+def check_genesis(client: httpx.Client, url: str) -> None:
+    """Hard guard: the RPC must answer with devnet's genesis hash, whatever its hostname says."""
+    if _rpc(client, url, "getGenesisHash", []) != DEVNET_GENESIS_HASH:
+        raise PaymentError(403, "not_devnet",
+                           "That RPC is not Solana devnet. Payments are devnet only.")
+
+
 def explorer_url(sig: str) -> str:
     return f"https://explorer.solana.com/tx/{sig}?cluster=devnet"
 
@@ -131,12 +146,20 @@ def send_payment(payment: Payment, client: httpx.Client | None = None) -> dict:
     own = client is None
     client = client or httpx.Client()
     try:
+        check_genesis(client, url)
         bh = _rpc(client, url, "getLatestBlockhash", [{"commitment": "confirmed"}])
         blockhash = Hash.from_string(bh["value"]["blockhash"])
         tx = build_transaction(payment, payer, blockhash, lamports)
-        sig = _rpc(client, url, "sendTransaction",
-                   [base64.b64encode(bytes(tx)).decode(),
-                    {"encoding": "base64", "preflightCommitment": "confirmed"}])
+        try:
+            sig = _rpc(client, url, "sendTransaction",
+                       [base64.b64encode(bytes(tx)).decode(),
+                        {"encoding": "base64", "preflightCommitment": "confirmed"}])
+        except PaymentError as e:
+            if any(s in e.message for s in UNFUNDED_ERRORS):
+                raise PaymentError(503, "payer_unfunded",
+                                   "The demo payer wallet is out of devnet test SOL. "
+                                   "Top it up at https://faucet.solana.com (devnet).") from None
+            raise
     finally:
         if own:
             client.close()
