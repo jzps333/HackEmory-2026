@@ -24,7 +24,7 @@ pieces listed at the top of `agent_integration.py`.)
 ## 1. Make the starter (on the Vultr agent server)
 
 ```bash
-cd ~/hackemory-2026/chert
+cd ~/HackEmory-2026/chert
 npm install -g @trychert/facetime@0.1.0-beta.20
 chert login --device && chert whoami           # project must start with a84bec72
 lk cloud auth                                    # pick "hack emory 2026"
@@ -80,11 +80,11 @@ agent can only reply within 24 hours of that phone's last iMessage to the line**
 
 ```bash
 # window 1: the agent (repo root)
-cd ~/hackemory-2026 && python3 -m chert.agent_integration dev
+cd ~/HackEmory-2026 && python3 -m chert.agent_integration dev
 #   wait for "registered worker" in the logs
 
 # window 2: Chert bridge (starter folder)
-cd ~/hackemory-2026/chert/scansafe-agent
+cd ~/HackEmory-2026/chert/scansafe-agent
 chert doctor --agent scansafe-agent      # runs a real test job; may use a little Gemini credit
 chert dev --agent scansafe-agent
 ```

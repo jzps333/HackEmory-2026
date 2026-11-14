@@ -1,6 +1,9 @@
 """Runs INSIDE a throwaway Docker container. Opens one URL, records what happened, prints JSON.
 
-Usage (inside the container): python run_scan.py <url>
+Usage (inside the container): python run_scan.py <url> [--stream]
+--stream: also print the browser's screen as it changes, one JSON line per frame
+({"type":"frame","jpeg":...}) plus {"type":"nav","url":...} lines, before the final result line.
+The LAST line is always the plain result JSON, with or without --stream.
 No keys, no logins, no personal data live here. Downloads are blocked, never opened.
 
 Network guard: every request the browser makes (first URL, each redirect hop, subresources,
@@ -31,7 +34,14 @@ MAX_HOPS = 10              # main-frame navigations before we stop following
 MAX_REQUESTS = 300         # total requests per scan before we abort the rest
 TIMEOUT_MS = 20000
 SETTLE_MS = 2500           # wait for JS redirects / popups
-SHOT_QUALITY = 60
+SHOT_QUALITY = 80
+STREAM_MIN_GAP_S = 0.12    # at most ~8 frames/s on the live stream
+STREAM_QUALITY = 55
+STREAM_MAX_FRAMES = 400    # hard cap per scan
+
+
+def _emit(obj: dict) -> None:
+    print(json.dumps(obj), flush=True)
 
 # Best-effort hidden-text finder for prompt-injection evidence. Text the user can't see but a
 # model reading the DOM could: display:none, visibility:hidden, opacity 0, tiny font,
@@ -100,7 +110,7 @@ def _now_ms(t0: float) -> int:
     return int((time.monotonic() - t0) * 1000)
 
 
-def scan(url: str) -> dict:
+def scan(url: str, stream: bool = False) -> dict:
     t0 = time.monotonic()
     out = {"url": url, "final_url": None, "domain": None, "redirect_chain": [],
            "status_codes": [], "page_title": None, "page_text": "", "hidden_text": "",
@@ -159,7 +169,7 @@ def scan(url: str) -> dict:
                   "--webrtc-ip-handling-policy=disable_non_proxied_udp"])
         context = browser.new_context(
             accept_downloads=False, java_script_enabled=True, service_workers="block",
-            viewport={"width": 390, "height": 844}, device_scale_factor=1,  # phone-sized
+            viewport={"width": 390, "height": 844}, device_scale_factor=2,  # phone-sized, sharp on FaceTime
             is_mobile=True, has_touch=True)
         context.route("**/*", on_route)   # context-wide: also covers popups and iframes
         try:
@@ -172,6 +182,34 @@ def scan(url: str) -> dict:
         def on_nav(frame) -> None:
             if frame == page.main_frame and frame.url != "about:blank":
                 out["redirect_chain"].append(frame.url)
+                if stream:
+                    _emit({"type": "nav", "url": frame.url[:300]})
+
+        if stream:
+            # Chrome's own screen stream (CDP screencast): a new JPEG whenever the page changes.
+            # Frames come out on stdout as they happen; the sandbox server forwards them live.
+            sent = {"n": 0, "last": 0.0}
+            cdp = context.new_cdp_session(page)
+
+            def on_frame(ev) -> None:
+                try:
+                    cdp.send("Page.screencastFrameAck", {"sessionId": ev["sessionId"]})
+                except Exception:
+                    pass
+                now = time.monotonic()
+                if sent["n"] >= STREAM_MAX_FRAMES or now - sent["last"] < STREAM_MIN_GAP_S:
+                    return
+                sent["n"] += 1
+                sent["last"] = now
+                _emit({"type": "frame", "jpeg": ev["data"], "t_ms": _now_ms(t0)})
+
+            cdp.on("Page.screencastFrame", on_frame)
+            try:
+                cdp.send("Page.startScreencast", {"format": "jpeg", "quality": STREAM_QUALITY,
+                                                  "maxWidth": 540, "maxHeight": 1170,
+                                                  "everyNthFrame": 1})
+            except Exception:
+                stream = False      # no screencast: the scan still works, just without frames
 
         def on_response(resp) -> None:
             req = resp.request
@@ -215,6 +253,14 @@ def scan(url: str) -> dict:
                 out["redirect_chain"] = chain + [u for u in out["redirect_chain"] if u not in chain]
             page.wait_for_timeout(SETTLE_MS)
             out["timings"]["settled_ms"] = _now_ms(t0)
+            if stream:
+                # A slow look down the page so the caller sees it move, then back to the top
+                # for the screenshot. Scrolling never clicks or types anything.
+                for _ in range(3):
+                    page.mouse.wheel(0, 320)
+                    page.wait_for_timeout(450)
+                page.evaluate("window.scrollTo({top: 0, behavior: 'instant'})")
+                page.wait_for_timeout(300)
         except Exception as e:                   # timeouts, DNS failures, blocked requests
             out["error"] = str(e).splitlines()[0][:300]
 
@@ -255,7 +301,9 @@ def scan(url: str) -> dict:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(json.dumps({"error": "usage: run_scan.py <url>"}))
+    args = sys.argv[1:]
+    stream = "--stream" in args[1:]
+    if not args or len(args) > 2 or (len(args) == 2 and not stream):
+        print(json.dumps({"error": "usage: run_scan.py <url> [--stream]"}))
         sys.exit(1)
-    print(json.dumps(scan(sys.argv[1])))
+    print(json.dumps(scan(args[0], stream=stream)), flush=True)

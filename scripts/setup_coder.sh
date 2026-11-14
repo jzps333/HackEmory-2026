@@ -16,8 +16,12 @@ touch /etc/coder.d/coder.env
 grep -q '^CODER_ACCESS_URL=' /etc/coder.d/coder.env \
   && sed -i "s|^CODER_ACCESS_URL=.*|CODER_ACCESS_URL=http://$IP:3000|" /etc/coder.d/coder.env \
   || echo "CODER_ACCESS_URL=http://$IP:3000" >> /etc/coder.d/coder.env
+# The package ships an empty CODER_HTTP_ADDRESS= line; Coder refuses to start without it.
 grep -q '^CODER_HTTP_ADDRESS=' /etc/coder.d/coder.env \
+  && sed -i "s|^CODER_HTTP_ADDRESS=.*|CODER_HTTP_ADDRESS=0.0.0.0:3000|" /etc/coder.d/coder.env \
   || echo "CODER_HTTP_ADDRESS=0.0.0.0:3000" >> /etc/coder.d/coder.env
+# Open the port if ufw is on (Vultr images ship with ufw allowing only SSH).
+command -v ufw >/dev/null && ufw allow 3000/tcp >/dev/null || true
 
 # Coder's Docker template needs Docker access.
 command -v docker >/dev/null || apt-get install -y -qq docker.io
