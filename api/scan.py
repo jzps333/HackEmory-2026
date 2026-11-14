@@ -150,11 +150,15 @@ def evidence_facts(sandbox: dict) -> list[str]:
                      "in front of its content; our scanner did not solve it.")
     if sandbox.get("login_wall"):
         facts.append("The page asks the visitor to sign in; our scanner typed nothing.")
-    labels = [str(c.get("label", ""))[:60] for c in (sandbox.get("clicked") or [])
-              if isinstance(c, dict)][:3]
-    if labels:
-        facts.append("To see the page, our scanner clicked harmless buttons (cookie banners, "
-                     "'Continue', close buttons) labelled: " + "; ".join(labels) + ".")
+    # Only our own category names go to the model, never the page's button text (that text is
+    # attacker-controlled and could carry instructions).
+    kinds = {"cookie": "a cookie banner", "continue": "a 'Continue' button",
+             "close": "a pop-up close button", "age_gate": "an age check",
+             "redirect_link": "a 'click here if not redirected' link"}
+    clicked = [kinds[c.get("kind")] for c in (sandbox.get("clicked") or [])
+               if isinstance(c, dict) and c.get("kind") in kinds][:3]
+    if clicked:
+        facts.append("To see the page, our scanner dismissed: " + "; ".join(dict.fromkeys(clicked)) + ".")
     return facts
 
 

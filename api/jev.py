@@ -65,7 +65,9 @@ def build_payload(sandbox: dict) -> dict:
         "page_text": (sandbox.get("page_text") or "")[:MAX_TEXT],
         "form_fields": sandbox.get("form_fields", []),
         "tried_download": bool(sandbox.get("downloads")),
-        "tried_popup": bool(sandbox.get("popups")),
+        # Pop-ups opened after one of our clicks count too: a scam could hide one behind "Continue".
+        "tried_popup": bool(sandbox.get("popups")) or any(
+            isinstance(c, dict) and c.get("popups") for c in (sandbox.get("clicked") or [])),
         # Text hidden from the visitor (display:none, off-screen, white-on-white...). Often where
         # prompt injection aimed at AI agents lives.
         "hidden_text": (sandbox.get("hidden_text") or "")[:1500],
