@@ -37,7 +37,7 @@ app.include_router(pay_router)    # /pay (devnet only)
 app.include_router(chert_router)  # /chert/webhook (Chert call + message events, signed)
 app.include_router(call_router)   # /call-me (Chert FaceTimes the person, agent walks the link live)
 app.include_router(result_router) # /result/{scan_id} (the page linked from follow-up texts)
-app.include_router(accounts_router)  # /me, /me/linked, /link/{dogwood,paypal}/* (saved accounts)
+app.include_router(accounts_router)  # /me, /me/linked, /link/dogwood/* (saved accounts)
 app.include_router(dogwood_router)   # /operators/dogwood/* (DEMO: fictional operator's OAuth + API)
 
 

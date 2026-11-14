@@ -135,16 +135,16 @@ SELECT add_continuous_aggregate_policy('scans_hourly',
 CREATE TABLE IF NOT EXISTS accounts (
     phone_hash        TEXT PRIMARY KEY,          -- sha256(E.164 phone + ACCOUNT_PEPPER), hex
     plate             TEXT,                      -- uppercased, 2-10 of A-Z 0-9 space dash
-    preferred_payment TEXT,                      -- 'solana_devnet' | 'paypal' | NULL
+    preferred_payment TEXT,                      -- 'solana_devnet' | 'virtual_card' | NULL
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS linked_accounts (
     id          BIGSERIAL PRIMARY KEY,
     phone_hash  TEXT NOT NULL,
-    provider    TEXT NOT NULL,                   -- 'dogwood' | 'paypal'
+    provider    TEXT NOT NULL,                   -- 'dogwood' (generic: more providers later)
     secret_enc  TEXT NOT NULL,                   -- Fernet(ACCOUNT_KEY) of a small JSON; '' once revoked
-    meta        JSONB NOT NULL DEFAULT '{}'::jsonb,   -- display only: {account_name, scope} / {display, env}
+    meta        JSONB NOT NULL DEFAULT '{}'::jsonb,   -- display only: {account_name, scope}
     linked_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at  TIMESTAMPTZ
 );
@@ -154,7 +154,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS linked_accounts_one_active
 - **Migration:** none needed. Both tables and the index are created on the first saved-accounts request (like
   `payment_refusals`) and by `python3 -m data.setup` (`OK   Tiger Data: accounts + linked_accounts ready`). Plain tables, not hypertables.
 - **No phone numbers and no plaintext tokens are stored.** `secret_enc` decrypts (with `ACCOUNT_KEY`) to
-  `{"access_token", "account_id"}` for Dogwood (a demo operator token) or `{"vault_id", "customer_id"}` for PayPal sandbox.
+  `{"access_token", "account_id"}` for Dogwood (a demo operator token). Virtual cards (Lithic sandbox) are never stored here:
+  they are minted per payment, closed right after, and only their last4 + Lithic card token are kept (in `/pay/status` and the
+  Dogwood session).
   Linking again revokes the previous active row; Disconnect sets `revoked_at` and wipes `secret_enc` (rows stay as history).
 - `ACCOUNT_PEPPER` and `ACCOUNT_KEY` must never change once rows exist (new pepper = everyone's account looks empty;
   new key = links unreadable, users reconnect). Setup steps: `docs/UI_API.md` section 9.

@@ -1,6 +1,6 @@
 """Saved accounts: session cookie + logout, CORS allowlist, profile, linked accounts, the demo
-Dogwood OAuth server + operator API + agent app view, and PayPal SANDBOX Vault (linking and
-paying). Offline: PayPal is an httpx MockTransport, the store is in memory (plus one fake
+Dogwood OAuth server (incl. link CSRF) + operator API + agent app view, and paying Dogwood with a
+one-time Lithic SANDBOX virtual card. Offline: Lithic is an httpx MockTransport, the store is in memory (plus one fake
 Postgres connection for the Tiger SQL path), Chert texts are faked."""
 import contextlib
 import json
@@ -16,8 +16,8 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from solders.keypair import Keypair
 
-from api import (account_crypto, dogwood, main as api_main, meter_pay, paypal_vault, recent_scans,
-                 result_store, routes_accounts, routes_call, session)
+from api import (account_crypto, dogwood, lithic_cards, main as api_main, meter_pay, recent_scans,
+                 result_store, routes_accounts, routes_call, routes_pay, session)
 from api.merchants import KNOWN_MERCHANTS
 from api.scan import parse_solana_pay, payment_result
 from data import accounts_store, tiger_store
@@ -39,8 +39,8 @@ client = TestClient(api_main.app)
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
     for k in ("APP_BASE_URL", "API_BASE_URL", "DOGWOOD_SITE_URL", "SESSION_COOKIE_DOMAIN", "CORS_EXTRA_ORIGINS",
-              "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET", "PAYPAL_ENV", "DOGWOOD_RATE_USD",
-              "DEMO_USD_PER_SOL", "PAYPAL_MAX_USD", "TIGER_DATABASE_URL"):
+              "LITHIC_API_KEY", "LITHIC_ENV", "DOGWOOD_RATE_USD", "VIRTUAL_CARD_MAX_USD",
+              "TIGER_DATABASE_URL"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("ACCOUNTS_STORE", "memory")
     monkeypatch.setenv("ACCOUNT_KEY", Fernet.generate_key().decode())
@@ -56,7 +56,8 @@ def _env(monkeypatch, tmp_path):
     accounts_store._memory.clear()
     dogwood.clear()
     routes_accounts.clear()
-    paypal_vault.reset()
+    routes_pay._dogwood_sessions.clear()
+    LAST.clear()
     recent_scans.clear()
     account_crypto.reset_cache()
     yield
@@ -177,8 +178,9 @@ def test_profile_signed_out_and_defaults():
     me = client.get("/me", headers=bearer(signed_in())).json()
     assert me == {"signed_in": True, "phone_masked": "•••9861", "plate": None,
                   "preferred_payment": "solana_devnet", "linked": [],
-                  "providers": {"dogwood": True, "paypal": False},
-                  "paypal_rates": {"dogwood_usd_per_hour": 2.5, "demo_usd_per_sol": 100.0}}
+                  "providers": {"dogwood": True},
+                  "payment_methods": {"solana_devnet": True, "virtual_card": False},
+                  "virtual_card_usd_per_hour": 2.5}
 
 
 @pytest.mark.parametrize("raw,want", [("abc 123", "ABC 123"), ("  gx-42  ", "GX-42"), ("ab", "AB"),
@@ -206,8 +208,9 @@ def test_profile_partial_updates_and_clearing():
     assert client.put("/me", json={"plate": ""}, headers=h).json()["plate"] is None
     r = client.put("/me", json={"preferred_payment": "venmo"}, headers=h)
     assert r.status_code == 400 and r.json()["error"] == "bad_preferred_payment"
-    r = client.put("/me", json={"preferred_payment": "paypal"}, headers=h)
-    assert r.status_code == 403 and r.json()["error"] == "paypal_not_linked"
+    assert client.put("/me", json={"preferred_payment": "virtual_card"}, headers=h).json()["preferred_payment"] \
+        == "virtual_card"
+    assert client.put("/me", json={"preferred_payment": "paypal"}, headers=h).json()["error"] == "bad_preferred_payment"
     # Each phone has its own profile.
     assert client.get("/me", headers=bearer(signed_in(OTHER))).json()["plate"] is None
 
@@ -256,11 +259,23 @@ def test_tiger_store_failure_is_502(monkeypatch):
 
 # --- D. Dogwood OAuth --------------------------------------------------------------------------
 
+LAST: dict = {}     # the browser that called /link/dogwood/start last: its session token + link nonce
+OMIT = object()
+
+
+def set_cookie_value(r: httpx.Response, name: str) -> str:
+    for sc in r.headers.get_list("set-cookie"):
+        if sc.startswith(name + "="):
+            return sc.split(";", 1)[0].split("=", 1)[1]
+    raise AssertionError(f"no {name} cookie set")
+
+
 def dogwood_start(token: str) -> dict:
-    r = client.get("/link/dogwood/start", headers=bearer(token))
+    r = client.get("/link/dogwood/start", headers=cookie(token))
     assert r.status_code == 200, r.text
     url = urlparse(r.json()["authorize_url"])
     assert (url.scheme, url.netloc, url.path) == ("https", "scansafe-demo-sites.vercel.app", "/dogwood/authorize")
+    LAST.update(token=token, nonce=set_cookie_value(r, "ss_link_nonce"))
     return {k: v[0] for k, v in parse_qs(url.query).items()}
 
 
@@ -270,10 +285,16 @@ def consent(q: dict, decision: str = "allow", **over) -> httpx.Response:
     return client.post("/operators/dogwood/oauth/authorize", json=body)
 
 
-def follow(redirect: str, **headers) -> httpx.Response:
-    """The browser following the consent page's redirect back to our API."""
+def follow(redirect: str, nonce=None, session_token=None) -> httpx.Response:
+    """The browser following the consent page's redirect back to our API. By default it is the
+    same browser that started (its ss_session + ss_link_nonce cookies); OMIT drops a cookie."""
     u = urlparse(redirect)
     assert f"{u.scheme}://{u.netloc}{u.path}" == REDIRECT
+    nonce = LAST.get("nonce") if nonce is None else nonce
+    session_token = LAST.get("token") if session_token is None else session_token
+    jar = [f"ss_link_nonce={nonce}" if nonce is not OMIT else "",
+           f"ss_session={session_token}" if session_token is not OMIT else ""]
+    headers = {"Cookie": "; ".join(c for c in jar if c)} if any(jar) else {}
     return client.get(f"{u.path}?{u.query}", headers=headers, follow_redirects=False)
 
 
@@ -285,6 +306,10 @@ def link_dogwood(token: str) -> httpx.Response:
 
 
 def test_dogwood_authorize_url_exact():
+    r = client.get("/link/dogwood/start", headers=bearer(signed_in()))
+    sc = [c for c in r.headers.get_list("set-cookie") if c.startswith("ss_link_nonce=")][0].lower()
+    for part in ("httponly", "secure", "samesite=lax", "domain=.scansafe.nyc", "path=/link", "max-age=600"):
+        assert part in sc, part
     q = dogwood_start(signed_in())
     assert q["client_id"] == "scansafe" and q["redirect_uri"] == REDIRECT and q["scope"] == "pay_parking"
     assert q["display"] == "•••9861"
@@ -293,6 +318,8 @@ def test_dogwood_authorize_url_exact():
     assert "redirect_uri=https%3A%2F%2Fapi.scansafe.nyc%2Flink%2Fdogwood%2Fcallback" in raw
     body, why = account_crypto.verify(dogwood.STATE_PURPOSE, q["state"])
     assert why == "" and body["ph"] == account_crypto.phone_hash(PHONE)
+    import hashlib
+    assert body["lh"] == hashlib.sha256(LAST["nonce"].encode()).hexdigest() and LAST["nonce"] not in q["state"]
     assert 590 <= body["exp"] - time.time() <= 600
     assert client.get("/link/dogwood/start").status_code == 401
 
@@ -301,6 +328,8 @@ def test_dogwood_full_link_flow_and_encryption_at_rest():
     token = signed_in()
     r = link_dogwood(token)
     assert r.status_code == 302 and r.headers["location"] == "https://scansafe.nyc/?linked=dogwood"
+    cleared = [c.lower() for c in r.headers.get_list("set-cookie") if c.startswith("ss_link_nonce=")][0]
+    assert "max-age=0" in cleared and "path=/link" in cleared
     me = client.get("/me", headers=bearer(token)).json()
     assert [(x["provider"], x["display"]) for x in me["linked"]] == [("dogwood", "Dogwood Parking")]
     assert datetime.fromisoformat(me["linked"][0]["linked_at"]).tzinfo is not None
@@ -353,8 +382,8 @@ def test_authorize_refusals():
     assert consent(q, decision="maybe").status_code == 400
     scope = consent(q, scope="everything").json()["redirect"]
     assert parse_qs(urlparse(scope).query)["error"] == ["invalid_scope"]
-    # A state signed for something else (e.g. the PayPal flow) is not a Dogwood state.
-    other = account_crypto.sign(routes_accounts.PAYPAL_STATE_PURPOSE, {"ph": "x", "n": "y"}, 600)
+    # A state signed for something else (e.g. an app link) is not a Dogwood state.
+    other = account_crypto.sign(dogwood.APP_PURPOSE, {"ph": "x", "n": "y"}, 600)
     assert consent(q, state=other).json()["error"] == "invalid_state"
 
 
@@ -422,12 +451,45 @@ def test_token_endpoint_refusals(monkeypatch):
     assert r.status_code == 200, r.text
 
 
+def _csrf_case(**browser) -> str:
+    q = dogwood_start(signed_in())
+    r = follow(consent(q).json()["redirect"], **browser)
+    assert r.status_code == 302 and accounts_store._memory.linked_rows == []
+    return r.headers["location"]
+
+
+def test_callback_refuses_without_the_link_nonce_cookie():
+    # e.g. an attacker's own code+state forced into a victim's browser: the victim has no nonce
+    assert _csrf_case(nonce=OMIT).endswith("link_error=invalid_state&provider=dogwood")
+
+
+def test_callback_refuses_a_mismatched_link_nonce():
+    assert _csrf_case(nonce="some-other-browsers-nonce").endswith("link_error=invalid_state&provider=dogwood")
+
+
+def test_callback_refuses_when_not_signed_in():
+    assert _csrf_case(session_token=OMIT).endswith("link_error=sign_in_first&provider=dogwood")
+    # A Bearer header doesn't come along on a browser redirect, but even if sent it's the cookie
+    # session the callback reads like any other request; an invalid cookie is "not signed in".
+    assert _csrf_case(session_token="forged").endswith("link_error=sign_in_first&provider=dogwood")
+
+
 def test_callback_refuses_when_signed_in_as_someone_else():
+    assert _csrf_case(session_token=signed_in(OTHER)).endswith(
+        "link_error=signed_in_as_someone_else&provider=dogwood")
+
+
+def test_callback_refuses_a_replayed_state():
     q = dogwood_start(signed_in())
     redirect = consent(q).json()["redirect"]
-    r = follow(redirect, Cookie=f"ss_session={signed_in(OTHER)}")
-    assert r.headers["location"].endswith("link_error=signed_in_as_someone_else&provider=dogwood")
-    assert accounts_store._memory.linked_rows == []
+    assert follow(redirect, nonce="wrong").headers["location"].endswith("link_error=invalid_state&provider=dogwood")
+    # The state was spent by that first (refused) try: even the right browser can't reuse it.
+    assert follow(redirect).headers["location"].endswith("link_error=invalid_state&provider=dogwood")
+    q2 = dogwood_start(signed_in())
+    r = consent(q2)
+    assert follow(r.json()["redirect"]).headers["location"].endswith("linked=dogwood")
+    assert follow(r.json()["redirect"]).headers["location"].endswith("link_error=invalid_state&provider=dogwood")
+    assert len(accounts_store._memory.linked_rows) == 1
 
 
 def test_disconnect_dogwood_revokes_everywhere():
@@ -480,7 +542,7 @@ def test_operator_sessions():
     assert r.status_code == 200, r.text
     s = r.json()
     assert s == {"session_id": s["session_id"], "meter_id": "42", "plate": "ABC 123", "hours": 3,
-                 "amount_sol": 0.03, "status": "pending_payment"}
+                 "amount_sol": 0.03, "amount_usd": 7.5, "status": "pending_payment"}
     assert client.get(f"/operators/dogwood/api/sessions/{s['session_id']}", headers=bearer(tok)).json() == s
     other = operator_token(OTHER)
     assert client.get(f"/operators/dogwood/api/sessions/{s['session_id']}", headers=bearer(other)).status_code == 404
@@ -599,170 +661,299 @@ def test_app_state_cors_for_demo_sites():
     assert r.headers["access-control-allow-origin"] == "https://scansafe-demo-sites.vercel.app"
 
 
-# --- E. PayPal sandbox ---------------------------------------------------------------------------
+# --- E. One-time virtual cards (Lithic sandbox) -------------------------------------------------
 
-class FakePayPal:
+PAN = "4111111289144142"      # Lithic sandbox-style 16-digit test number
+CVV = "731"
+
+
+class FakeLithic:
+    """Lithic sandbox stand-in. Records (method, path, body, headers)."""
+
     def __init__(self):
         self.calls: list[tuple[str, str, dict, dict]] = []
-        self.order_status = "CREATED"
-        self.capture_status = "COMPLETED"
+        self.cards: dict[str, dict] = {}
+        self.decline = ""            # "message" | "422" to decline the simulated authorization
+        self.wrong_limit = False
+        self.clearing_fails = False
+        self.patch_fails = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        assert request.url.host == "api-m.sandbox.paypal.com"      # never anything but the sandbox
-        path = request.url.path
-        try:
-            body = json.loads(request.content) if request.content else {}
-        except ValueError:
-            body = {"form": request.content.decode()}
-        self.calls.append((request.method, path, body, dict(request.headers)))
-        if path == "/v1/oauth2/token":
-            assert request.headers["authorization"].startswith("Basic ")
-            return httpx.Response(200, json={"access_token": "A21-test-token", "expires_in": 32400})
-        assert request.headers["authorization"] == "Bearer A21-test-token"
-        if path == "/v3/vault/setup-tokens":
-            return httpx.Response(201, json={"id": "SETUP-TOK-1", "status": "PAYER_ACTION_REQUIRED", "links": [
-                {"rel": "self", "href": "https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/SETUP-TOK-1"},
-                {"rel": "approve", "href": "https://www.sandbox.paypal.com/agreements/approve?approval_session_id=S1"}]})
-        if path == "/v3/vault/payment-tokens":
-            return httpx.Response(201, json={"id": "VAULT-SECRET-9", "customer": {"id": "CUST-1"},
-                                             "payment_source": {"paypal": {"email_address": "jane.doe@example.com"}}})
-        if path == "/v3/vault/payment-tokens/VAULT-SECRET-9" and request.method == "DELETE":
-            return httpx.Response(204)
-        if path == "/v2/checkout/orders":
-            done = {"payments": {"captures": [{"id": "CAP-1", "status": self.capture_status}]}}
-            if self.order_status == "COMPLETED":
-                return httpx.Response(201, json={"id": "ORDER-1", "status": "COMPLETED",
-                                                 "purchase_units": [done]})
-            return httpx.Response(201, json={"id": "ORDER-1", "status": self.order_status})
-        if path == "/v2/checkout/orders/ORDER-1/capture":
-            return httpx.Response(201, json={"id": "ORDER-1", "status": "COMPLETED", "purchase_units": [
-                {"payments": {"captures": [{"id": "CAP-1", "status": self.capture_status}]}}]})
-        return httpx.Response(404, json={"name": "RESOURCE_NOT_FOUND", "debug_id": "d1"})
+        assert request.url.host == "sandbox.lithic.com"            # never anything but the sandbox
+        assert request.headers["authorization"] == "lithic-sandbox-test-key"   # raw key, no "Bearer"
+        path, method = request.url.path, request.method
+        body = json.loads(request.content) if request.content else {}
+        self.calls.append((method, path, body, dict(request.headers)))
+        if method == "POST" and path == "/v1/cards":
+            n = len(self.cards)
+            tok, pan = f"card-tok-{n + 1}", PAN[:-2] + f"{42 + n:02d}"    # first card: PAN itself
+            card = {"token": tok, "type": body["type"], "state": "OPEN", "memo": body.get("memo"),
+                    "spend_limit": body["spend_limit"] + (1 if self.wrong_limit else 0),
+                    "spend_limit_duration": body["spend_limit_duration"],
+                    "pan": pan, "cvv": CVV, "exp_month": "06", "exp_year": "2030", "last_four": pan[-4:]}
+            self.cards[tok] = card
+            return httpx.Response(200, json=card)
+        if method == "POST" and path == "/v1/simulate/authorize":
+            card = next(c for c in self.cards.values() if c["pan"] == body["pan"])
+            if self.decline == "422":
+                return httpx.Response(422, json={"message": "Exceeds transaction limit"})
+            if self.decline or card["state"] != "OPEN" or body["amount"] > card["spend_limit"]:
+                return httpx.Response(201, json={"token": "tx-declined", "debugging_request_id": "d",
+                                                 "message": "Transaction exceeds user-set transaction limit"})
+            card["state"] = "CLOSED"                                # SINGLE_USE: closed on first approval
+            return httpx.Response(201, json={"token": "tx-1", "debugging_request_id": "d"})
+        if method == "GET" and path == "/v1/transactions/tx-1":
+            return httpx.Response(200, json={"token": "tx-1", "result": "APPROVED", "status": "PENDING"})
+        if method == "POST" and path == "/v1/simulate/clearing":
+            return httpx.Response(422 if self.clearing_fails else 201, json={"debugging_request_id": "d"})
+        if path.startswith("/v1/cards/"):
+            card = self.cards[path.rsplit("/", 1)[1]]
+            if method == "PATCH":
+                if self.patch_fails:
+                    return httpx.Response(500, json={"message": "oops"})
+                card["state"] = body["state"]
+            return httpx.Response(200, json=card)
+        return httpx.Response(404, json={"message": "not found"})
 
-    def paths(self) -> list[str]:
-        return [f"{m} {p}" for m, p, _, _ in self.calls]
+    def bodies(self, method: str, path: str) -> list[dict]:
+        return [b for m, p, b, _ in self.calls if m == method and p == path]
+
+    def closed(self) -> list[str]:
+        return [p.rsplit("/", 1)[1] for m, p, b, _ in self.calls if m == "PATCH" and b == {"state": "CLOSED"}]
 
 
 @pytest.fixture
-def paypal(monkeypatch):
-    monkeypatch.setenv("PAYPAL_CLIENT_ID", "sandbox-client-id")
-    monkeypatch.setenv("PAYPAL_CLIENT_SECRET", "sandbox-client-secret")
-    monkeypatch.setenv("PAYPAL_ENV", "sandbox")
-    fake = FakePayPal()
-    monkeypatch.setattr(paypal_vault, "_http", lambda: REAL_CLIENT(transport=httpx.MockTransport(fake.handler)))
+def lithic(monkeypatch):
+    monkeypatch.setenv("LITHIC_API_KEY", "lithic-sandbox-test-key")
+    monkeypatch.setenv("LITHIC_ENV", "sandbox")
+    fake = FakeLithic()
+    monkeypatch.setattr(lithic_cards, "_http", lambda: REAL_CLIENT(transport=httpx.MockTransport(fake.handler)))
     return fake
 
 
-def link_paypal(token: str, fake: FakePayPal) -> httpx.Response:
-    r = client.get("/link/paypal/start", headers=bearer(token))
-    assert r.status_code == 200, r.text
-    assert r.json() == {"approve_url": "https://www.sandbox.paypal.com/agreements/approve?approval_session_id=S1"}
-    setup = [c for c in fake.calls if c[1] == "/v3/vault/setup-tokens"][-1][2]["payment_source"]["paypal"]
-    ret = urlparse(setup["experience_context"]["return_url"])
-    assert f"{ret.scheme}://{ret.netloc}{ret.path}" == "https://api.scansafe.nyc/link/paypal/callback"
-    state = parse_qs(ret.query)["state"][0]
-    # PayPal appends approval_token_id (the setup token id) to the return URL.
-    return client.get(f"/link/paypal/callback?state={state}&approval_token_id=SETUP-TOK-1&approval_session_id=S1",
-                      follow_redirects=False)
-
-
-def test_paypal_not_configured(monkeypatch):
-    r = client.get("/link/paypal/start", headers=bearer(signed_in()))
-    assert r.status_code == 503 and r.json()["error"] == "paypal_not_configured"
-    monkeypatch.setenv("PAYPAL_CLIENT_ID", "id")
-    monkeypatch.setenv("PAYPAL_CLIENT_SECRET", "secret")
-    for env in (None, "live", "production", "Sandbox2"):
-        if env is None:
-            monkeypatch.delenv("PAYPAL_ENV", raising=False)
-        else:
-            monkeypatch.setenv("PAYPAL_ENV", env)
-        r = client.get("/link/paypal/start", headers=bearer(signed_in()))
-        assert r.status_code == 503 and r.json()["error"] == "paypal_not_configured", env
-    sid = scanned()
-    r = client.post("/pay", json={"scan_id": sid, "hours": 1, "approved": True, "payment_method": "paypal"},
-                    headers=bearer(signed_in()))
-    assert r.status_code == 503 and r.json()["error"] == "paypal_not_configured"
-
-
-def test_paypal_link_flow(paypal, monkeypatch):
-    monkeypatch.setenv("APP_BASE_URL", "https://app.scansafe.nyc")
-    token = signed_in()
-    assert client.get("/link/paypal/start").status_code == 401
-    r = link_paypal(token, paypal)
-    assert r.status_code == 302 and r.headers["location"] == "https://app.scansafe.nyc/accounts?linked=paypal"
-    setup = [c for c in paypal.calls if c[1] == "/v3/vault/setup-tokens"][0]
-    src = setup[2]["payment_source"]["paypal"]
-    assert src["usage_type"] == "MERCHANT" and src["experience_context"]["cancel_url"].endswith("&cancelled=1")
-    assert setup[3]["paypal-request-id"].startswith("scansafe-setup-")
-    pt = [c for c in paypal.calls if c[1] == "/v3/vault/payment-tokens"][0][2]
-    assert pt == {"payment_source": {"token": {"id": "SETUP-TOK-1", "type": "SETUP_TOKEN"}}}
-    me = client.get("/me", headers=bearer(token)).json()
-    assert me["providers"]["paypal"] is True
-    assert [(x["provider"], x["display"]) for x in me["linked"]] == [("paypal", "j•••@example.com")]
-    (row,) = accounts_store._memory.linked_rows
-    assert "VAULT-SECRET-9" not in stored_blob() and "CUST-1" not in stored_blob()
-    assert account_crypto.decrypt(row["secret_enc"]) == {"vault_id": "VAULT-SECRET-9", "customer_id": "CUST-1"}
-    assert row["meta"] == {"display": "j•••@example.com", "env": "sandbox"}
-    assert client.put("/me", json={"preferred_payment": "paypal"}, headers=bearer(token)).json()["preferred_payment"] == "paypal"
-
-
-def test_paypal_callback_refusals(paypal):
-    token = signed_in()
-    client.get("/link/paypal/start", headers=bearer(token))
-    ret = [c for c in paypal.calls if c[1] == "/v3/vault/setup-tokens"][-1][2]["payment_source"]["paypal"]
-    state = parse_qs(urlparse(ret["experience_context"]["return_url"]).query)["state"][0]
-    r = client.get(f"/link/paypal/callback?state={state}&approval_token_id=SOMEONE-ELSES", follow_redirects=False)
-    assert r.headers["location"].endswith("link_error=invalid_state&provider=paypal")
-    r = client.get(f"/link/paypal/callback?state={state}&approval_token_id=SETUP-TOK-1", follow_redirects=False)
-    assert r.headers["location"].endswith("link_error=invalid_state&provider=paypal")    # state spent
-    client.get("/link/paypal/start", headers=bearer(token))
-    ret = [c for c in paypal.calls if c[1] == "/v3/vault/setup-tokens"][-1][2]["payment_source"]["paypal"]
-    r = client.get(urlparse(ret["experience_context"]["cancel_url"]).path + "?" +
-                   urlparse(ret["experience_context"]["cancel_url"]).query, follow_redirects=False)
-    assert r.headers["location"] == "https://scansafe.nyc/?link_error=cancelled&provider=paypal"
-    assert client.get("/link/paypal/callback?state=junk&approval_token_id=SETUP-TOK-1",
-                      follow_redirects=False).headers["location"].endswith("link_error=invalid_state&provider=paypal")
-    assert accounts_store._memory.linked_rows == []
-    assert "/v3/vault/payment-tokens" not in [c[1] for c in paypal.calls]
+def ready_driver(phone: str = PHONE, plate: str = "gx 4242", link: bool = True) -> str:
+    """Signed in, plate saved, Dogwood linked: everything a virtual-card payment needs."""
+    token = signed_in(phone)
+    if plate:
+        client.put("/me", json={"plate": plate}, headers=bearer(token))
+    if link:
+        assert link_dogwood(token).headers["location"].endswith("linked=dogwood")
+    return token
 
 
 def pay(sid: str, token=None, **over):
-    body = {"scan_id": sid, "hours": 3, "approved": True, "payment_method": "paypal", **over}
+    body = {"scan_id": sid, "hours": 3, "approved": True, "payment_method": "virtual_card", **over}
     return client.post("/pay", json=body, headers=bearer(token) if token else {})
 
 
-def test_paypal_charge_meter(paypal):
-    token = signed_in()
-    link_paypal(token, paypal)
+def everything_visible(caplog=None) -> str:
+    """Logs, stored rows, operator file and pay statuses: where a PAN must never show up."""
+    parts = [stored_blob(), json.dumps({k: v for k, (_, v) in meter_pay._status.items()})]
+    path = os.environ["DOGWOOD_OPERATOR_FILE"]
+    if os.path.exists(path):
+        parts.append(open(path).read())
+    if caplog is not None:
+        parts.append(caplog.text)
+    return "\n".join(parts)
+
+
+def test_virtual_card_gating(monkeypatch):
+    token = ready_driver()
     sid = scanned()
+    r = pay(sid, token)
+    assert r.status_code == 503 and r.json()["error"] == "lithic_not_configured"
+    monkeypatch.setenv("LITHIC_API_KEY", "some-key")
+    for env in (None, "production", "live", "Sandbox2", ""):
+        if env is None:
+            monkeypatch.delenv("LITHIC_ENV", raising=False)
+        else:
+            monkeypatch.setenv("LITHIC_ENV", env)
+        r = pay(sid, token)
+        assert r.status_code == 503 and r.json()["error"] == "lithic_sandbox_only", env
+    assert meter_pay.get_status(sid)["state"] == "none"
+    assert lithic_cards.BASE_URL == "https://sandbox.lithic.com"
+    me = client.get("/me", headers=bearer(token)).json()
+    assert me["payment_methods"]["virtual_card"] is False
+
+
+def test_virtual_card_pays_dogwood(lithic):
+    token = ready_driver()
+    sid = scanned()
+    assert client.post("/pay/quote", json={"scan_id": sid, "hours": 3}).json()["amount_usd"] == 7.5
     r = pay(sid, token)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert (body["ok"], body["method"], body["paypal_order_id"], body["amount_usd"], body["hours"]) == \
-        (True, "paypal", "ORDER-1", 7.5, 3)
-    assert "usd_note" not in body and body["payment"]["merchant_verified"] is True
-    order = [c for c in paypal.calls if c[1] == "/v2/checkout/orders"][0]
-    assert order[2]["intent"] == "CAPTURE"
-    assert order[2]["payment_source"] == {"paypal": {"vault_id": "VAULT-SECRET-9"}}
-    assert order[2]["purchase_units"][0]["amount"] == {"currency_code": "USD", "value": "7.50"}
-    assert order[3]["paypal-request-id"] == f"scansafe-{sid}-750"
-    assert "POST /v2/checkout/orders/ORDER-1/capture" in paypal.paths()
+    assert (body["ok"], body["method"], body["provider"], body["amount_usd"], body["hours"]) == \
+        (True, "virtual_card", "lithic_sandbox", 7.5, 3)
+    assert (body["card_last4"], body["card_token"], body["authorization_token"]) == ("4142", "card-tok-1", "tx-1")
+    assert body["card_closed"] is True and body["settled"] is True
+    # Minted SINGLE_USE with a spend limit of exactly the amount, labelled with the scan.
+    (create,) = lithic.bodies("POST", "/v1/cards")
+    assert create == {"type": "SINGLE_USE", "spend_limit": 750, "spend_limit_duration": "TRANSACTION",
+                      "memo": f"ScanSafe · Dogwood meter 42 · {sid}", "state": "OPEN"}
+    import uuid
+    uuid.UUID([h for m, p, b, h in lithic.calls if p == "/v1/cards"][0]["idempotency-key"])
+    # Dogwood (server to server) authorized exactly that amount on that card, then cleared it.
+    (auth,) = lithic.bodies("POST", "/v1/simulate/authorize")
+    assert auth == {"amount": 750, "descriptor": "DOGWOOD LOT & METER", "pan": PAN, "mcc": "7523"}
+    assert lithic.bodies("POST", "/v1/simulate/clearing") == [{"token": "tx-1"}]
+    assert lithic.closed() == ["card-tok-1"]
     st = client.get(f"/pay/status/{sid}").json()
-    assert (st["state"], st["method"], st["paypal_order_id"], st["amount_usd"], st["hours"]) == \
-        ("paid", "paypal", "ORDER-1", 7.5, 3)
-    # One payment per scan, whatever the method.
-    n = len(paypal.calls)
-    assert pay(sid, token).json()["error"] == "already_paid"
-    r = client.post("/pay", json={"scan_id": sid, "hours": 3, "approved": True})
-    assert r.status_code == 409 and len(paypal.calls) == n
-    # The Dogwood app view shows the PayPal receipt.
-    s = app_token(sid)
-    st = client.get(f"/operators/dogwood/app-state?s={s}").json()
-    assert st["status"] == "paid" and st["payment_method"] == "paypal" and st["amount_usd"] == 7.5
-    assert st["receipt"]["paypal_order_id"] == "ORDER-1" and st["receipt"]["signature"] is None
+    assert {k: st[k] for k in ("state", "method", "provider", "card_last4", "card_token", "amount_usd",
+                               "authorization_token", "hours")} == {
+        "state": "paid", "method": "virtual_card", "provider": "lithic_sandbox", "card_last4": "4142",
+        "card_token": "card-tok-1", "amount_usd": 7.5, "authorization_token": "tx-1", "hours": 3}
+    # The Dogwood session is paid and keeps only last4 + the card token.
+    ses = client.get(f"/operators/dogwood/api/sessions/{st['dogwood_session_id']}", headers=bearer(operator_access()))
+    assert ses.json()["status"] == "paid" and ses.json()["plate"] == "GX 4242"
+    assert ses.json()["payment"]["card_last4"] == "4142" and ses.json()["payment"]["card_token"] == "card-tok-1"
+    # The Dogwood app view shows the receipt.
+    st = client.get(f"/operators/dogwood/app-state?s={app_token(sid)}").json()
+    assert st["status"] == "paid" and st["payment_method"] == "virtual_card" and st["amount_usd"] == 7.5
+    assert st["receipt"]["card_last4"] == "4142" and st["receipt"]["provider"] == "lithic_sandbox"
+    assert st["receipt"]["text"] == "Paid with a one-time virtual card ••4142 (Lithic sandbox)"
+    assert st["plate"] == "GX 4242"
 
 
-def test_quote_shows_the_paypal_price(monkeypatch):
+def operator_access(phone: str = PHONE) -> str:
+    rows = [r for r in accounts_store._memory.linked_rows
+            if r["phone_hash"] == account_crypto.phone_hash(phone) and r["revoked_at"] is None]
+    return account_crypto.decrypt(rows[0]["secret_enc"])["access_token"]
+
+
+def test_card_details_never_leak(lithic, caplog):
+    caplog.set_level("DEBUG")
+    token = ready_driver()
+    sid = scanned()
+    r = pay(sid, token)
+    texts = [r.text, client.get(f"/pay/status/{sid}").text, client.get("/me", headers=bearer(token)).text,
+             client.get(f"/operators/dogwood/app-state?s={app_token(sid)}").text, everything_visible(caplog)]
+    for t in texts:
+        assert PAN not in t and '"cvv"' not in t and '"pan"' not in t and "lithic-sandbox-test-key" not in t
+        assert f'"{CVV}"' not in t
+    assert repr(lithic_cards.CardDetails("t", PAN, CVV, "06", "2030")) == "CardDetails(token='t', last4='4142')"
+    assert PAN not in str(lithic_cards.CardDetails("t", PAN, CVV, "06", "2030"))
+
+
+def test_one_payment_per_scan(lithic):
+    token = ready_driver()
+    sid = scanned()
+    assert pay(sid, token).status_code == 200
+    r = pay(sid, token)
+    assert r.status_code == 409 and r.json()["error"] == "already_paid"
+    assert client.post("/pay", json={"scan_id": sid, "hours": 3, "approved": True}).status_code == 409
+    assert len(lithic.bodies("POST", "/v1/cards")) == 1
+
+
+def test_virtual_card_refusals(lithic):
+    sid = scanned()
+    assert pay(sid).json()["error"] == "not_signed_in"
+    assert pay(sid, ready_driver(OTHER, link=False)).json()["error"] == "dogwood_not_linked"
+    token = ready_driver(plate="")
+    r = pay(sid, token)
+    assert r.status_code == 400 and r.json()["error"] == "plate_required"
+    client.put("/me", json={"plate": "AB 123"}, headers=bearer(token))
+    assert pay(sid, token, approved=False).json()["error"] == "not_approved"
+    assert pay(sid, token, hours=None).json()["error"] == "hours_required"
+    assert pay(sid, token, hours=9).json()["error"] == "bad_hours"
+    assert pay(sid, token, payment_method="agentcard").json()["error"] == "bad_payment_method"
+    r = pay(scanned(DINER_QR), token, hours=None)
+    assert r.status_code == 400 and r.json()["error"] == "not_a_meter"
+    assert lithic.calls == []                                     # nothing minted for any of these
+    assert meter_pay.get_status(sid)["state"] == "none"
+    # A cookie from a foreign origin doesn't authorize a card payment.
+    r = client.post("/pay", json={"scan_id": sid, "hours": 3, "approved": True, "payment_method": "virtual_card"},
+                    headers={**cookie(token), "Origin": "https://evil.example"})
+    assert r.status_code == 401
+
+
+def test_over_cap_and_custom_rate(lithic, monkeypatch):
+    token = ready_driver()
+    monkeypatch.setenv("DOGWOOD_RATE_USD", "1.25")
+    sid = scanned()
+    assert pay(sid, token, hours=2).json()["amount_usd"] == 2.5
+    assert lithic.bodies("POST", "/v1/cards")[0]["spend_limit"] == 250
+    monkeypatch.setenv("VIRTUAL_CARD_MAX_USD", "3")
+    r = pay(scanned(), token, hours=4)
+    assert r.status_code == 400 and r.json()["error"] == "over_cap"
+
+
+@pytest.mark.parametrize("how", ["message", "422"])
+def test_decline_closes_the_card_and_allows_retry(lithic, how):
+    token = ready_driver()
+    sid = scanned()
+    lithic.decline = how
+    r = pay(sid, token)
+    assert r.status_code == 402 and r.json()["error"] == "card_declined"
+    assert lithic.closed() == ["card-tok-1"]                      # never left open
+    st = client.get(f"/pay/status/{sid}").json()
+    assert st["state"] == "failed" and st["method"] == "virtual_card" and st["card_closed"] is True
+    lithic.decline = ""
+    assert pay(sid, token).status_code == 200                     # a fresh card on retry
+    assert lithic.closed() == ["card-tok-1", "card-tok-2"]
+    # The same (still pending) Dogwood session was reused for the retry.
+    assert len([s for s in json.load(open(os.environ["DOGWOOD_OPERATOR_FILE"]))["sessions"].values()]) == 1
+
+
+def test_wrong_limit_card_is_closed_and_refused(lithic):
+    lithic.wrong_limit = True
+    token = ready_driver()
+    sid = scanned()
+    r = pay(sid, token)
+    assert r.status_code == 502 and r.json()["error"] == "lithic_error"
+    assert lithic.closed() == ["card-tok-1"] and lithic.bodies("POST", "/v1/simulate/authorize") == []
+
+
+def test_dogwood_refusal_closes_the_card(lithic, monkeypatch):
+    token = ready_driver()
+    sid = scanned()
+    monkeypatch.setattr(dogwood, "_card_problem", lambda card: "the card has expired")
+    r = pay(sid, token)
+    assert r.status_code == 400 and r.json()["error"] == "card_invalid" and PAN not in r.text
+    assert lithic.closed() == ["card-tok-1"]
+
+
+def test_unreachable_and_close_fallback(lithic, monkeypatch):
+    token = ready_driver()
+    lithic.patch_fails = True                    # close fails, but the used SINGLE_USE card is CLOSED already
+    lithic.clearing_fails = True
+    r = pay(scanned(), token)
+    assert r.status_code == 200 and r.json()["card_closed"] is True and r.json()["settled"] is False
+
+    def down():
+        def handler(request):
+            raise httpx.ConnectError("down")
+        return REAL_CLIENT(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(lithic_cards, "_http", down)
+    r = pay(scanned(), token)
+    assert r.status_code == 502 and r.json()["error"] == "lithic_unreachable"
+
+
+def test_operator_pay_endpoint_never_echoes_the_card(lithic):
+    token = ready_driver()
+    access = operator_access()
+    s = client.post("/operators/dogwood/api/sessions", json={"meter_id": "42", "plate": "GX 4242", "hours": 1},
+                    headers=bearer(access)).json()
+    url = f"/operators/dogwood/api/sessions/{s['session_id']}/pay"
+    bad = {"card": {"token": "card-x", "pan": "41111111111", "cvv": CVV, "exp_month": "06", "exp_year": "2030"}}
+    r = client.post(url, json=bad, headers=bearer(access))
+    assert r.status_code == 400 and r.json()["error"] == "card_invalid" and "41111111111" not in r.text
+    r = client.post(url, content=b"{not json " + PAN.encode(), headers={**bearer(access), "Content-Type": "application/json"})
+    assert r.status_code == 400 and PAN not in r.text
+    r = client.post(url, json={"card": {"pan": PAN}}, headers=bearer("dwat_nope"))
+    assert r.status_code == 401 and PAN not in r.text
+    # A real (sandbox) card works over HTTP too.
+    from api.lithic_cards import create_card
+    card = create_card(250, memo="test")
+    good = {"card": {"token": card.token, "pan": card.pan, "cvv": card.cvv, "exp_month": card.exp_month,
+                     "exp_year": card.exp_year, "last_four": card.last4}}
+    r = client.post(url, json=good, headers=bearer(access))
+    assert r.status_code == 200 and r.json()["status"] == "paid" and PAN not in r.text
+    assert lithic.bodies("POST", "/v1/simulate/authorize")[-1]["amount"] == 250
+    assert client.post(url, json=good, headers=bearer(access)).json()["error"] == "already_paid"
+
+
+def test_quote_shows_the_card_price(monkeypatch):
     sid = scanned()
     q = client.post("/pay/quote", json={"scan_id": sid, "hours": 3}).json()
     assert (q["amount_sol"], q["rate_per_hour_usd"], q["amount_usd"]) == (0.03, 2.5, 7.5)
@@ -771,97 +962,13 @@ def test_quote_shows_the_paypal_price(monkeypatch):
         assert client.post("/pay/quote", json={"scan_id": sid, "hours": 1}).json()["amount_usd"] == 2.5, bad
 
 
-def test_paypal_completed_on_create_and_custom_rate(paypal, monkeypatch):
-    monkeypatch.setenv("DOGWOOD_RATE_USD", "1.25")
-    paypal.order_status = "COMPLETED"
-    token = signed_in()
-    link_paypal(token, paypal)
-    sid = scanned()
-    assert client.post("/pay/quote", json={"scan_id": sid, "hours": 2}).json()["amount_usd"] == 2.5
-    r = pay(sid, token, hours=2)
-    assert r.status_code == 200 and r.json()["amount_usd"] == 2.5
-    assert not any(p.endswith("/capture") for p in paypal.paths())
-
-
-def test_paypal_fixed_price_uses_labelled_demo_rate(paypal):
-    token = signed_in()
-    link_paypal(token, paypal)
-    r = pay(scanned(DINER_QR), token, hours=None)
-    assert r.status_code == 200, r.text
-    assert r.json()["amount_usd"] == 0.5 and "demo" in r.json()["usd_note"].lower()
-    assert client.get(f"/pay/status/{r.json()['scan_id']}").json()["usd_note"] == r.json()["usd_note"]
-
-
-def test_paypal_refusals(paypal, monkeypatch):
-    token = signed_in()
-    sid = scanned()
-    assert pay(sid).status_code == 401                                         # not signed in
-    r = pay(sid, token)
-    assert r.status_code == 403 and r.json()["error"] == "paypal_not_linked"   # signed in, not linked
-    link_paypal(token, paypal)
-    assert pay(sid, token, approved=False).json()["error"] == "not_approved"
-    r = pay(sid, token, hours=None)
-    assert r.status_code == 400 and r.json()["error"] == "hours_required"
-    assert pay(sid, token, hours=7).json()["error"] == "bad_hours"
-    assert pay(sid, token, payment_method="venmo").json()["error"] == "bad_payment_method"
-    monkeypatch.setenv("PAYPAL_MAX_USD", "5")
-    assert pay(sid, token).json()["error"] == "over_cap"
-    monkeypatch.delenv("PAYPAL_MAX_USD")
-    # Someone else's linked PayPal is never used for my payment.
-    assert pay(sid, signed_in(OTHER)).json()["error"] == "paypal_not_linked"
-    assert not any("/v2/checkout/orders" in p for p in paypal.paths())
-    assert client.get(f"/pay/status/{sid}").json()["state"] == "none"
-    # A cookie from a foreign origin doesn't authorize a PayPal charge.
-    r = client.post("/pay", json={"scan_id": sid, "hours": 3, "approved": True, "payment_method": "paypal"},
-                    headers={**cookie(token), "Origin": "https://evil.example"})
-    assert r.status_code == 401
-
-
-def test_paypal_decline_then_retry(paypal):
-    token = signed_in()
-    link_paypal(token, paypal)
-    sid = scanned()
-    paypal.capture_status = "DECLINED"
-    r = pay(sid, token)
-    assert r.status_code == 402 and r.json()["error"] == "paypal_declined"
-    st = client.get(f"/pay/status/{sid}").json()
-    assert st["state"] == "failed" and st["method"] == "paypal"
-    paypal.capture_status = "COMPLETED"
-    assert pay(sid, token, hours=2).status_code == 200
-
-
-def test_paypal_disconnect_resets_preference_and_deletes_vault_token(paypal):
-    token = signed_in()
-    link_paypal(token, paypal)
-    client.put("/me", json={"preferred_payment": "paypal"}, headers=bearer(token))
-    r = client.delete("/me/linked/paypal", headers=bearer(token))
-    assert r.json()["revoked"] is True
-    assert "DELETE /v3/vault/payment-tokens/VAULT-SECRET-9" in paypal.paths()
-    me = client.get("/me", headers=bearer(token)).json()
-    assert me["linked"] == [] and me["preferred_payment"] == "solana_devnet"
-    assert pay(scanned(), token).json()["error"] == "paypal_not_linked"
-
-
-def test_paypal_unreachable_is_502(paypal, monkeypatch):
-    def down():
-        def handler(request):
-            raise httpx.ConnectError("down")
-        return REAL_CLIENT(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(paypal_vault, "_http", down)
-    r = client.get("/link/paypal/start", headers=bearer(signed_in()))
-    assert r.status_code == 502 and r.json()["error"] == "paypal_unreachable"
-
-
-def test_secrets_never_logged(paypal, caplog):
+def test_secrets_never_logged(lithic, caplog):
     caplog.set_level("DEBUG")
-    token = signed_in()
-    link_paypal(token, paypal)
+    token = ready_driver()
     pay(scanned(), token)
-    link_dogwood(token)
-    text = caplog.text
-    for secret in ("sandbox-client-secret", "A21-test-token", "VAULT-SECRET-9", os.environ["ACCOUNT_KEY"],
-                   token, "dwat_", dogwood.client_secret()):
-        assert secret not in text
+    for secret in ("lithic-sandbox-test-key", PAN, os.environ["ACCOUNT_KEY"], token, "dwat_",
+                   dogwood.client_secret(), LAST["nonce"]):
+        assert secret not in caplog.text
 
 
 # --- Tiger store (SQL path, fake connection) -----------------------------------------------------

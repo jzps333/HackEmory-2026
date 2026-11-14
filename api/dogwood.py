@@ -10,7 +10,9 @@ OAuth (authorization code, one registered client "scansafe"):
                -> {"access_token", "token_type": "Bearer", "expires_in", "scope"}
   Dogwood has no login of its own: the demo account is derived from the ScanSafe sign-in that
   started the link (the signed state), so each ScanSafe user gets one stable Dogwood account.
-Operator API (Bearer = Dogwood access token): GET /api/me, POST /api/sessions, GET /api/sessions/{id}.
+Operator API (Bearer = Dogwood access token): GET /api/me, POST /api/sessions, GET /api/sessions/{id},
+POST /api/sessions/{id}/pay {card} (a Lithic SANDBOX authorization + clearing on that one-time card;
+keeps only last4 + the Lithic card token).
 Agent live view: POST /app-session (X-Agent-Key) -> one-time app link; GET/POST /app-state?s=...
 
 Operator tokens and parking sessions are kept in DOGWOOD_OPERATOR_FILE
@@ -141,15 +143,24 @@ def revoke_access_token(token: str) -> bool:
     return True
 
 
-def _token_account(request: Request) -> Optional[dict]:
-    scheme, _, value = (request.headers.get("authorization") or "").strip().partition(" ")
-    if scheme.lower() != "bearer" or not value.strip():
+def account_for_token(token: str) -> Optional[dict]:
+    """The Dogwood account a (non-expired, non-revoked) access token belongs to, or None."""
+    if not token:
         return None
     with _lock:
-        t = _load()["tokens"].get(_h(value.strip()))
+        t = _load()["tokens"].get(_h(token))
     if not t or t.get("exp", 0) < time.time():
         return None
     return t
+
+
+def _request_token(request: Request) -> str:
+    scheme, _, value = (request.headers.get("authorization") or "").strip().partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
+def _token_account(request: Request) -> Optional[dict]:
+    return account_for_token(_request_token(request))
 
 
 # --- OAuth -------------------------------------------------------------------------------------
@@ -252,16 +263,136 @@ async def oauth_token(request: Request):
 
 
 # --- operator API ------------------------------------------------------------------------------
+# Each call is a function taking the Dogwood access token and returning (HTTP status, JSON body):
+# the HTTP routes below wrap them, and ScanSafe's /pay calls them in-process (server to server,
+# so card details never cross a network hop we own).
 
 _BEARER_ERR = {"WWW-Authenticate": 'Bearer error="invalid_token"'}
+_NO_TOKEN = (401, {"error": "invalid_token", "error_description": "Missing, revoked or expired Dogwood token."})
+CARD_FIELDS = ("pan", "cvv", "exp_month", "exp_year")   # Lithic card object names
+DESCRIPTOR = "DOGWOOD LOT & METER"                       # what the card statement shows (max 25)
 
 
-@router.get("/api/me")
-def api_me(request: Request):
-    acct = _token_account(request)
+def _respond(result: tuple[int, dict]) -> JSONResponse:
+    status, body = result
+    return JSONResponse(status_code=status, content=body, headers=_BEARER_ERR if status == 401 else None)
+
+
+def _session_view(s: dict) -> dict:
+    out = {k: s[k] for k in ("session_id", "meter_id", "plate", "hours", "amount_sol", "status")}
+    out["amount_usd"] = s.get("amount_usd")
+    if s.get("payment"):
+        out["payment"] = dict(s["payment"])   # method, provider, card_last4, card_token, authorization_token, paid_at
+    return out
+
+
+def _fail(status: int, code: str, message: str) -> tuple[int, dict]:
+    return status, {"ok": False, "error": code, "message": message}
+
+
+def create_session(token: str, meter_id: Any, plate: Any, hours: Any) -> tuple[int, dict]:
+    acct = account_for_token(token)
     if acct is None:
-        return _oauth_error(401, "invalid_token", "Missing, revoked or expired Dogwood token.", _BEARER_ERR)
-    return {"account_id": acct["account_id"], "name": acct["name"]}
+        return _NO_TOKEN
+    if SCOPE not in (acct.get("scope") or "").split():
+        return 403, {"error": "insufficient_scope", "error_description": "This token can't pay for parking."}
+    m = meter()
+    if str(meter_id or "") != m.meter_id:
+        return _fail(404, "unknown_meter", f"Dogwood has no meter {str(meter_id)[:20]}. Try meter {m.meter_id}.")
+    from api.routes_accounts import PlateError, normalize_plate
+    try:
+        plate = normalize_plate(plate if isinstance(plate, str) else None)
+    except PlateError as e:
+        return _fail(400, "bad_plate", str(e))
+    if not plate:
+        return _fail(400, "bad_plate", "A plate is required.")
+    try:
+        hours = meter_pay.parse_hours(hours, m)
+    except PayStateError as e:
+        return _fail(e.status, e.code, e.message)
+    from api.merchants import meter_usd
+    s = {"session_id": "dws_" + secrets.token_hex(8), "meter_id": m.meter_id, "plate": plate,
+         "hours": hours, "amount_sol": m.amount_sol(hours), "amount_usd": float(meter_usd(hours)),
+         "status": "pending_payment", "account_id": acct["account_id"], "created_at": time.time()}
+    with _lock:
+        data = _load()
+        data["sessions"][s["session_id"]] = s
+        _save(data)
+    return 200, _session_view(s)
+
+
+def get_session(token: str, session_id: str) -> tuple[int, dict]:
+    acct = account_for_token(token)
+    if acct is None:
+        return _NO_TOKEN
+    with _lock:
+        s = _load()["sessions"].get(session_id)
+    if not s or s.get("account_id") != acct["account_id"]:
+        return _fail(404, "unknown_session", "No such parking session on this account.")
+    return 200, _session_view(s)
+
+
+def _card_problem(card) -> str:
+    """"" if the card details look like a usable card (no Luhn check: sandbox numbers)."""
+    from api.lithic_cards import CardDetails
+    if not isinstance(card, CardDetails):
+        return "card details are missing"
+    pan = card.pan.replace(" ", "")
+    if not pan.isdigit() or len(pan) != 16:
+        return "the card number isn't valid"
+    if card.last4 and card.last4 != pan[-4:]:
+        return "the card number isn't valid"
+    if not (card.cvv.isdigit() and 3 <= len(card.cvv) <= 4):
+        return "the security code isn't valid"
+    try:
+        month, year = int(card.exp_month), int(card.exp_year)
+    except (TypeError, ValueError):
+        return "the expiry date isn't valid"
+    year = year + 2000 if year < 100 else year
+    now = time.gmtime()
+    if not 1 <= month <= 12 or (year, month) < (now.tm_year, now.tm_mon):
+        return "the card has expired"
+    if not card.token:
+        return "the card token is missing"
+    return ""
+
+
+def pay_session(token: str, session_id: str, card) -> tuple[int, dict]:
+    """Dogwood "charges" the card for the session: a Lithic SANDBOX authorization for exactly the
+    session's USD amount (the card's own limit really applies), then a simulated clearing, then
+    the session is marked paid. Keeps only last4 + the Lithic card token. `card` is an
+    api.lithic_cards.CardDetails; it is never stored, logged or echoed."""
+    from api import lithic_cards
+    acct = account_for_token(token)
+    if acct is None:
+        return _NO_TOKEN
+    with _lock:
+        s = _load()["sessions"].get(session_id)
+    if not s or s.get("account_id") != acct["account_id"]:
+        return _fail(404, "unknown_session", "No such parking session on this account.")
+    if s.get("status") == "paid":
+        return _fail(409, "already_paid", "This parking session is already paid.")
+    problem = _card_problem(card)
+    if problem:
+        return _fail(400, "card_invalid", f"Dogwood couldn't use that card: {problem}.")
+    cents = int(round(float(s.get("amount_usd") or 0) * 100))
+    try:
+        auth = lithic_cards.simulate_authorize(card.pan.replace(" ", ""), cents, DESCRIPTOR)
+    except lithic_cards.CardError as e:
+        return _fail(e.status, e.code, e.message)
+    settled = lithic_cards.simulate_clearing(auth)
+    payment = {"method": "virtual_card", "provider": lithic_cards.PROVIDER, "card_last4": card.last4,
+               "card_token": card.token, "authorization_token": auth, "settled": settled,
+               "simulated": True, "amount_usd": s.get("amount_usd"), "paid_at": int(time.time())}
+    with _lock:
+        data = _load()
+        cur = data["sessions"].get(session_id) or s
+        if cur.get("status") == "paid":   # a parallel request won: don't mark twice
+            return _fail(409, "already_paid", "This parking session is already paid.")
+        cur.update(status="paid", payment=payment)
+        data["sessions"][session_id] = cur
+        _save(data)
+    return 200, _session_view(cur)
 
 
 class SessionRequest(BaseModel):
@@ -270,51 +401,45 @@ class SessionRequest(BaseModel):
     hours: Any = None
 
 
-def _session_view(s: dict) -> dict:
-    return {k: s[k] for k in ("session_id", "meter_id", "plate", "hours", "amount_sol", "status")}
+@router.get("/api/me")
+def api_me(request: Request):
+    acct = _token_account(request)
+    if acct is None:
+        return _respond(_NO_TOKEN)
+    return {"account_id": acct["account_id"], "name": acct["name"]}
 
 
 @router.post("/api/sessions")
 def api_create_session(req: SessionRequest, request: Request):
-    acct = _token_account(request)
-    if acct is None:
-        return _oauth_error(401, "invalid_token", "Missing, revoked or expired Dogwood token.", _BEARER_ERR)
-    if SCOPE not in (acct.get("scope") or "").split():
-        return _oauth_error(403, "insufficient_scope", "This token can't pay for parking.")
-    m = meter()
-    if str(req.meter_id or "") != m.meter_id:
-        return _error(404, "unknown_meter", f"Dogwood has no meter {req.meter_id!s:.20}. Try meter {m.meter_id}.")
-    from api.routes_accounts import PlateError, normalize_plate
-    try:
-        plate = normalize_plate(req.plate if isinstance(req.plate, str) else None)
-    except PlateError as e:
-        return _error(400, "bad_plate", str(e))
-    if not plate:
-        return _error(400, "bad_plate", "A plate is required.")
-    try:
-        hours = meter_pay.parse_hours(req.hours, m)
-    except PayStateError as e:
-        return _error(e.status, e.code, e.message)
-    s = {"session_id": "dws_" + secrets.token_hex(8), "meter_id": m.meter_id, "plate": plate,
-         "hours": hours, "amount_sol": m.amount_sol(hours), "status": "pending_payment",
-         "account_id": acct["account_id"], "created_at": time.time()}
-    with _lock:
-        data = _load()
-        data["sessions"][s["session_id"]] = s
-        _save(data)
-    return _session_view(s)
+    return _respond(create_session(_request_token(request), req.meter_id, req.plate, req.hours))
 
 
 @router.get("/api/sessions/{session_id}")
 def api_get_session(session_id: str, request: Request):
-    acct = _token_account(request)
-    if acct is None:
-        return _oauth_error(401, "invalid_token", "Missing, revoked or expired Dogwood token.", _BEARER_ERR)
-    with _lock:
-        s = _load()["sessions"].get(session_id)
-    if not s or s.get("account_id") != acct["account_id"]:
-        return _error(404, "unknown_session", "No such parking session on this account.")
-    return _session_view(s)
+    return _respond(get_session(_request_token(request), session_id))
+
+
+@router.post("/api/sessions/{session_id}/pay")
+async def api_pay_session(session_id: str, request: Request):
+    """{"card": {"token", "pan", "cvv", "exp_month", "exp_year", "last_four"?}} (the Lithic card
+    object). The body is parsed by hand so no validation error can echo it."""
+    import asyncio
+    from api.lithic_cards import CardDetails
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        body = None
+    raw = body.get("card") if isinstance(body, dict) else None
+    card = None
+    if isinstance(raw, dict) and all(isinstance(raw.get(k), (str, int)) for k in CARD_FIELDS):
+        card = CardDetails(token=str(raw.get("token") or ""), pan=str(raw["pan"]), cvv=str(raw["cvv"]),
+                           exp_month=raw["exp_month"], exp_year=raw["exp_year"],
+                           last4=str(raw.get("last_four") or ""))
+    try:
+        return _respond(await asyncio.to_thread(pay_session, _request_token(request), session_id, card))
+    finally:
+        if card is not None:
+            card.wipe()
 
 
 # --- the agent's live view of the Dogwood app --------------------------------------------------
@@ -414,10 +539,13 @@ def app_state(scan_id: str, plate: Optional[str]) -> dict:
         out["payment_method"] = status.get("method", "solana_devnet")
         out["receipt"] = {"signature": status.get("signature"), "explorer_url": status.get("explorer_url"),
                           "paid_at": status.get("paid_at"), "method": out["payment_method"]}
-        if out["payment_method"] == "paypal":
+        if out["payment_method"] == "virtual_card":
             out["amount_usd"] = status.get("amount_usd")
-            out["receipt"].update(paypal_order_id=status.get("paypal_order_id"),
-                                  amount_usd=status.get("amount_usd"))
+            out["receipt"].update(provider=status.get("provider"), card_last4=status.get("card_last4"),
+                                  amount_usd=status.get("amount_usd"),
+                                  dogwood_session_id=status.get("dogwood_session_id"),
+                                  text=f"Paid with a one-time virtual card \u2022\u2022{status.get('card_last4')} "
+                                       "(Lithic sandbox)")
     return out
 
 

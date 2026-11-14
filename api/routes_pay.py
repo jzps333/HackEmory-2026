@@ -1,23 +1,24 @@
-"""POST /pay: send an approved Solana Pay payment on devnet, or (payment_method "paypal") charge
-the signed-in user's saved PayPal SANDBOX account. Plus pay-by-the-hour parking:
-POST /pay/quote, GET /pay/quote/{scan_id}, GET /pay/status/{scan_id} (see api/meter_pay.py).
+"""POST /pay: send an approved Solana Pay payment on devnet, or (payment_method "virtual_card") pay
+a Dogwood parking meter with a one-time Lithic SANDBOX virtual card the server mints for exactly that
+amount. Plus pay-by-the-hour parking: POST /pay/quote, GET /pay/quote/{scan_id},
+GET /pay/status/{scan_id} (see api/meter_pay.py).
 
 Mount in api/main.py:  from api.routes_pay import router as pay_router; app.include_router(pay_router)
 """
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from decimal import Decimal
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from api import account_crypto, meter_pay, paypal_vault, session
+from api import account_crypto, lithic_cards, meter_pay, session
 from api.account_crypto import AccountConfigError
-from api.paypal_vault import PayPalError
+from api.lithic_cards import CardError
 from api.merchants import KNOWN_MERCHANTS, meter_for  # noqa: F401  (tests check it's the shared table)
 from api.meter_pay import PayStateError
 from api.schema import Payment
@@ -26,8 +27,11 @@ from api.solana_pay import PaymentError, send_payment
 log = logging.getLogger("scansafe.pay")
 router = APIRouter()
 
-PAYMENT_METHODS = ("solana_devnet", "paypal")
+PAYMENT_METHODS = ("solana_devnet", "virtual_card")
 DEFAULT_METHOD = "solana_devnet"
+
+_sessions_lock = threading.Lock()
+_dogwood_sessions: dict[str, str] = {}    # scan_id -> Dogwood session_id (reused on a retry)
 
 
 class PayRequest(BaseModel):
@@ -35,7 +39,7 @@ class PayRequest(BaseModel):
     payment: Optional[Payment] = None   # optional: the server's own copy of the scan wins
     approved: bool = False              # true only after the user tapped confirm
     hours: Any = None                   # parking meters: required; the server prices it
-    payment_method: Any = None          # "solana_devnet" (default) | "paypal" (signed in, linked)
+    payment_method: Any = None          # "solana_devnet" (default) | "virtual_card" (signed in, meters)
 
 
 class PayResponse(BaseModel):
@@ -75,67 +79,95 @@ def _claim(scan_id: str, request: Request) -> None:
         log.warning("couldn't remember the scan owner: %s", type(e).__name__)
 
 
-def paypal_amount(payment: Payment, meter, hours: Optional[int]) -> tuple[Decimal, Optional[str]]:
-    """(USD amount, demo-rate note or None). Meters: hours x DOGWOOD_RATE_USD. Fixed-price codes:
-    their test-SOL amount x DEMO_USD_PER_SOL, a made-up demo rate (labelled as such)."""
-    if meter is not None and hours is not None:
-        return paypal_vault.usd(paypal_vault.dogwood_rate_usd() * hours), None
-    rate = paypal_vault.demo_usd_per_sol()
-    return (paypal_vault.usd(Decimal(str(payment.amount_sol)) * rate),
-            f"Demo conversion at a fixed {rate} USD per test SOL (not a market price).")
+def _dogwood_session(token: str, scan_id: str, meter_id: str, plate: str, hours: int) -> str:
+    """The Dogwood parking session to pay for this scan: an earlier unpaid one with the same
+    plate and hours, else a new one. Raises CardError."""
+    from api import dogwood
+    with _sessions_lock:
+        prev = _dogwood_sessions.get(scan_id)
+    if prev:
+        status, s = dogwood.get_session(token, prev)
+        if status == 200 and s["status"] == "pending_payment" and (s["plate"], s["hours"]) == (plate, hours):
+            return prev
+    status, s = dogwood.create_session(token, meter_id, plate, hours)
+    if status == 401:
+        raise CardError(409, "dogwood_relink_needed", "Reconnect Dogwood Parking in your account.")
+    if status != 200:
+        raise CardError(502, "dogwood_error", "Dogwood couldn't start the parking session. Nothing was charged.")
+    with _sessions_lock:
+        _dogwood_sessions[scan_id] = s["session_id"]
+        while len(_dogwood_sessions) > 2000:
+            _dogwood_sessions.pop(next(iter(_dogwood_sessions)))
+    return s["session_id"]
 
 
-def _pay_paypal(req: PayRequest, request: Request, payment: Payment, meter, hours: Optional[int]):
-    """Charge the signed-in user's saved PayPal sandbox account. Same rules as Solana: approved,
-    hours for meters, one payment per scan_id."""
-    from api.routes_accounts import Refusal, linked_secret
+def _pay_virtual_card(req: PayRequest, request: Request, payment: Payment, meter, hours: Optional[int]):
+    """Mint a SINGLE_USE Lithic sandbox card whose limit is exactly hours x DOGWOOD_RATE_USD, and
+    pay Dogwood with it server to server (the operator API, in-process). The card is closed
+    afterwards whatever happens. Same rules as Solana: approved, hours, one payment per scan."""
+    from api import dogwood
+    from api.merchants import env_decimal, meter_usd
+    from api.routes_accounts import Refusal, get_plate, linked_secret
+    if meter is None or hours is None:
+        return _error(400, "not_a_meter", "Virtual cards pay parking meters only. Pay this code with the devnet wallet.")
+    if payment.label != dogwood.OPERATOR:
+        return _error(400, "not_dogwood", "Virtual cards only pay Dogwood Lot & Meter Co. meters in this demo.")
     try:
-        paypal_vault.require_configured()
+        lithic_cards.require_configured()
         ph = _signed_in_hash(request)
         if not ph:
-            return _error(401, "not_signed_in", "Sign in with your phone to pay with PayPal.")
-        secret = linked_secret(ph, "paypal")
-        if not secret or not secret.get("vault_id"):
-            return _error(403, "paypal_not_linked", "Connect PayPal in your account first.")
-        amount, demo_note = paypal_amount(payment, meter, hours)
-        cap = paypal_vault.env_decimal("PAYPAL_MAX_USD", "25")
-        if not Decimal("0.01") <= amount <= cap:
-            return _error(400, "over_cap", f"This demo only charges PayPal sandbox up to ${cap:.2f}.")
-    except (Refusal, PayPalError) as e:
+            return _error(401, "not_signed_in", "Sign in with your phone to pay with a virtual card.")
+        dw = linked_secret(ph, "dogwood")
+        if not dw or not dw.get("access_token"):
+            return _error(403, "dogwood_not_linked", "Connect Dogwood Parking in your account first.")
+        plate = get_plate(ph)
+        if not plate:
+            return _error(400, "plate_required", "Add your plate in your account first.")
+    except (Refusal, CardError) as e:
         return _error(e.status, e.code, e.message)
     except AccountConfigError as e:
         return _error(503, e.code, e.message)
+    amount = meter_usd(hours)
+    cents = int(amount * 100)
+    cap = env_decimal("VIRTUAL_CARD_MAX_USD", "25")
+    if amount > cap:
+        return _error(400, "over_cap", f"This demo only pays up to ${cap:.2f} with a virtual card.")
     meter_pay.claim_owner(req.scan_id, ph)
 
     try:
         meter_pay.begin_payment(req.scan_id)
     except PayStateError as e:
         return _error(e.status, e.code, e.message)
-    what = (f"{hours} hour{'s' if hours != 1 else ''} of parking" if hours is not None else "your order")
-    outcome: dict = {}
+    card_token, outcome = "", {}
+    base = {"method": "virtual_card", "provider": lithic_cards.PROVIDER, "amount_usd": float(amount),
+            "currency": "USD", "hours": hours, "merchant": payment.label}
     try:
-        charged = paypal_vault.charge(secret["vault_id"], amount,
-                                      f"{payment.label or 'Merchant'}: {what} (ScanSafe demo, sandbox)",
-                                      req.scan_id)
-        outcome = {"state": "paid", "method": "paypal", "paypal_order_id": charged["order_id"],
-                   "paypal_capture_id": charged["capture_id"], "amount_usd": float(amount),
-                   "currency": "USD", "hours": hours, "merchant": payment.label,
-                   "paid_at": int(time.time())}
-        if demo_note:
-            outcome["usd_note"] = demo_note
-    except PayPalError as e:
-        outcome = {"state": "failed", "method": "paypal", "error": e.code, "message": e.message,
-                   "amount_usd": float(amount), "hours": hours, "merchant": payment.label}
+        session_id = _dogwood_session(dw["access_token"], req.scan_id, meter.meter_id, plate, hours)
+        card = lithic_cards.create_card(cents, memo=f"ScanSafe \u00b7 Dogwood meter {meter.meter_id} \u00b7 {req.scan_id}")
+        card_token = card.token
+        try:
+            status, paid = dogwood.pay_session(dw["access_token"], session_id, card)
+        finally:
+            card.wipe()
+            del card
+        if status != 200:
+            raise CardError(status if status in (400, 402, 409) else 502, paid.get("error") or "dogwood_error",
+                            paid.get("message") or "Dogwood couldn't take the payment. Nothing was charged.")
+        p = paid["payment"]
+        outcome = {"state": "paid", **base, "card_last4": p["card_last4"], "card_token": card_token,
+                   "authorization_token": p.get("authorization_token"), "settled": p.get("settled"),
+                   "simulated": True, "dogwood_session_id": session_id, "paid_at": p["paid_at"]}
+    except CardError as e:
+        outcome = {"state": "failed", **base, "error": e.code, "message": e.message}
         return _error(e.status, e.code, e.message)
     finally:
+        if card_token:
+            closed = lithic_cards.close_card(card_token)   # success or failure: never leave it open
+            if outcome:
+                outcome["card_closed"] = closed
         meter_pay.finish_payment(req.scan_id, outcome)
-    body = {"ok": True, "scan_id": req.scan_id, "method": "paypal",
-            "paypal_order_id": charged["order_id"], "paypal_capture_id": charged["capture_id"],
-            "amount_usd": float(amount), "currency": "USD", "hours": hours, "merchant": payment.label,
-            "payment": payment.model_dump(mode="json"), "paid_at": outcome["paid_at"]}
-    if demo_note:
-        body["usd_note"] = demo_note
-    return JSONResponse(body)
+    return JSONResponse({"ok": True, "scan_id": req.scan_id, **{k: v for k, v in outcome.items() if k != "state"},
+                         "payment": payment.model_dump(mode="json")})
 
 
 @router.post("/pay", response_model=PayResponse,
@@ -145,7 +177,7 @@ def pay(req: PayRequest, request: Request):
         return _error(403, "not_approved", "The user has not approved this payment.")
     method = DEFAULT_METHOD if req.payment_method is None else req.payment_method
     if method not in PAYMENT_METHODS:
-        return _error(400, "bad_payment_method", 'payment_method must be "solana_devnet" or "paypal".')
+        return _error(400, "bad_payment_method", 'payment_method must be "solana_devnet" or "virtual_card".')
 
     # The server's own copy of the scan wins over whatever the client sends.
     scan = meter_pay.lookup_scan(req.scan_id)
@@ -179,8 +211,8 @@ def pay(req: PayRequest, request: Request):
         payment.message = (f"Meter {meter.meter_id} " if meter.meter_id else "Parking ") + \
             f"- {hours} hour{'s' if hours != 1 else ''}"
 
-    if method == "paypal":
-        return _pay_paypal(req, request, payment, meter, hours)
+    if method == "virtual_card":
+        return _pay_virtual_card(req, request, payment, meter, hours)
     _claim(req.scan_id, request)
 
     try:

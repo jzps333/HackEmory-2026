@@ -1,6 +1,6 @@
 """Saved accounts: profile (GET/PUT /me), linked accounts (GET /me/linked, DELETE
-/me/linked/{provider}), and the two link flows: Dogwood Parking (a fictional operator whose OAuth
-server we host, see api/dogwood.py) and PayPal SANDBOX Vault (api/paypal_vault.py).
+/me/linked/{provider}), and the Dogwood Parking link flow (a fictional operator whose OAuth
+server we host, see api/dogwood.py).
 
 Auth: the phone sign-in token, as `Authorization: Bearer <token>` or the `ss_session` cookie
 (api/session.py). Errors: {"ok": false, "error": "<code>", "message": "<plain words>"}.
@@ -8,9 +8,15 @@ Link callbacks are browser navigations, so they always answer with a 302 back to
   success  APP_BASE_URL/accounts?linked=<provider>
   failure  APP_BASE_URL/accounts?link_error=<code>&provider=<provider>
 (APP_BASE_URL unset: https://scansafe.nyc/?linked=... and https://scansafe.nyc/?link_error=...)
+
+Link CSRF: /link/<provider>/start sets a short-lived `ss_link_nonce` cookie and puts its sha256 in
+the signed state. The callback only links when (1) that cookie is present and matches the state,
+(2) the browser is signed in (ss_session cookie) as the same person who started, and (3) the
+state hasn't been used before. Anything else is a refusal, never a pass.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 import os
@@ -22,29 +28,27 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
-from api import account_crypto, dogwood, paypal_vault, session
+from api import account_crypto, dogwood, lithic_cards, session
 from api.account_crypto import AccountConfigError
-from api.paypal_vault import PayPalError
 from data import accounts_store
 
 log = logging.getLogger("scansafe.accounts")
 router = APIRouter(tags=["accounts"])
 
-PROVIDERS = ("dogwood", "paypal")
-PAYMENT_METHODS = ("solana_devnet", "paypal")
+PROVIDERS = ("dogwood",)
+PAYMENT_METHODS = ("solana_devnet", "virtual_card")
 DEFAULT_PAYMENT = "solana_devnet"
-PAYPAL_STATE_PURPOSE = "link:paypal"
 LINK_TTL_S = 10 * 60
+LINK_NONCE_COOKIE = "ss_link_nonce"
 PLATE_RE = re.compile(r"[A-Z0-9 -]{2,10}")
 NO_STORE = {"Cache-Control": "no-store"}
 
 _lock = threading.Lock()
-_spent_states: dict[str, float] = {}      # nonce -> expiry: each link state works once
-_paypal_pending: dict[str, dict] = {}     # nonce -> {"setup_token_id", "exp"}
+_spent_states: dict[str, float] = {}      # state nonce -> expiry: each link state works once
 
 
 class Refusal(Exception):
@@ -63,7 +67,7 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
 
 
 def _refused(e: Exception) -> JSONResponse:
-    if isinstance(e, (Refusal, PayPalError)):
+    if isinstance(e, Refusal):
         return _error(e.status, e.code, e.message)
     if isinstance(e, AccountConfigError):
         return _error(503, e.code, e.message)
@@ -128,9 +132,7 @@ def _display(row: dict) -> str:
     meta = row.get("meta") or {}
     if row["provider"] == "dogwood":
         return meta.get("account_name") or dogwood.ACCOUNT_NAME
-    if row["provider"] == "paypal":
-        return meta.get("display") or "PayPal (sandbox)"
-    return row["provider"]
+    return meta.get("display") or row["provider"]
 
 
 def linked_view(rows: list[dict]) -> list[dict]:
@@ -155,10 +157,8 @@ def linked_secret(phone_hash: str, provider: str) -> Optional[dict]:
     return secret
 
 
-def _new_state(purpose: str, phone: str, phone_hash: str) -> tuple[str, str]:
-    nonce = secrets.token_urlsafe(12)
-    state = account_crypto.sign(purpose, {"ph": phone_hash, "d": session_mask(phone), "n": nonce}, LINK_TTL_S)
-    return state, nonce
+def get_plate(phone_hash: str) -> Optional[str]:
+    return (_db(_store().get_profile, phone_hash) or {}).get("plate")
 
 
 def session_mask(phone: str) -> str:
@@ -166,8 +166,29 @@ def session_mask(phone: str) -> str:
     return mask_phone(phone)
 
 
+def _nonce_hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode()).hexdigest()
+
+
+def _new_state(purpose: str, phone: str, phone_hash: str, response: Response) -> str:
+    """A signed state for one link attempt, bound to this browser by the ss_link_nonce cookie."""
+    browser_nonce = secrets.token_urlsafe(24)
+    response.set_cookie(LINK_NONCE_COOKIE, browser_nonce, max_age=LINK_TTL_S, path="/link",
+                        domain=session.cookie_domain(), secure=True, httponly=True, samesite="lax")
+    return account_crypto.sign(purpose, {"ph": phone_hash, "d": session_mask(phone),
+                                         "n": secrets.token_urlsafe(12), "lh": _nonce_hash(browser_nonce)},
+                               LINK_TTL_S)
+
+
+def _clear_nonce(response: Response) -> None:
+    response.delete_cookie(LINK_NONCE_COOKIE, path="/link", domain=session.cookie_domain(), secure=True,
+                           httponly=True, samesite="lax")
+
+
 def _take_state(purpose: str, state: str, request: Request) -> tuple[Optional[dict], str]:
-    """Verify a link state from a callback and spend it. (payload, "") or (None, link_error)."""
+    """Verify a link state from a callback and spend it. (payload, "") or (None, link_error).
+    Fails closed: no nonce cookie, a nonce that doesn't match, not signed in, or signed in as
+    someone else are all refusals."""
     body, reason = account_crypto.verify(purpose, state)
     if body is None:
         return None, "link_expired" if reason == "expired" else "invalid_state"
@@ -175,12 +196,16 @@ def _take_state(purpose: str, state: str, request: Request) -> tuple[Optional[di
     with _lock:
         for k in [k for k, exp in _spent_states.items() if exp < now]:
             del _spent_states[k]
-        if body["n"] in _spent_states:
+        if body.get("n") in _spent_states:
             return None, "invalid_state"
-        _spent_states[body["n"]] = body["exp"] + 1
-    # Someone signed in as another person in this browser? Don't link into the wrong account.
+        _spent_states[str(body.get("n"))] = body["exp"] + 1      # single use, whatever happens next
+    nonce = request.cookies.get(LINK_NONCE_COOKIE) or ""
+    if not nonce or not hmac.compare_digest(_nonce_hash(nonce), str(body.get("lh") or "")):
+        return None, "invalid_state"          # started in another browser (or forged): refuse
     current = session.current_phone(request)
-    if current and not hmac.compare_digest(account_crypto.phone_hash(current), body["ph"]):
+    if not current:
+        return None, "sign_in_first"
+    if not hmac.compare_digest(account_crypto.phone_hash(current), str(body.get("ph") or "")):
         return None, "signed_in_as_someone_else"
     return body, ""
 
@@ -193,15 +218,16 @@ class ProfileUpdate(BaseModel):
 
 
 def _profile(phone: str, phone_hash: str) -> dict:
+    from api.merchants import dogwood_rate_usd
     store = _store()
     profile = _db(store.get_profile, phone_hash) or {}
     rows = _db(store.list_linked, phone_hash)
     return {"signed_in": True, "phone_masked": session_mask(phone), "plate": profile.get("plate"),
             "preferred_payment": profile.get("preferred_payment") or DEFAULT_PAYMENT,
             "linked": linked_view(rows),
-            "providers": {"dogwood": True, "paypal": paypal_vault.is_configured()},
-            "paypal_rates": {"dogwood_usd_per_hour": float(paypal_vault.dogwood_rate_usd()),
-                             "demo_usd_per_sol": float(paypal_vault.demo_usd_per_sol())}}
+            "providers": {"dogwood": True},
+            "payment_methods": {"solana_devnet": True, "virtual_card": lithic_cards.is_configured()},
+            "virtual_card_usd_per_hour": float(dogwood_rate_usd())}
 
 
 @router.get("/me")
@@ -231,9 +257,7 @@ def put_me(req: ProfileUpdate, request: Request):
             pref = req.preferred_payment
             if pref is not None and pref not in PAYMENT_METHODS:
                 raise Refusal(400, "bad_preferred_payment",
-                              'Preferred payment must be "solana_devnet" or "paypal".')
-            if pref == "paypal" and _db(_store().get_linked, ph, "paypal") is None:
-                raise Refusal(403, "paypal_not_linked", "Connect PayPal first.")
+                              'Preferred payment must be "solana_devnet" or "virtual_card".')
             fields["preferred_payment"] = pref
         if fields:
             _db(_store().update_profile, ph, fields)
@@ -259,12 +283,8 @@ def _revoke_upstream(provider: str, secret_enc: str) -> None:
         secret = account_crypto.decrypt(secret_enc) if secret_enc else None
     except AccountConfigError:
         secret = None
-    if not secret:
-        return
-    if provider == "dogwood":
+    if secret and provider == "dogwood":
         dogwood.revoke_access_token(secret.get("access_token", ""))
-    elif provider == "paypal":
-        paypal_vault.delete_payment_token(secret.get("vault_id", ""))
 
 
 @router.delete("/me/linked/{provider}")
@@ -274,22 +294,16 @@ def delete_linked(provider: str, request: Request):
         if provider not in PROVIDERS:
             raise Refusal(404, "unknown_provider", "There's no such account to disconnect.")
         _phone, ph = _who(request)
-        store = _store()
-        row = _db(store.revoke, ph, provider)
+        row = _db(_store().revoke, ph, provider)
         if row:
             _revoke_upstream(provider, row.get("secret_enc") or "")
-            if provider == "paypal":
-                profile = _db(store.get_profile, ph) or {}
-                if profile.get("preferred_payment") == "paypal":
-                    _db(store.update_profile, ph, {"preferred_payment": DEFAULT_PAYMENT})
         return JSONResponse({"ok": True, "provider": provider, "revoked": bool(row)}, headers=NO_STORE)
     except (Refusal, AccountConfigError) as e:
         return _refused(e)
 
 
 def _save_link(phone_hash: str, provider: str, secret: dict, meta: dict) -> None:
-    store = _store()
-    out = _db(store.link, phone_hash, provider, account_crypto.encrypt(secret), meta)
+    out = _db(_store().link, phone_hash, provider, account_crypto.encrypt(secret), meta)
     if out.get("replaced"):
         _revoke_upstream(provider, out["replaced"])
 
@@ -297,23 +311,27 @@ def _save_link(phone_hash: str, provider: str, secret: dict, meta: dict) -> None
 # --- Dogwood -----------------------------------------------------------------------------------
 
 @router.get("/link/dogwood/start")
-def dogwood_start(request: Request):
-    """{"authorize_url"}: open it (same tab) to show Dogwood's consent page."""
+def dogwood_start(request: Request, response: Response):
+    """{"authorize_url"}: open it (same tab) to show Dogwood's consent page. Also sets the
+    ss_link_nonce cookie (Path=/link, 10 min) that the callback requires."""
     try:
         phone, ph = _who(request)
         _store()
         _need_encryption()
-        state, _nonce = _new_state(dogwood.STATE_PURPOSE, phone, ph)
-        q = urlencode({"client_id": dogwood.CLIENT_ID, "redirect_uri": dogwood.redirect_uri(),
-                       "scope": dogwood.SCOPE, "state": state, "display": session_mask(phone)})
-        return JSONResponse({"authorize_url": f"{dogwood.site_base()}/dogwood/authorize?{q}"}, headers=NO_STORE)
     except (Refusal, AccountConfigError) as e:
         return _refused(e)
+    response.headers["Cache-Control"] = "no-store"
+    state = _new_state(dogwood.STATE_PURPOSE, phone, ph, response)
+    q = urlencode({"client_id": dogwood.CLIENT_ID, "redirect_uri": dogwood.redirect_uri(),
+                   "scope": dogwood.SCOPE, "state": state, "display": session_mask(phone)})
+    return {"authorize_url": f"{dogwood.site_base()}/dogwood/authorize?{q}"}
 
 
 def _back(provider: str, error: str = "") -> RedirectResponse:
     url = app_url(link_error=error, provider=provider) if error else app_url(linked=provider)
-    return RedirectResponse(url, status_code=302, headers=NO_STORE)
+    out = RedirectResponse(url, status_code=302, headers=NO_STORE)
+    _clear_nonce(out)
+    return out
 
 
 @router.get("/link/dogwood/callback")
@@ -344,59 +362,6 @@ def dogwood_callback(request: Request, code: str = "", state: str = "", error: s
     return _back("dogwood")
 
 
-# --- PayPal (sandbox) --------------------------------------------------------------------------
-
-@router.get("/link/paypal/start")
-def paypal_start(request: Request):
-    """{"approve_url"}: open it (same tab); PayPal sandbox sends the browser back to our callback."""
-    try:
-        paypal_vault.require_configured()
-        phone, ph = _who(request)
-        _store()
-        _need_encryption()
-        state, nonce = _new_state(PAYPAL_STATE_PURPOSE, phone, ph)
-        back = f"{dogwood.api_base()}/link/paypal/callback?{urlencode({'state': state})}"
-        setup = paypal_vault.create_setup_token(back, back + "&cancelled=1", request_id=f"scansafe-setup-{nonce}")
-        now = time.time()
-        with _lock:
-            for k in [k for k, v in _paypal_pending.items() if v["exp"] < now]:
-                del _paypal_pending[k]
-            _paypal_pending[nonce] = {"setup_token_id": setup["id"], "exp": now + LINK_TTL_S}
-        return JSONResponse({"approve_url": setup["approve_url"]}, headers=NO_STORE)
-    except (Refusal, AccountConfigError, PayPalError) as e:
-        return _refused(e)
-
-
-@router.get("/link/paypal/callback")
-def paypal_callback(request: Request, state: str = "", approval_token_id: str = "", cancelled: str = ""):
-    """PayPal sends the browser here after Approve (with approval_token_id) or Cancel."""
-    body, problem = _take_state(PAYPAL_STATE_PURPOSE, state, request)
-    if body is None:
-        return _back("paypal", problem)
-    with _lock:
-        pending = _paypal_pending.pop(body["n"], None)
-    if cancelled:
-        return _back("paypal", "cancelled")
-    if not pending or not approval_token_id or not hmac.compare_digest(
-            pending["setup_token_id"].encode(), approval_token_id.encode()):
-        return _back("paypal", "invalid_state")
-    try:
-        tok = paypal_vault.create_payment_token(approval_token_id, request_id=f"scansafe-pt-{body['n']}")
-    except PayPalError as e:
-        log.info("paypal payment token refused: %s", e.code)
-        return _back("paypal", "paypal_refused")
-    try:
-        _save_link(body["ph"], "paypal", {"vault_id": tok["id"], "customer_id": tok.get("customer_id", "")},
-                   {"display": paypal_vault.mask_email(tok.get("email", "")) or "PayPal (sandbox)",
-                    "env": "sandbox"})
-    except (Refusal, AccountConfigError) as e:
-        paypal_vault.delete_payment_token(tok["id"])
-        log.warning("paypal link not saved: %s", getattr(e, "code", type(e).__name__))
-        return _back("paypal", "server_error")
-    return _back("paypal")
-
-
 def clear() -> None:  # tests
     with _lock:
         _spent_states.clear()
-        _paypal_pending.clear()

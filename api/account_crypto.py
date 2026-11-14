@@ -7,7 +7,7 @@ Env (never commit values, never log them):
                   Never change it once accounts exist: every saved account is keyed by it.
                   The signing keys below are derived from it too.
   ACCOUNT_KEY     Fernet key that encrypts linked-account tokens at rest. Required for linking
-                  and for paying with PayPal. Generate one with
+                  and for paying with a virtual card (it reads the Dogwood token). Generate one with
                   python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())'
 """
 from __future__ import annotations

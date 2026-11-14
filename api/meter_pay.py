@@ -115,14 +115,13 @@ def make_quote(scan_id: str, raw_hours: Any) -> dict:
     """Validate and store the latest quote for scan_id. Raises PayStateError."""
     _scan, payment, meter = meter_scan(scan_id)
     hours = parse_hours(raw_hours, meter)
-    from api import paypal_vault
-    usd_rate = paypal_vault.dogwood_rate_usd()
+    from api.merchants import dogwood_rate_usd, meter_usd
     quote = {"scan_id": scan_id, "merchant": payment.label,
              "rate_per_hour_sol": meter.rate_per_hour_sol, "hours": hours,
              "amount_sol": meter.amount_sol(hours), "min_hours": meter.min_hours,
              "max_hours": meter.max_hours, "meter_url": meter.meter_url,
-             # the same hours paid with PayPal sandbox instead (test money, USD)
-             "rate_per_hour_usd": float(usd_rate), "amount_usd": float(paypal_vault.usd(usd_rate * hours)),
+             # the same hours paid with a one-time virtual card instead (Lithic sandbox, test USD)
+             "rate_per_hour_usd": float(dogwood_rate_usd()), "amount_usd": float(meter_usd(hours)),
              "updated_at": round(time.time(), 3)}
     with _lock:
         _put(_quotes, scan_id, quote)

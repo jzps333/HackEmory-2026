@@ -1,4 +1,4 @@
-"""Saved accounts: the profile (plate, preferred payment) and linked accounts (Dogwood, PayPal).
+"""Saved accounts: the profile (plate, preferred payment) and linked accounts (Dogwood Parking).
 
 Tables live in Tiger Data (same database as the scan log) and are created on first use, or by
 `python3 -m data.setup`. Rows are keyed by phone_hash (api/account_crypto.phone_hash); no phone
