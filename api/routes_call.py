@@ -77,15 +77,33 @@ def _save_consent(data: dict) -> None:
     os.replace(tmp, CONSENT_FILE)
 
 
-def issue_consent_code(phone: str) -> str:
-    """A short code the user texts to the ScanSafe line from this phone to allow calls to it."""
-    import secrets
+MAX_PENDING = 500
+START_LIMIT_PER_MIN = 30
+
+
+def _prune(data: dict, now: float) -> None:
+    ttl = CONSENT_TTL.total_seconds()
+    data["requests"] = {k: v for k, v in data.get("requests", {}).items() if now - v["at"] < ttl}
+    data["tokens"] = {k: v for k, v in data.get("tokens", {}).items() if now - v["at"] < TOKEN_TTL_S}
+    data.pop("codes", None)
+    data.pop("verified", None)       # old format: verification no longer hands out tokens later
+
+
+def start_sign_in(phone: str) -> tuple[str, str]:
+    """New pending sign-in for `phone`: (code to text, secret request id for the requester).
+    Several can be pending per phone, so one person can't cancel another's sign-in."""
+    import hashlib, secrets
     code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(6))
+    request_id = secrets.token_urlsafe(24)
+    now = time.time()
     with _consent_lock:
         data = _load_consent()
-        data["codes"][phone] = {"code": code, "at": time.time()}
+        _prune(data, now)
+        if len(data["requests"]) >= MAX_PENDING:
+            raise HTTPException(status_code=503, detail="too many sign-ins in progress; try again soon")
+        data["requests"][hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now}
         _save_consent(data)
-    return code
+    return code, request_id
 
 
 def _inbound_texts() -> list[tuple[str, str]]:
@@ -114,34 +132,31 @@ def _inbound_texts() -> list[tuple[str, str]]:
     return out
 
 
-def phone_consented(phone: str) -> bool:
-    """True if this exact phone texted its one-time code to the line within 24 h.
-
-    The code is issued for the full number, and the text must contain that code AND come from a
-    number ending in the same 4 digits (all Chert shows us), so a stranger can't enable calls to
-    someone else's phone by texting from their own."""
-    now = time.time()
+def complete_sign_in(phone: str, request_id: str) -> Optional[str]:
+    """If this request's code was texted to the line from a number ending in the same 4 digits,
+    issue one token (to the holder of request_id) and close the request. Otherwise None."""
+    import hashlib
+    key = hashlib.sha256(request_id.encode()).hexdigest()
     with _consent_lock:
         data = _load_consent()
-        v = data["verified"].get(phone)
-        if v and now - v < CONSENT_TTL.total_seconds():
-            return True
-        c = data["codes"].get(phone)
-    if not c or now - c["at"] > CONSENT_TTL.total_seconds():
-        return False
-    if any(last4 == phone[-4:] and c["code"] in text for last4, text in _inbound_texts()):
-        with _consent_lock:
-            data = _load_consent()
-            data["verified"][phone] = now
-            data["codes"].pop(phone, None)
-            _save_consent(data)
-        log.info("calls enabled for a phone ending %s (code texted)", phone[-4:])
-        return True
-    return False
+        _prune(data, time.time())
+        req = data["requests"].get(key)
+    if not req or req["phone"] != phone:
+        return None
+    if not any(last4 == phone[-4:] and req["code"] in text for last4, text in _inbound_texts()):
+        return None
+    with _consent_lock:
+        data = _load_consent()
+        if data.get("requests", {}).pop(key, None) is None:
+            return None                      # already completed: one token per request
+        _save_consent(data)
+    log.info("phone sign-in completed for a phone ending %s", phone[-4:])
+    return _issue_token(phone)
 
 
 class PhoneRequest(BaseModel):
     phone: str
+    request_id: str = ""
 
 
 TOKEN_TTL_S = 30 * 24 * 3600
@@ -181,8 +196,8 @@ def phone_start(req: PhoneRequest) -> dict:
     (Reverse OTP: the user texts us, so no SMS provider is needed, and it also lets Chert reach them.)"""
     phone = _norm_phone(req.phone)
     _take_code_slot(phone)
-    code = issue_consent_code(phone)
-    return {"code": code, "line": "+16504444331",
+    code, request_id = start_sign_in(phone)
+    return {"code": code, "request_id": request_id, "line": "+16504444331",
             "sms_body": f"Hi ScanSafe! My sign-in code is {code}"}
 
 
@@ -191,20 +206,31 @@ def phone_verify(req: PhoneRequest) -> dict:
     """Step 2 (the app polls this every few seconds): once the code text has arrived from this
     phone, returns a sign-in token. The token is what /call-me trusts, never a phone in the body."""
     phone = _norm_phone(req.phone)
-    if not phone_consented(phone):
+    if not req.request_id:
+        raise HTTPException(status_code=400, detail="request_id from /auth/phone/start is required")
+    token = complete_sign_in(phone, req.request_id)
+    if not token:
         return {"verified": False}
-    return {"verified": True, "phone": phone, "token": _issue_token(phone)}
+    return {"verified": True, "phone": phone, "token": token}
 
 
 _code_slots: dict[str, float] = {}
+_start_times: list[float] = []
 
 
 def _take_code_slot(phone: str) -> None:
+    """Per phone: one start every 10 s. Global: at most START_LIMIT_PER_MIN starts a minute."""
     now = time.monotonic()
     with _rate_lock:
+        _start_times[:] = [t for t in _start_times if now - t < 60]
+        if len(_start_times) >= START_LIMIT_PER_MIN:
+            raise HTTPException(status_code=429, detail="too many sign-ins right now; try again in a minute")
         if now - _code_slots.get(phone, -1e9) < 10:
             raise HTTPException(status_code=429, detail="please wait a few seconds")
+        for k in [k for k, t in _code_slots.items() if now - t > 60]:
+            del _code_slots[k]
         _code_slots[phone] = now
+        _start_times.append(now)
 
 
 def allowed_phones() -> set[str]:

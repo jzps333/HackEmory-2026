@@ -235,22 +235,44 @@ def test_no_call_id_gives_up(monkeypatch):
 
 def test_phone_sign_in_then_call_uses_token_phone(fakes, monkeypatch):
     stranger = "+13125550123"                       # not on the allowlist
-    code = client.post("/auth/phone/start", json={"phone": stranger}).json()["code"]
-    assert client.post("/auth/phone/verify", json={"phone": stranger}).json() == {"verified": False}
+    start = client.post("/auth/phone/start", json={"phone": stranger}).json()
+    code, rid = start["code"], start["request_id"]
+    body = {"phone": stranger, "request_id": rid}
+    assert client.post("/auth/phone/verify", json=body).json() == {"verified": False}
     monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"HI SCANSAFE! MY SIGN-IN CODE IS {code}")])
-    v = client.post("/auth/phone/verify", json={"phone": stranger}).json()
+    v = client.post("/auth/phone/verify", json=body).json()
     assert v["verified"] is True and v["phone"] == stranger and v["token"]
+    # One token per sign-in: replaying the same request id gets nothing.
+    assert client.post("/auth/phone/verify", json=body).json() == {"verified": False}
     # The body asks to call someone else; the token's phone wins.
     r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
                     headers={"Authorization": f"Bearer {v['token']}"})
     assert r.status_code == 200
 
 
+def test_verify_needs_the_requesters_secret(monkeypatch):
+    phone = "+13125550123"
+    start = client.post("/auth/phone/start", json={"phone": phone}).json()
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"CODE IS {start['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": phone}).status_code == 400
+    assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": "guess"}).json() == {"verified": False}
+
+
 def test_code_from_a_different_phone_does_not_sign_in(monkeypatch):
     victim = "+13125550123"
-    code = client.post("/auth/phone/start", json={"phone": victim}).json()["code"]
-    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("9999", f"MY SIGN-IN CODE IS {code}")])
-    assert client.post("/auth/phone/verify", json={"phone": victim}).json() == {"verified": False}
+    start = client.post("/auth/phone/start", json={"phone": victim}).json()
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("9999", f"MY SIGN-IN CODE IS {start['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": victim, "request_id": start["request_id"]}).json() \
+        == {"verified": False}
+
+
+def test_second_start_does_not_cancel_the_first(monkeypatch):
+    phone = "+13125550123"
+    first = client.post("/auth/phone/start", json={"phone": phone}).json()
+    routes_call._code_slots.clear()
+    client.post("/auth/phone/start", json={"phone": phone})
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"CODE {first['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": first["request_id"]}).json()["verified"]
 
 
 def test_bad_token_falls_back_to_allowlist_only(fakes):
