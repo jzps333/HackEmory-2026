@@ -1,4 +1,4 @@
-"""Data endpoints (Person 3): scam map pins, search, and the Tiger Data dashboard.
+"""Data endpoints (Person 3): scam map pins, search, scan-log search, and the Tiger Data dashboard.
 
 Include in main.py with `app.include_router(router)`. Call `record_scan(result)` after every scan.
 Every endpoint returns a clear 503 if its service isn't configured, 502 if the service errors.
@@ -6,6 +6,7 @@ Every endpoint returns a clear 503 if its service isn't configured, 502 if the s
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
@@ -13,18 +14,18 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 from api import recent_scans
-from api.schema import ScanResult
-from data import tiger_store, typesense_store
+from api.schema import ScamType, ScanResult, Verdict
+from data import scan_search, tiger_store, typesense_store
 
 log = logging.getLogger("scansafe.data")
 router = APIRouter(tags=["data"])
 
 
-def _need_typesense() -> None:
+def _need_typesense(what: str = "Scam map") -> None:
     if not typesense_store.is_configured():
         raise HTTPException(503, detail={
             "error": "typesense_not_configured", "service": "typesense",
-            "message": "Scam map is unavailable: set TYPESENSE_HOST and TYPESENSE_API_KEY."})
+            "message": f"{what} is unavailable: set TYPESENSE_HOST and TYPESENSE_API_KEY."})
 
 
 def _need_tiger() -> None:
@@ -43,12 +44,18 @@ def _upstream(service: str, e: Exception) -> HTTPException:
 # ---------- helpers for /scan (never raise) ----------
 
 def record_scan(result: ScanResult) -> None:
-    """Log one scan to Tiger Data. Never raises: a DB hiccup must not break a scan."""
+    """Log one scan to Tiger Data, then index it in the Typesense `scans` collection (scan-log
+    search). Each step is best effort and independent. Never raises: a hiccup must not break a scan."""
     try:
         if tiger_store.is_configured():
             tiger_store.log_scan(result)
     except Exception as e:  # noqa: BLE001 - intentionally swallow everything
         log.warning("record_scan failed: %s", type(e).__name__)
+    try:
+        if typesense_store.is_configured():
+            scan_search.index_scan(result)
+    except Exception as e:  # noqa: BLE001
+        log.warning("index_scan failed: %s", type(e).__name__)
 
 
 def flagged_before(result: ScanResult, radius_km: float = 5) -> int:
@@ -91,6 +98,11 @@ def report(req: ReportRequest) -> dict:
         doc = typesense_store.add_pin(result)
     except httpx.HTTPError as e:
         raise _upstream("typesense", e)
+    if doc is not None:
+        try:   # the scan-log entry gets the same rounded point, so /scans/search can filter by place
+            scan_search.set_location(result)
+        except Exception as e:  # noqa: BLE001 - the pin is stored; this part is best effort
+            log.warning("scan set_location failed: %s", type(e).__name__)
     return {"stored": doc is not None, "code": "pinned" if doc is not None else "not_pinned", "pin": doc}
 
 
@@ -113,6 +125,27 @@ def search(q: str = Query(..., min_length=1, max_length=200), limit: int = Query
     except httpx.HTTPError as e:
         raise _upstream("typesense", e)
     return {"count": len(found), "results": found}
+
+
+@router.get("/scans/search")
+def scans_search(q: str = Query("", max_length=200),
+                 verdict: Optional[Verdict] = Query(None),
+                 scam_type: Optional[ScamType] = Query(None),
+                 lat: Optional[float] = Query(None, ge=-90, le=90),
+                 lng: Optional[float] = Query(None, ge=-180, le=180),
+                 radius_km: float = Query(5.0, gt=0, le=100),
+                 page: int = Query(1, ge=1, le=100),
+                 per_page: int = Query(20, ge=1, le=100)) -> dict:
+    """Typo-tolerant search over every logged scan (Typesense `scans`, mirrored from Tiger Data).
+    Empty q or "*" = browse, newest first. lat+lng only match scans that were reported."""
+    if (lat is None) != (lng is None):
+        raise HTTPException(422, detail={"error": "bad_location", "message": "Send both lat and lng, or neither."})
+    _need_typesense("Scan search")
+    try:
+        return scan_search.search(q=q, verdict=verdict, scam_type=scam_type, lat=lat, lng=lng,
+                                  radius_km=radius_km, page=page, per_page=per_page)
+    except httpx.HTTPError as e:
+        raise _upstream("typesense", e)
 
 
 # ---------- Tiger Data ----------
