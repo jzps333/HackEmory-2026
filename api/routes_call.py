@@ -22,11 +22,11 @@ import re
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from api import config  # noqa: F401  (loads .env and the LiveKit fallback file)
@@ -52,6 +52,235 @@ class CallRequest(BaseModel):
     phone: str
     lat: Optional[float] = None
     lng: Optional[float] = None
+
+
+CHERT_MESSAGES_API = os.getenv("CHERT_API_BASE", "https://app.trychert.com/api/v1").rstrip("/")
+CONSENT_TTL = timedelta(hours=24)          # Chert's trial can only reach phones that texted the line
+CONSENT_FILE = os.getenv("SCANSAFE_CONSENT_FILE", os.path.expanduser("~/.scansafe-call-consent.json"))
+_consent_lock = threading.Lock()
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"   # no 0/O/1/I
+
+
+def _load_consent() -> dict:
+    try:
+        with open(CONSENT_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"codes": {}, "verified": {}}
+
+
+def _save_consent(data: dict) -> None:
+    tmp = CONSENT_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CONSENT_FILE)
+
+
+MAX_PENDING = 2000
+START_LIMIT_PER_MIN = 300          # global ceiling, well above any one client
+START_LIMIT_PER_IP_MIN = 5
+REQUEST_TTL_S = 15 * 60            # a pending sign-in must be texted within 15 minutes
+MAX_PENDING_PER_PHONE = 3
+MAX_PENDING_PER_CLIENT = 10
+
+
+def _prune(data: dict, now: float) -> None:
+    data["requests"] = {k: v for k, v in data.get("requests", {}).items() if now - v["at"] < REQUEST_TTL_S}
+    data["tokens"] = {k: v for k, v in data.get("tokens", {}).items() if now - v["at"] < TOKEN_TTL_S}
+    data.pop("codes", None)
+    data.pop("verified", None)       # old format: verification no longer hands out tokens later
+
+
+def start_sign_in(phone: str, client: str = "") -> tuple[str, str]:
+    """New pending sign-in for `phone`: (code to text, secret request id for the requester).
+    Several can be pending per phone, so one person can't cancel another's sign-in."""
+    import hashlib, secrets
+    code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(6))
+    request_id = secrets.token_urlsafe(24)
+    now = time.time()
+    with _consent_lock:
+        data = _load_consent()
+        _prune(data, now)
+        reqs = data["requests"]
+        if sum(1 for r in reqs.values() if r.get("client") == client) >= MAX_PENDING_PER_CLIENT:
+            raise HTTPException(status_code=429, detail="too many sign-ins from this device; try again later")
+        # A client only ever replaces its OWN older codes for this phone.
+        mine = sorted((k for k, r in reqs.items() if r["phone"] == phone and r.get("client") == client),
+                      key=lambda k: reqs[k]["at"])
+        for k in mine[: max(0, len(mine) - MAX_PENDING_PER_PHONE + 1)]:
+            del reqs[k]
+        # Full: drop the oldest code of whoever holds the most, so a flooder only displaces itself.
+        while len(reqs) >= MAX_PENDING:
+            counts: dict[str, int] = {}
+            for r in reqs.values():
+                counts[r.get("client", "")] = counts.get(r.get("client", ""), 0) + 1
+            top = max(counts, key=counts.get)
+            victim = min((k for k, r in reqs.items() if r.get("client", "") == top), key=lambda k: reqs[k]["at"])
+            del reqs[victim]
+        reqs[hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now,
+                                                                 "client": client}
+        _save_consent(data)
+    return code, request_id
+
+
+def _inbound_texts() -> list[tuple[str, str]]:
+    """(last 4 digits of sender, text) for texts to the line in the last 24 h. Never raises."""
+    out: list[tuple[str, str]] = []
+    try:
+        r = httpx.get(f"{CHERT_MESSAGES_API}/shared-messages", params={"limit": 100},
+                      headers=_chert_headers(), timeout=8)
+        r.raise_for_status()
+        cutoff = datetime.now(timezone.utc) - CONSENT_TTL
+        for m in (r.json().get("data") or {}).get("items") or []:
+            if m.get("direction") != "inbound":
+                continue
+            try:
+                when = datetime.fromisoformat(str(m.get("created_at")))
+            except ValueError:
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            # Chert only exposes the other party masked ("•••9861"); for inbound texts that's the sender.
+            digits = re.sub(r"\D", "", str(m.get("masked_recipient") or ""))
+            if when >= cutoff and len(digits) >= 4:
+                out.append((digits[-4:], str(m.get("text") or "").upper()))
+    except Exception as e:  # noqa: BLE001
+        log.warning("couldn't read recent texts from Chert: %s", type(e).__name__)
+    return out
+
+
+def complete_sign_in(phone: str, request_id: str) -> Optional[str]:
+    """If this request's code was texted to the line from a number ending in the same 4 digits,
+    issue one token (to the holder of request_id) and close the request. Otherwise None."""
+    import hashlib
+    key = hashlib.sha256(request_id.encode()).hexdigest()
+    with _consent_lock:
+        data = _load_consent()
+        _prune(data, time.time())
+        req = data["requests"].get(key)
+    if not req or req["phone"] != phone:
+        return None
+    if not any(last4 == phone[-4:] and req["code"] in text for last4, text in _inbound_texts()):
+        return None
+    with _consent_lock:
+        data = _load_consent()
+        if data.get("requests", {}).pop(key, None) is None:
+            return None                      # already completed: one token per request
+        _save_consent(data)
+    log.info("phone sign-in completed for a phone ending %s", phone[-4:])
+    return _issue_token(phone)
+
+
+class PhoneRequest(BaseModel):
+    phone: str
+    request_id: str = ""
+
+
+TOKEN_TTL_S = 30 * 24 * 3600
+
+
+def _norm_phone(raw: str) -> str:
+    phone = raw.strip().replace(" ", "")
+    if not PHONE_RE.match(phone):
+        raise HTTPException(status_code=400, detail="phone must be in international format, e.g. +14045550123")
+    return phone
+
+
+def _issue_token(phone: str) -> str:
+    import hashlib, secrets
+    token = secrets.token_urlsafe(32)
+    with _consent_lock:
+        data = _load_consent()
+        data.setdefault("tokens", {})[hashlib.sha256(token.encode()).hexdigest()] = {"phone": phone, "at": time.time()}
+        _save_consent(data)
+    return token
+
+
+def phone_for_token(token: str) -> Optional[str]:
+    import hashlib
+    if not token:
+        return None
+    with _consent_lock:
+        t = _load_consent().get("tokens", {}).get(hashlib.sha256(token.encode()).hexdigest())
+    if t and time.time() - t["at"] < TOKEN_TTL_S:
+        return t["phone"]
+    return None
+
+
+@router.post("/auth/phone/start")
+def phone_start(req: PhoneRequest, request: Request) -> dict:
+    """Sign in with your phone, step 1: get a code to text to the ScanSafe line from this phone.
+    (Reverse OTP: the user texts us, so no SMS provider is needed, and it also lets Chert reach them.)"""
+    phone = _norm_phone(req.phone)
+    _take_code_slot(phone, _client_ip(request))   # same client value used below
+    client = _client_ip(request)
+    code, request_id = start_sign_in(phone, client)
+    return {"code": code, "request_id": request_id, "line": "+16504444331",
+            "sms_body": f"Hi ScanSafe! My sign-in code is {code}"}
+
+
+@router.post("/auth/phone/verify")
+def phone_verify(req: PhoneRequest) -> dict:
+    """Step 2 (the app polls this every few seconds): once the code text has arrived from this
+    phone, returns a sign-in token. The token is what /call-me trusts, never a phone in the body."""
+    phone = _norm_phone(req.phone)
+    if not req.request_id:
+        raise HTTPException(status_code=400, detail="request_id from /auth/phone/start is required")
+    token = complete_sign_in(phone, req.request_id)
+    if not token:
+        return {"verified": False}
+    return {"verified": True, "phone": phone, "token": token}
+
+
+_code_slots: dict[str, float] = {}
+_start_times: list[float] = []
+_ip_starts: dict[str, list[float]] = {}
+
+
+def _take_code_slot(phone: str, client: str = "") -> None:
+    """Per client (IP): START_LIMIT_PER_IP_MIN starts a minute. Per phone: one every 10 s.
+    Global ceiling only as a backstop, set far above what one client can reach."""
+    now = time.monotonic()
+    with _rate_lock:
+        recent = [t for t in _ip_starts.get(client, []) if now - t < 60]
+        if len(recent) >= START_LIMIT_PER_IP_MIN:
+            raise HTTPException(status_code=429, detail="too many sign-ins from this device; try again in a minute")
+        if now - _code_slots.get(phone, -1e9) < 10:
+            raise HTTPException(status_code=429, detail="please wait a few seconds")
+        _start_times[:] = [t for t in _start_times if now - t < 60]
+        if len(_start_times) >= START_LIMIT_PER_MIN:
+            raise HTTPException(status_code=429, detail="too many sign-ins right now; try again in a minute")
+        for k in [k for k, t in _code_slots.items() if now - t > 60]:
+            del _code_slots[k]
+        for k in [k for k, ts in _ip_starts.items() if not ts or now - ts[-1] > 60]:
+            del _ip_starts[k]
+        recent.append(now)
+        _ip_starts[client] = recent
+        _code_slots[phone] = now
+        _start_times.append(now)
+
+
+TRUSTED_PROXIES = {"127.0.0.1", "::1"}    # Caddy runs on this machine
+
+
+def _client_ip(request: Request) -> str:
+    """The caller's IP. X-Forwarded-For is only believed when the request came from our own
+    Caddy on localhost (its last entry is the address Caddy saw). IPv6 is grouped by /48."""
+    import ipaddress
+    peer = request.client.host if request.client else ""
+    ip = peer
+    if peer in TRUSTED_PROXIES:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            ip = xff.split(",")[-1].strip()
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.version == 6:
+            return str(ipaddress.ip_network(f"{addr}/48", strict=False))
+        return str(addr)
+    except ValueError:
+        return ip or "?"
 
 
 def allowed_phones() -> set[str]:
@@ -83,14 +312,15 @@ def _take_rate_slot() -> None:
         _last_call_at = now
 
 
-def validate(req: CallRequest) -> tuple[str, str]:
+def validate(req: CallRequest, signed_in: bool = False) -> tuple[str, str]:
     url, phone = req.url.strip(), req.phone.strip().replace(" ", "")
     if not url or len(url) > 2000 or not re.match(r"^https?://", url, re.I):
         raise HTTPException(status_code=400, detail="only web links (http/https) can be walked through on a call")
     if not PHONE_RE.match(phone):
         raise HTTPException(status_code=400, detail="phone must be in international format, e.g. +14045550123")
-    if phone not in allowed_phones():
-        raise HTTPException(status_code=403, detail="this number isn't set up for ScanSafe calls")
+    if not signed_in and phone not in allowed_phones():
+        raise HTTPException(status_code=403, detail="sign in with your phone first: text your code to "
+                                                    "+1 650-444-4331 from this phone")
     missing = [k for k in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "CHERT_API_KEY",
                            "CHERT_PROJECT_ID", "CHERT_LINE_ID") if not os.getenv(k)]
     if missing:
@@ -183,9 +413,15 @@ async def _cleanup(lkapi, room: str) -> None:
 
 
 @router.post("/call-me")
-async def call_me(req: CallRequest) -> dict:
-    """Ring the person on FaceTime; our agent opens `url` in the sandbox and shows it live."""
-    url, phone = validate(req)
+async def call_me(req: CallRequest, authorization: str = Header(default="")) -> dict:
+    """Ring the person on FaceTime; our agent opens `url` in the sandbox and shows it live.
+    Who gets called comes from the phone sign-in token (Authorization: Bearer <token>), not from
+    the request body. Without a token only the server's own allowlist (the demo phone) works."""
+    token = authorization.removeprefix("Bearer ").strip()
+    signed_in = await asyncio.to_thread(phone_for_token, token) if token else None
+    if signed_in:
+        req = req.model_copy(update={"phone": signed_in})
+    url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
     _take_rate_slot()
     return await place_call(url, phone)
 

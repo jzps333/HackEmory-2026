@@ -13,6 +13,16 @@ lk = pytest.importorskip("livekit.api")   # the backend uses livekit-api (instal
 from api import main as api_main  # noqa: E402
 from api import routes_call  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _no_chert_texts(monkeypatch, tmp_path):
+    """No texts have arrived (never hit Chert from tests); consent/tokens go to a temp file."""
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [])
+    monkeypatch.setattr(routes_call, "CONSENT_FILE", str(tmp_path / "consent.json"))
+    routes_call._code_slots.clear()
+    routes_call._ip_starts.clear()
+    routes_call._start_times.clear()
+
 PHONE = "+14045550123"
 _real_sleep = asyncio.sleep
 ENV = {"SCANSAFE_DEMO_PHONE": PHONE, "CALL_ALLOWED_PHONES": "+14045550999",
@@ -222,3 +232,90 @@ def test_gives_up_when_call_ends(monkeypatch, done):
 def test_no_call_id_gives_up(monkeypatch):
     room = types.SimpleNamespace(metadata="")
     assert asyncio.run(ai.wait_for_outbound_answer(room, timeout=0.3)) is False
+
+
+
+def test_phone_sign_in_then_call_uses_token_phone(fakes, monkeypatch):
+    stranger = "+13125550123"                       # not on the allowlist
+    start = client.post("/auth/phone/start", json={"phone": stranger}).json()
+    code, rid = start["code"], start["request_id"]
+    body = {"phone": stranger, "request_id": rid}
+    assert client.post("/auth/phone/verify", json=body).json() == {"verified": False}
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"HI SCANSAFE! MY SIGN-IN CODE IS {code}")])
+    v = client.post("/auth/phone/verify", json=body).json()
+    assert v["verified"] is True and v["phone"] == stranger and v["token"]
+    # One token per sign-in: replaying the same request id gets nothing.
+    assert client.post("/auth/phone/verify", json=body).json() == {"verified": False}
+    # The body asks to call someone else; the token's phone wins.
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
+                    headers={"Authorization": f"Bearer {v['token']}"})
+    assert r.status_code == 200
+
+
+def test_verify_needs_the_requesters_secret(monkeypatch):
+    phone = "+13125550123"
+    start = client.post("/auth/phone/start", json={"phone": phone}).json()
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"CODE IS {start['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": phone}).status_code == 400
+    assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": "guess"}).json() == {"verified": False}
+
+
+def test_code_from_a_different_phone_does_not_sign_in(monkeypatch):
+    victim = "+13125550123"
+    start = client.post("/auth/phone/start", json={"phone": victim}).json()
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("9999", f"MY SIGN-IN CODE IS {start['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": victim, "request_id": start["request_id"]}).json() \
+        == {"verified": False}
+
+
+def test_second_start_does_not_cancel_the_first(monkeypatch):
+    phone = "+13125550123"
+    first = client.post("/auth/phone/start", json={"phone": phone}).json()
+    routes_call._code_slots.clear()      # skip the 10 s per-phone wait
+    client.post("/auth/phone/start", json={"phone": phone})
+    monkeypatch.setattr(routes_call, "_inbound_texts", lambda: [("0123", f"CODE {first['code']}")])
+    assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": first["request_id"]}).json()["verified"]
+
+
+def test_bad_token_falls_back_to_allowlist_only(fakes):
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
+                    headers={"Authorization": "Bearer not-a-real-token"})
+    assert r.status_code == 403
+
+
+
+def test_one_device_cannot_lock_out_everyone(monkeypatch):
+    who = {"ip": "6.6.6.6"}
+    monkeypatch.setattr(routes_call, "_client_ip", lambda request: who["ip"])
+    for i in range(5):
+        assert client.post("/auth/phone/start", json={"phone": f"+1312555010{i}"}).status_code == 200
+    assert client.post("/auth/phone/start", json={"phone": "+13125550109"}).status_code == 429
+    who["ip"] = "7.7.7.7"                     # a different person is unaffected
+    assert client.post("/auth/phone/start", json={"phone": "+13125550110"}).status_code == 200
+
+
+def test_spoofed_forwarded_for_is_ignored_from_outside():
+    from starlette.requests import Request as R
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", b"1.2.3.4")], "client": ("203.0.113.9", 5555)}
+    assert routes_call._client_ip(R(scope)) == "203.0.113.9"
+    scope["client"] = ("127.0.0.1", 5555)    # came through our Caddy
+    assert routes_call._client_ip(R(scope)) == "1.2.3.4"
+
+
+def test_new_code_only_evicts_the_same_clients_own_codes():
+    routes_call.start_sign_in("+13125550123", "victim-device")
+    for _ in range(5):
+        routes_call.start_sign_in("+13125550123", "attacker")
+    reqs = routes_call._load_consent()["requests"].values()
+    assert any(r["client"] == "victim-device" for r in reqs)       # still pending
+    assert sum(1 for r in reqs if r["client"] == "attacker") == 3
+
+
+def test_full_store_evicts_from_the_biggest_holder(monkeypatch):
+    monkeypatch.setattr(routes_call, "MAX_PENDING", 6)
+    monkeypatch.setattr(routes_call, "MAX_PENDING_PER_CLIENT", 100)
+    routes_call.start_sign_in("+14045550000", "normal-user")
+    for i in range(8):
+        routes_call.start_sign_in(f"+1312555{i:04d}", "flooder")
+    reqs = list(routes_call._load_consent()["requests"].values())
+    assert len(reqs) <= 6 and any(r["client"] == "normal-user" for r in reqs)
