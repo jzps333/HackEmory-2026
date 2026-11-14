@@ -36,6 +36,25 @@ export async function scanUrl(url: string, location: [number, number] | null): P
   return request<ScanResult>("/scan", { method: "POST", body: JSON.stringify(body) }, 90000);
 }
 
+export interface CallMeResponse {
+  call_id?: string;
+  status?: string;
+}
+
+/** Ask ScanSafe to FaceTime this phone and show the page for `url` live (Chert outbound call). */
+export async function callMe(url: string, phone: string, location: [number, number] | null): Promise<CallMeResponse> {
+  if (DEMO_MODE) {
+    await wait(1200);
+    return { status: "demo" };
+  }
+  const body: { url: string; phone: string; lat?: number; lng?: number } = { url, phone };
+  if (location) {
+    body.lat = location[0];
+    body.lng = location[1];
+  }
+  return request<CallMeResponse>("/call-me", { method: "POST", body: JSON.stringify(body) }, 45000);
+}
+
 interface BackendSummary {
   by_verdict?: Record<string, { total: number; last_24h: number } | undefined>;
   top_scam_types_24h?: { scam_type: string; total: number }[];

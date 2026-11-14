@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
+import FaceTimeCard from "@/components/FaceTimeCard";
 import VerdictIcon from "./VerdictIcon";
 import { DEMO_MODE, pay, report, screenshotSrc } from "@/lib/api";
 import { VERDICT_TEXT, isWebLink, percent, scamLabel } from "@/lib/labels";
@@ -48,9 +49,11 @@ function ScreenshotImg({ src, index }: { src: string; index: number }) {
 interface Props {
   result: ScanResult;
   onDone: () => void;
+  /** Set when the user agreed to calls in onboarding: shows "FaceTime me and show me". */
+  facetime?: { phone: string; location: [number, number] | null } | null;
 }
 
-export default function ResultView({ result: r, onDone }: Props) {
+export default function ResultView({ result: r, onDone, facetime }: Props) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [speaking, setSpeaking] = useState(false);
   const [canSpeak, setCanSpeak] = useState(false);
@@ -138,6 +141,10 @@ export default function ResultView({ result: r, onDone }: Props) {
       {DEMO_MODE && <p className="hint" style={{ marginTop: "0.75rem" }}><span className="demo-badge">Demo</span> This is sample data, not a real check.</p>}
 
       <p className="explanation">{r.explanation}</p>
+
+      {facetime && !r.payment && (
+        <FaceTimeCard url={r.url} phone={facetime.phone} location={facetime.location} />
+      )}
 
       {canSpeak && (
         <button type="button" className="btn" onClick={readAloud} aria-pressed={speaking}>

@@ -204,3 +204,11 @@ th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid #ccc
 @media (prefers-contrast: more) {
   :root { --muted: #111; --border: #000; }
 }
+
+/* Onboarding takes the whole screen: hide the app header and page padding behind it. */
+body:has(.onb) .site-header { display: none; }
+body:has(.onb) main { max-width: none; padding: 0; }
+
+.link-button { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.facetime-card { margin-top: 1.25rem; }
+.facetime-card h2 { margin-top: 0; }
