@@ -38,7 +38,8 @@ except ImportError:
                  "room_io"):
         setattr(_agents, name, _Any)
     _agents.function_tool = lambda f: f
-    _agents.AgentServer = type("AgentServer", (), {"rtc_session": lambda self, **k: (lambda f: f)})
+    _agents.AgentServer = type("AgentServer", (), {"__init__": lambda self, *a, **k: None,
+                                                  "rtc_session": lambda self, **k: (lambda f: f)})
     _lk.rtc, _lk.agents = _rtc, _agents
     sys.modules.update({"livekit": _lk, "livekit.rtc": _rtc, "livekit.agents": _agents})
 

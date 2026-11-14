@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
 
-from api import config
+from api import config, recent_scans
 from api.routes_data import flagged_before, record_scan
 from api.routes_data import router as data_router
 from api.routes_call import router as call_router
@@ -50,6 +50,7 @@ def _location(req: ScanRequest) -> list[float] | None:
 
 def _finish(result: ScanResult, background_tasks: BackgroundTasks) -> ScanResult:
     result.flagged_before = flagged_before(result)   # "reported N times near you"; never raises
+    recent_scans.remember(result)                    # so /report can trust only our own results
     background_tasks.add_task(record_scan, result)   # log to Tiger Data off the request path
     return result
 
