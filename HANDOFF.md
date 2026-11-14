@@ -88,31 +88,23 @@ CHERT_WEBHOOK_SECRET (empty); optional CALL_ALLOWED_PHONES) and `~/HackEmory-202
 (LiveKit URL/key/secret, AGENT_NAME). Check a var is set without printing it: `grep -c '^NAME=.' .env`.
 Non-secret settings in use: `GEMINI_MODEL=gemini-3.5-flash-lite`.
 
-**Agent server tmux sessions** (logs in `/root/api.log`, `/root/agent.log`, `/root/chert.log`):
-```bash
-# backend
-tmux kill-session -t api; tmux new -d -s api "cd ~/HackEmory-2026 && uvicorn api.main:app --host 0.0.0.0 --port 8000 2>&1 | tee /root/api.log"
-# FaceTime agent (restart this, THEN the bridge, so chert dev makes a fresh warm room)
-tmux kill-session -t agent; tmux new -d -s agent "cd ~/HackEmory-2026 && python3 -m chert.agent_integration start 2>&1 | tee /root/agent.log"
-# Chert bridge, in a retry loop (survives Chert outages)
-tmux send-keys -t chert C-c; sleep 8; tmux kill-session -t chert
-tmux new -d -s chert "cd ~/HackEmory-2026/chert/scansafe-agent && while true; do chert dev --agent scansafe-agent 2>&1 | tee -a /root/chert.log; echo \"[\$(date +%T)] chert dev exited; retrying in 20s\" | tee -a /root/chert.log; sleep 20; done"
-```
-Healthy signs: `registered worker` in agent.log; `"scansafe-agent" is in a waiting room` in chert.log.
+**Agent server services (systemd)**: `scansafe-api` (uvicorn on `127.0.0.1:8000`), `scansafe-agent` (FaceTime agent)
+and `scansafe-chert` (Chert bridge). They restart on crash and start on boot; logs are in journald
+(`journalctl -u scansafe-agent -f`). Unit files, deploy, logs and rollback: `deploy/README.md`. Health: `./deploy/check.sh`.
+Healthy signs: `registered worker` in `journalctl -u scansafe-agent`; `"scansafe-agent" is in a waiting room` in
+`journalctl -u scansafe-chert`. Don't start these by hand in tmux as well (one worker per box, one bridge per line).
 Caddy config: `/etc/caddy/Caddyfile` (`api.scansafe.nyc` → `127.0.0.1:8000`, `flush_interval -1` for streaming).
 
-**How deploys have worked so far:** changed files are `scp`'d from the user's Mac into `~/HackEmory-2026/` on the server,
-then the tmux session is restarted. The server checkout is therefore NOT in sync with git (it's `main` plus files from
-`live-stream-and-calls`). Once branches are merged, on the server run `git status`, discard the copied files
-(`git checkout -- <paths>`; never touch `.env` or `chert/scansafe-agent/`), then `git pull`, and restart.
+**Deploying:** the server checkout is a clean `main` (never `scp` files onto it). Push to `main`, then
+`ssh root@144.202.25.65 'cd ~/HackEmory-2026 && git pull && systemctl restart scansafe-api scansafe-agent'`.
+When to restart `scansafe-chert` too: `deploy/README.md`.
 
-**Sandbox server:** `~/HackEmory-2026/sandbox/` runs `server.py` (uvicorn :8080) in tmux `sandbox`; scans run in
-throwaway containers on Docker network `scansafe-net` with iptables egress blocks. Rebuild after changing
-`run_scan.py`/`netguard.py`, then restart the server with its original command (which holds the token):
+**Sandbox server:** `~/HackEmory-2026/sandbox/` runs `server.py` (uvicorn :8080) as systemd unit `scansafe-sandbox`
+(token in `/etc/scansafe/sandbox.env`, chmod 600); scans run in throwaway containers on Docker network `scansafe-net`
+with iptables egress blocks (restored at boot by `netfilter-persistent`). Rebuild after changing `run_scan.py`/`netguard.py`:
 ```bash
-cd ~/HackEmory-2026/sandbox && docker build -q -t scansafe-sandbox . && tmux respawn-pane -k -t sandbox
+cd ~/HackEmory-2026/sandbox && docker build -q -t scansafe-sandbox . && systemctl restart scansafe-sandbox
 ```
-Don't print the pane's start command (it contains the token).
 
 ---
 
@@ -172,7 +164,7 @@ screen shows the live stream (falls back to `/scan`); results with verdict, expl
 |---|---|---|---|
 | 1 | Typesense: create a free cluster (cloud.typesense.org), put host + admin key in the agent server `.env`, run `python3 -m data.setup`, restart `api` | user creates cluster; Claude runs setup | `GET /pins?lat=33.79&lng=-84.32` returns 200; reporting a malicious demo scan pins it on the map |
 | 2 | Coder: Templates → Docker Containers, start a workspace, invite teammates, screenshot | user | Screenshot of a running workspace saved for Devpost |
-| 3 | Done: branches merged into `main`. Still to do: make the server checkouts `git pull` main instead of scp'd files | Claude | server `git status` clean on `main` |
+| 3 | Done: branches merged into `main`; the agent server runs a clean `main` checkout under systemd (`deploy/README.md`) | Claude | server `git status` clean on `main` |
 | 4 | Outbound call answer issue (section 6) | user tests, Claude debugs | A `/call-me` call is answered and the live walkthrough plays |
 | 5 | Finish/deploy the in-progress items (section 6): app report messages, click-past (rebuild sandbox image), demo sites + QR sheet | Claude | Deployed; demo QR codes give the intended verdicts |
 | 6 | Devnet wallet: replace the placeholder Dogwood wallet in `api/scan.py` `KNOWN_MERCHANTS`, regenerate QR codes (`scripts/README.md`, `scripts/make_demo_qr.py`) | user makes wallet, Claude edits | Solana Pay demo code verifies and a devnet payment goes through with approval |

@@ -1,0 +1,25 @@
+# ScanSafe backend (FastAPI). Agent server 144.202.25.65.
+# Caddy proxies https://api.scansafe.nyc -> 127.0.0.1:8000, and the FaceTime agent calls
+# http://localhost:8000, so the port is bound to loopback only (ufw blocks 8000 anyway).
+# The app loads ~/HackEmory-2026/.env itself (api/config.py), so no EnvironmentFile here.
+[Unit]
+Description=ScanSafe API (uvicorn api.main:app on 127.0.0.1:8000, behind Caddy)
+Wants=network-online.target
+After=network-online.target
+# Never give up restarting (the default stops after 5 failures in 10 s).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/HackEmory-2026
+Environment=HOME=/root PYTHONUNBUFFERED=1
+# --timeout-graceful-shutdown: a restart waits at most 10 s for open /scan/stream responses.
+ExecStart=/usr/local/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 10
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+SyslogIdentifier=scansafe-api
+
+[Install]
+WantedBy=multi-user.target
