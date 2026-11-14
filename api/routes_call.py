@@ -105,11 +105,19 @@ def start_sign_in(phone: str, client: str = "") -> tuple[str, str]:
         reqs = data["requests"]
         if sum(1 for r in reqs.values() if r.get("client") == client) >= MAX_PENDING_PER_CLIENT:
             raise HTTPException(status_code=429, detail="too many sign-ins from this device; try again later")
-        mine = sorted((k for k, r in reqs.items() if r["phone"] == phone), key=lambda k: reqs[k]["at"])
+        # A client only ever replaces its OWN older codes for this phone.
+        mine = sorted((k for k, r in reqs.items() if r["phone"] == phone and r.get("client") == client),
+                      key=lambda k: reqs[k]["at"])
         for k in mine[: max(0, len(mine) - MAX_PENDING_PER_PHONE + 1)]:
-            del reqs[k]                      # only ever drop this phone's own oldest codes
-        if len(reqs) >= MAX_PENDING:
-            raise HTTPException(status_code=503, detail="too many sign-ins in progress; try again soon")
+            del reqs[k]
+        # Full: drop the oldest code of whoever holds the most, so a flooder only displaces itself.
+        while len(reqs) >= MAX_PENDING:
+            counts: dict[str, int] = {}
+            for r in reqs.values():
+                counts[r.get("client", "")] = counts.get(r.get("client", ""), 0) + 1
+            top = max(counts, key=counts.get)
+            victim = min((k for k, r in reqs.items() if r.get("client", "") == top), key=lambda k: reqs[k]["at"])
+            del reqs[victim]
         reqs[hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now,
                                                                  "client": client}
         _save_consent(data)
@@ -258,7 +266,7 @@ TRUSTED_PROXIES = {"127.0.0.1", "::1"}    # Caddy runs on this machine
 
 def _client_ip(request: Request) -> str:
     """The caller's IP. X-Forwarded-For is only believed when the request came from our own
-    Caddy on localhost (its last entry is the address Caddy saw). IPv6 is grouped by /64."""
+    Caddy on localhost (its last entry is the address Caddy saw). IPv6 is grouped by /48."""
     import ipaddress
     peer = request.client.host if request.client else ""
     ip = peer
@@ -269,7 +277,7 @@ def _client_ip(request: Request) -> str:
     try:
         addr = ipaddress.ip_address(ip)
         if addr.version == 6:
-            return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+            return str(ipaddress.ip_network(f"{addr}/48", strict=False))
         return str(addr)
     except ValueError:
         return ip or "?"

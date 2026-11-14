@@ -302,12 +302,20 @@ def test_spoofed_forwarded_for_is_ignored_from_outside():
     assert routes_call._client_ip(R(scope)) == "1.2.3.4"
 
 
-def test_new_code_only_evicts_the_same_phones_oldest():
-    routes_call.start_sign_in("+13125550123", "a")
-    other = routes_call.start_sign_in("+14045550000", "b")
-    for _ in range(4):
-        routes_call.start_sign_in("+13125550123", "a")
-    data = routes_call._load_consent()
-    assert sum(1 for r in data["requests"].values() if r["phone"] == "+13125550123") == 3
-    assert any(r["phone"] == "+14045550000" for r in data["requests"].values())
-    assert other
+def test_new_code_only_evicts_the_same_clients_own_codes():
+    routes_call.start_sign_in("+13125550123", "victim-device")
+    for _ in range(5):
+        routes_call.start_sign_in("+13125550123", "attacker")
+    reqs = routes_call._load_consent()["requests"].values()
+    assert any(r["client"] == "victim-device" for r in reqs)       # still pending
+    assert sum(1 for r in reqs if r["client"] == "attacker") == 3
+
+
+def test_full_store_evicts_from_the_biggest_holder(monkeypatch):
+    monkeypatch.setattr(routes_call, "MAX_PENDING", 6)
+    monkeypatch.setattr(routes_call, "MAX_PENDING_PER_CLIENT", 100)
+    routes_call.start_sign_in("+14045550000", "normal-user")
+    for i in range(8):
+        routes_call.start_sign_in(f"+1312555{i:04d}", "flooder")
+    reqs = list(routes_call._load_consent()["requests"].values())
+    assert len(reqs) <= 6 and any(r["client"] == "normal-user" for r in reqs)
