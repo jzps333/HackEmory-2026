@@ -27,3 +27,7 @@ screenshots/
 .DS_Store
 .vscode/
 .idea/
+
+# Solana keypairs (they live only on the API server in /root/solana/)
+devnet-payer.json
+merchant-*.json

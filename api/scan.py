@@ -14,14 +14,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 from api import config, jev
+from api.merchants import KNOWN_MERCHANTS
 from api.schema import JevChecks, Payment, ScanResult
 
 SHARED = Path(__file__).resolve().parent.parent / "shared"
-
-# Demo merchants and their real (devnet) wallets. Person 4: put your demo wallet addresses here.
-KNOWN_MERCHANTS: dict[str, str] = {
-    "Peachtree Parking Co.": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
-}
 
 
 # ---------- verdict rule ----------

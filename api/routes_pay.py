@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from api.scan import KNOWN_MERCHANTS
+from api.merchants import KNOWN_MERCHANTS
 from api.schema import Payment
 from api.solana_pay import PaymentError, send_payment
 
