@@ -10,6 +10,9 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from pydantic import BaseModel, ConfigDict
+
+from api import recent_scans
 from api.schema import ScanResult
 from data import tiger_store, typesense_store
 
@@ -62,19 +65,33 @@ def flagged_before(result: ScanResult, radius_km: float = 5) -> int:
 
 # ---------- Typesense ----------
 
+class ReportRequest(BaseModel):
+    """Only the scan_id is used. The app may still send the whole ScanResult; everything else
+    in the body is ignored, because the pin is built from the server's own copy of the check."""
+    model_config = ConfigDict(extra="ignore")
+    scan_id: str
+
+
 @router.post("/report")
-def report(result: ScanResult) -> dict:
-    """User tapped "Report scam". Pins malicious scans that have a location; never stores who."""
+def report(req: ReportRequest) -> dict:
+    """User tapped "Report scam". Pins malicious scans that have a location; never stores who.
+    The scan must be one this server ran recently (see api/recent_scans.py)."""
+    result = recent_scans.get(req.scan_id)
+    if result is None:
+        return {"stored": False, "code": "unknown_scan",
+                "reason": "We couldn't find that check. Please scan the code again."}
     _need_typesense()
     if result.verdict != "malicious":
-        return {"stored": False, "reason": "Only scans with a malicious verdict are pinned."}
+        return {"stored": False, "code": "not_malicious",
+                "reason": "Only scans we confirmed as scams are pinned on the map."}
     if not result.location:
-        return {"stored": False, "reason": "No location shared, so there is nothing to pin."}
+        return {"stored": False, "code": "no_location",
+                "reason": "No location was shared, so there is nothing to pin."}
     try:
         doc = typesense_store.add_pin(result)
     except httpx.HTTPError as e:
         raise _upstream("typesense", e)
-    return {"stored": doc is not None, "pin": doc}
+    return {"stored": doc is not None, "code": "pinned" if doc is not None else "not_pinned", "pin": doc}
 
 
 @router.get("/pins")

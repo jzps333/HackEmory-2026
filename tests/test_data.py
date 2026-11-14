@@ -169,14 +169,30 @@ def test_routes_503_when_not_configured(client, monkeypatch):
     assert client.get("/stats/hourly").status_code == 503
     r = client.get("/stats/summary")
     assert r.status_code == 503 and r.json()["detail"]["service"] == "tiger_data"
+    from api import recent_scans
+    recent_scans.remember(malicious())
     assert client.post("/report", json=malicious().model_dump()).status_code == 503
 
 
 def test_report_route(client, ts_mock):
-    r = client.post("/report", json=malicious().model_dump())
+    from api import recent_scans
+    recent_scans.clear()
+    real = malicious()
+    recent_scans.remember(real)
+    r = client.post("/report", json=real.model_dump())
     assert r.status_code == 200 and r.json()["stored"] is True
-    r = client.post("/report", json=malicious(verdict="safe").model_dump())
-    assert r.json()["stored"] is False
+    # A scan this server never ran can't be pinned, whatever the body claims.
+    fake = malicious(scan_id="made-up-id")
+    r = client.post("/report", json=fake.model_dump())
+    assert r.json()["stored"] is False and r.json()["code"] == "unknown_scan"
+    # The server's copy wins: the client can't turn a safe check into a scam pin.
+    safe = malicious(scan_id="safe-1", verdict="safe")
+    recent_scans.remember(safe)
+    r = client.post("/report", json={**safe.model_dump(), "verdict": "malicious"})
+    assert r.json()["stored"] is False and r.json()["code"] == "not_malicious"
+    # Only scan_id is needed.
+    r = client.post("/report", json={"scan_id": real.scan_id})
+    assert r.json()["stored"] is True
 
 
 def test_typesense_error_is_502(client, ts_env, monkeypatch):

@@ -1,8 +1,13 @@
 import os
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv()
+# LiveKit keys live in the Chert starter folder (written by `lk app env`); /call-me needs them.
+load_dotenv(Path(__file__).resolve().parent.parent / "chert" / "scansafe-agent" / ".env.local",
+            override=False)
 
 JEV_API_KEY = os.getenv("JEV_API_KEY", "")
 JEV_BASE_URL = os.getenv("JEV_BASE_URL", "")  # empty = OpenRouter Decisions API

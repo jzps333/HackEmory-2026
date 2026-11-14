@@ -14,16 +14,24 @@ No page text is ever read aloud or handed to the voice model as an instruction.
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import json
+import logging
 import os
 import re
 import threading
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
+log = logging.getLogger("scansafe.tools")
+
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 SCAN_TIMEOUT_S = 60.0
+STREAM_TIMEOUT_S = 75.0     # whole live-stream scan, start to result
+STREAM_CONNECT_S = 5.0      # a missing/down stream endpoint should fail fast and fall back
 
 # Words an elderly caller shouldn't have to decode. speech_for() never produces them.
 JARGON = ("phishing", "redirect", "url", "domain", "malware", "sandbox", "jev", "probability",
@@ -81,6 +89,91 @@ def scan_url(url: str, lat: Optional[float] = None, lng: Optional[float] = None,
     if not isinstance(data, dict) or data.get("verdict") not in ("safe", "suspicious", "malicious"):
         return fallback_result(url, "unexpected response shape")
     return data
+
+
+def scan_url_stream(url: str, on_frame: Callable[[bytes], Any],
+                    on_nav: Optional[Callable[[str], Any]] = None,
+                    should_stop: Optional[Callable[[], bool]] = None,
+                    lat: Optional[float] = None, lng: Optional[float] = None,
+                    *, client: Optional[httpx.Client] = None,
+                    timeout: float = STREAM_TIMEOUT_S) -> Optional[dict]:
+    """POST {SCANSAFE_API_URL}/scan/stream and watch the sandbox browser while it works.
+
+    Blocking (run it with asyncio.to_thread). The endpoint answers NDJSON, one object per line:
+      {"type": "frame", "jpeg": "<base64>", "t_ms": 1234}  -> on_frame(jpeg_bytes)
+      {"type": "nav", "url": "https://..."}                -> on_nav(url)
+      {"type": "result", "data": {...}}                    -> returned (same dict as POST /scan)
+
+    Returns None if ``should_stop()`` turned True (the stream is closed, nothing else is sent).
+    On ANY failure before a usable result (endpoint missing/404, connection error, bad JSON,
+    stream ends without a result, timeout) it falls back to the plain ``scan_url`` and returns
+    that, so callers get exactly what they got before. Never raises.
+    """
+    def stopped() -> bool:
+        try:
+            return bool(should_stop and should_stop())
+        except Exception:
+            return False
+
+    body: dict[str, Any] = {"url": url}
+    if lat is not None and lng is not None:
+        body["lat"], body["lng"] = float(lat), float(lng)
+    endpoint = f"{api_url()}/scan/stream"
+    deadline = time.monotonic() + timeout
+    result: Any = None
+    why = "stream ended without a result"
+    own = client is None
+    c = client or httpx.Client()
+    try:
+        with c.stream("POST", endpoint, json=body,
+                      timeout=httpx.Timeout(timeout, connect=STREAM_CONNECT_S)) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if stopped():
+                    return None                      # leaving the with-block closes the stream
+                if time.monotonic() > deadline:
+                    why = "stream timeout"
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                msg = json.loads(line)
+                kind = msg.get("type") if isinstance(msg, dict) else None
+                if kind == "frame":
+                    try:
+                        jpeg = base64.b64decode(msg.get("jpeg") or "", validate=False)
+                    except (binascii.Error, ValueError, TypeError):
+                        continue                     # one bad frame isn't worth a rescan
+                    if jpeg:
+                        _safe_call(on_frame, jpeg)
+                elif kind == "nav" and on_nav is not None and isinstance(msg.get("url"), str):
+                    _safe_call(on_nav, msg["url"])
+                elif kind == "result":
+                    result = msg.get("data")
+                    break
+    except httpx.TimeoutException:
+        why = "stream timeout"
+    except Exception as e:    # 404 (not deployed), connection error, bad JSON, broken stream...
+        why = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        if own:
+            c.close()
+    if stopped():
+        return None
+    if isinstance(result, dict) and result.get("verdict") in ("safe", "suspicious", "malicious"):
+        return result
+    if result is not None:
+        why = "unexpected result shape"
+    log.info("live stream unavailable (%s); falling back to POST /scan", why)
+    return scan_url(url, lat, lng, client=client)
+
+
+def _safe_call(fn: Callable, arg: Any) -> None:
+    """A broken video callback must never break the scan itself."""
+    try:
+        fn(arg)
+    except Exception:
+        log.exception("live stream callback failed")
 
 
 # --- Speech ------------------------------------------------------------------------------------

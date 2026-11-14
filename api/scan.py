@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -92,12 +93,42 @@ def payment_result(qr: str, payment: Payment) -> ScanResult:
 
 # ---------- sandbox + Gemini ----------
 
+SANDBOX_TIMEOUT_S = 60
+
+
+def _sandbox_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {config.SANDBOX_TOKEN}"}
+
+
 def run_sandbox(url: str) -> dict:
     """Ask the sandbox server (separate Vultr VM) to open the URL. See sandbox/server.py."""
     r = httpx.post(f"{config.SANDBOX_URL.rstrip('/')}/run", json={"url": url},
-                   headers={"Authorization": f"Bearer {config.SANDBOX_TOKEN}"}, timeout=60)
+                   headers=_sandbox_headers(), timeout=SANDBOX_TIMEOUT_S)
     r.raise_for_status()
     return r.json()
+
+
+class SandboxStreamError(Exception):
+    """The sandbox stream ran past its deadline."""
+
+
+def stream_sandbox(url: str) -> Iterator[dict]:
+    """POST {SANDBOX_URL}/run/stream and yield each NDJSON message as a dict, as it arrives:
+    {"type": "frame"|"nav"|"result"|"error", ...}. Raises httpx.HTTPError or SandboxStreamError."""
+    deadline = time.monotonic() + SANDBOX_TIMEOUT_S   # httpx's timeout is per read, not total
+    with httpx.Client(timeout=SANDBOX_TIMEOUT_S) as client, client.stream(
+            "POST", f"{config.SANDBOX_URL.rstrip('/')}/run/stream", json={"url": url},
+            headers=_sandbox_headers()) as r:
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if time.monotonic() > deadline:
+                raise SandboxStreamError("sandbox stream timed out")
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue  # blank or partial line
+            if isinstance(msg, dict):
+                yield msg
 
 
 def explain(sandbox: dict, verdict: str, scam_type: str) -> str:
@@ -137,6 +168,48 @@ def mock_result(qr: str) -> ScanResult:
     return ScanResult(**data)
 
 
+def sandbox_result(qr: str, sandbox: dict, started: float) -> ScanResult:
+    """What the sandbox saw -> ScanResult: Jev, verdict rule, Gemini. Shared by /scan and /scan/stream."""
+    tried_download = bool(sandbox.get("downloads"))
+    try:
+        checks = jev.check_page(sandbox)
+    except jev.JevError:
+        checks = JevChecks(malicious_p=0.5)  # Jev down: treat as suspicious, never as safe
+    verdict, score, scam_type = decide(checks, tried_download)
+    # The sandbox blocked the page itself from reaching an internal address (or a hop was
+    # served from one): never call that safe.
+    blocked_doc = any(b.get("type") == "document" for b in sandbox.get("blocked_requests") or [])
+    if verdict == "safe" and (blocked_doc or str(sandbox.get("error") or "").startswith("blocked:")):
+        verdict, score, scam_type = "suspicious", max(score, config.SECOND_LOOK_SCORE), "other"
+    return ScanResult(
+        scan_id=uuid.uuid4().hex[:12], url=qr,
+        final_url=sandbox.get("final_url"), redirect_chain=sandbox.get("redirect_chain", []),
+        domain=sandbox.get("domain"), page_title=sandbox.get("page_title"),
+        verdict=verdict, jev_score=score, scam_type=scam_type,
+        explanation=explain(sandbox, verdict, scam_type), checks=checks,
+        screenshots=sandbox.get("screenshots", []),
+        scanned_at=int(time.time()), scan_ms=int((time.time() - started) * 1000),
+    )
+
+
+def failed_result(qr: str, started: float) -> ScanResult:
+    """The sandbox couldn't open the page (error, timeout, no result). Never call that safe."""
+    score = config.SECOND_LOOK_SCORE
+    return ScanResult(
+        scan_id=uuid.uuid4().hex[:12], url=qr, verdict="suspicious", jev_score=score,
+        scam_type="other", checks=JevChecks(malicious_p=score),
+        explanation=("We couldn't finish checking this one, so be careful. Don't enter any "
+                     "passwords or card numbers."),
+        scanned_at=int(time.time()), scan_ms=int((time.time() - started) * 1000),
+    )
+
+
+def with_location(result: ScanResult, location: list[float] | None) -> ScanResult:
+    if location:
+        result.location = [round(location[0], 3), round(location[1], 3)]  # ~100 m
+    return result
+
+
 def scan(qr: str, location: list[float] | None = None) -> ScanResult:
     payment = parse_solana_pay(qr)
     if payment:
@@ -145,27 +218,5 @@ def scan(qr: str, location: list[float] | None = None) -> ScanResult:
         result = mock_result(qr)
     else:
         started = time.time()
-        sandbox = run_sandbox(qr)
-        tried_download = bool(sandbox.get("downloads"))
-        try:
-            checks = jev.check_page(sandbox)
-        except jev.JevError:
-            checks = JevChecks(malicious_p=0.5)  # Jev down: treat as suspicious, never as safe
-        verdict, score, scam_type = decide(checks, tried_download)
-        # The sandbox blocked the page itself from reaching an internal address (or a hop was
-        # served from one): never call that safe.
-        blocked_doc = any(b.get("type") == "document" for b in sandbox.get("blocked_requests") or [])
-        if verdict == "safe" and (blocked_doc or str(sandbox.get("error") or "").startswith("blocked:")):
-            verdict, score, scam_type = "suspicious", max(score, config.SECOND_LOOK_SCORE), "other"
-        result = ScanResult(
-            scan_id=uuid.uuid4().hex[:12], url=qr,
-            final_url=sandbox.get("final_url"), redirect_chain=sandbox.get("redirect_chain", []),
-            domain=sandbox.get("domain"), page_title=sandbox.get("page_title"),
-            verdict=verdict, jev_score=score, scam_type=scam_type,
-            explanation=explain(sandbox, verdict, scam_type), checks=checks,
-            screenshots=sandbox.get("screenshots", []),
-            scanned_at=int(time.time()), scan_ms=int((time.time() - started) * 1000),
-        )
-    if location:
-        result.location = [round(location[0], 3), round(location[1], 3)]  # ~100 m
-    return result
+        result = sandbox_result(qr, run_sandbox(qr), started)
+    return with_location(result, location)
