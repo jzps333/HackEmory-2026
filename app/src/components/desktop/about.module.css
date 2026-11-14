@@ -1,0 +1,35 @@
+.section { padding: 6rem 0 0; }
+.kicker { margin: 0 0 0.5rem; color: #0ae448; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.85rem; }
+.h2 { display: flex; align-items: center; gap: 0.6rem; font-size: clamp(2rem, 3.4vw, 2.8rem) !important; line-height: 1.1 !important; letter-spacing: -0.02em; margin: 0 0 1.25rem !important; }
+.h3 { font-size: 1.25rem; margin: 1rem 0 0.5rem; }
+.lead { color: var(--muted); font-size: 1.15rem; }
+.reveal { font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.4; font-weight: 600; color: #fff; max-width: 900px; }
+
+.features { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.feature { height: 100%; border: 1px solid var(--line); }
+.feature p { color: var(--muted); margin: 0 0 0.75rem; }
+.featureIcon { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #07170c; color: #0ae448; border: 1px solid #154a24; }
+.by { color: #abff84 !important; font-size: 0.9rem; font-weight: 700; margin: 0 !important; }
+
+.privacy { }
+.checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; font-size: 1.15rem; }
+.checks li { padding: 1rem 1.25rem; border: 1px solid var(--line); border-left: 4px solid #0ae448; border-radius: 12px; background: #070707; }
+
+.video { display: grid; place-items: center; text-align: center; min-height: 320px; border: 1px dashed #2c2c2c; border-radius: 20px; color: var(--muted); }
+.videoTitle { color: #fff; font-size: 1.4rem; font-weight: 700; margin: 0 0 0.25rem; }
+
+.closing { margin-top: 6rem; padding: 4rem; border: 1px solid #154a24; border-radius: 28px; background: #04110a; text-align: center; }
+.closing .h2 { justify-content: center; }
+.ctaRow { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem; }
+.cta { font-weight: 700; font-size: 1.05rem; text-decoration: none; }
+.ctaGhost { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.5rem; border: 1px solid #3a3a3a; border-radius: 12px; color: #fff; text-decoration: none; font-weight: 700; }
+.ctaGhost:hover { border-color: #0ae448; color: #abff84; }
+
+.footer { margin-top: 6rem; padding-top: 2rem; border-top: 1px solid var(--line); color: var(--muted); display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 2rem; }
+.footer a { color: #0ae448; }
+.note { grid-column: 1 / -1; font-size: 0.9rem; }
+
+@media (max-width: 960px) {
+  .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .closing { padding: 2.5rem; }
+}
