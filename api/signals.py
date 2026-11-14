@@ -74,7 +74,7 @@ SHARED_HOSTING = {
     "mystrikingly.com", "translate.goog", "r2.dev", "amplifyapp.com", "appspot.com",
     "fly.dev", "deno.dev", "railway.app", "up.railway.app", "codesandbox.io", "csb.app",
     # user content on big brands' domains: the brand's age and name say nothing about the page
-    "sharepoint.com", "s3.amazonaws.com", "googleusercontent.com", "notion.site", "my.canva.site",
+    "sharepoint.com", "amazonaws.com", "googleusercontent.com", "notion.site", "my.canva.site",
     "blob.core.windows.net", "web.core.windows.net", "myshopify.com",
 }
 # Single hosts where anyone can publish a page or form (phishers love these).
@@ -83,6 +83,7 @@ USER_CONTENT_HOSTS = {
     "firebasestorage.googleapis.com", "forms.office.com", "forms.microsoft.com", "onedrive.live.com",
     "1drv.ms", "raw.githubusercontent.com", "gist.github.com", "dl.dropboxusercontent.com",
     "linktr.ee", "t.me", "telegra.ph", "form.jotform.com", "typeform.com",
+    "script.google.com", "script.googleusercontent.com",
 }
 SHORTENERS = {
     "bit.ly", "bitly.com", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd", "buff.ly",
@@ -141,7 +142,7 @@ BRANDS: dict[str, tuple[str, str, tuple[str, ...], tuple[str, ...]]] = {
     "microsoft": ("fake_login_other", "Microsoft", ("microsoft", "outlook", "office 365", "office365", "hotmail"),
                   ("microsoft.com", "live.com", "outlook.com", "office.com", "microsoftonline.com",
                    "hotmail.com", "microsoft365.com", "office365.com", "sharepoint.com")),
-    "amazon": ("fake_login_other", "Amazon", ("amazon",), ("amazon.com", "amazonaws.com", "a.co")),
+    "amazon": ("fake_login_other", "Amazon", ("amazon",), ("amazon.com", "a.co")),
     "netflix": ("fake_login_other", "Netflix", ("netflix",), ("netflix.com",)),
     "facebook": ("fake_login_other", "Facebook", ("facebook",), ("facebook.com", "fb.com", "meta.com", "fbcdn.net")),
     "instagram": ("fake_login_other", "Instagram", ("instagram",), ("instagram.com",)),
@@ -517,8 +518,10 @@ class Signals:
 
     @property
     def brand_match(self) -> bool:
-        """This website is who the page says it is."""
-        return (bool(self.official_brand) or self.restricted_tld or self.names_itself) \
+        """This website is who the page says it is. Only independent evidence counts: a curated
+        brand's own domain, or a restricted TLD (.gov/.edu). A page naming its own site in its title
+        (names_itself) is page-controlled, so it only prevents a false "mismatch", never earns trust."""
+        return (bool(self.official_brand) or self.restricted_tld) \
             and not self.brand_mismatch and not self.address_tricks
 
     @property

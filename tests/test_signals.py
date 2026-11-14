@@ -452,3 +452,20 @@ def test_explain_gets_hop_count_and_facts(monkeypatch, rdap):
     sb2 = page("https://usps-redelivery.top/fee", "USPS - Redelivery fee", fields=CARD)
     api_scan.explain(sb2, "malicious", "fake_delivery", collect(sb2))
     assert "imitates USPS" in sent["prompt"] and "card number" in sent["prompt"]
+
+
+def test_page_naming_its_own_old_domain_earns_no_brand_trust(rdap):
+    """names_itself is page-controlled: an old unknown domain that puts its name in the title
+    must not get the established-brand credit (only curated brands or .gov/.edu do)."""
+    table, _ = rdap
+    table["oldshop.example"] = days_ago(4000)
+    sig = collect(page("https://oldshop.example/login", "Oldshop - Sign in", fields=PASSWORD))
+    assert sig.names_itself and not sig.brand_match and not sig.established_brand
+
+
+def test_amazonaws_user_hosting_is_not_amazon(rdap):
+    table, _ = rdap
+    table["amazonaws.com"] = days_ago(7000)
+    sig = collect(page("https://evil-bucket.s3.us-east-1.amazonaws.com/login.html", "Amazon Sign-In",
+                       fields=PASSWORD))
+    assert not sig.established_brand and not sig.brand_match
