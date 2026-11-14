@@ -41,6 +41,9 @@ BRIDGE_TOKEN_TTL = timedelta(hours=1)
 CHERT_FACETIME_API = os.getenv("CHERT_FACETIME_API", "https://facetime.trychert.com/api/v1").rstrip("/")
 
 _rate_lock = threading.Lock()
+# Calls this server placed. Status lookups are limited to these, so /call-me/{id} can't be used
+# to read other calls on the Chert project with our credential.
+_our_calls: set[str] = set()
 _last_call_at = 0.0
 
 
@@ -157,6 +160,7 @@ async def place_call(url: str, phone: str) -> dict:
             raise HTTPException(status_code=502, detail="Chert didn't return a call id")
         await lkapi.room.update_room_metadata(lk.UpdateRoomMetadataRequest(
             room=room, metadata=json.dumps({"chert_call_id": call_id})))
+        _our_calls.add(str(call_id))
         log.info("outbound call %s placed in room %s", call_id, room)
         return {"call_id": call_id, "room": room, "status": data.get("status", "allocated")}
     except HTTPException:
@@ -188,6 +192,8 @@ async def call_me(req: CallRequest) -> dict:
 
 @router.get("/call-me/{call_id}")
 async def call_status(call_id: str) -> dict:
+    if call_id not in _our_calls:
+        raise HTTPException(status_code=404, detail="unknown call")
     if not re.match(r"^[A-Za-z0-9_-]{1,80}$", call_id):
         raise HTTPException(status_code=400, detail="bad call id")
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as c:
