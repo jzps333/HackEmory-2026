@@ -277,6 +277,17 @@ def test_second_start_does_not_cancel_the_first(monkeypatch):
     assert client.post("/auth/phone/verify", json={"phone": phone, "request_id": first["request_id"]}).json()["verified"]
 
 
+def test_signed_in_call_needs_no_phone_in_body(fakes):
+    token = routes_call._issue_token("+13125550123")              # not on the allowlist
+    r = client.post("/call-me", json={"url": "https://example.com"},
+                    headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    assert json.loads(fakes["req"].content)["destination"] == "+13125550123"
+    # Without a token, a missing phone is a 400, never a call.
+    routes_call._last_call_at = 0.0
+    assert client.post("/call-me", json={"url": "https://example.com"}).status_code == 400
+
+
 def test_bad_token_falls_back_to_allowlist_only(fakes):
     r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
                     headers={"Authorization": "Bearer not-a-real-token"})

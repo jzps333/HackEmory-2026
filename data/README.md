@@ -120,7 +120,11 @@ SELECT add_continuous_aggregate_policy('scans_hourly',
     if_not_exists     => TRUE);
 ```
 - Hypertable column: `time` = `scanned_at` from the ScanResult (UTC). Default chunk interval (7 days).
-- Indexes: none created explicitly. `create_hypertable` adds its default index on `time DESC` (`scans_time_idx`).
+- Indexes: `create_hypertable` adds its default index on `time DESC` (`scans_time_idx`). `data.setup` also creates
+  `scans_domain_time_idx ON scans (domain, time DESC)` for `/stats/domain/{domain}` (additive; queries work without it).
+- `payment_refusals (time, scan_id PRIMARY KEY, reason, amount_sol, source)`: plain table, one row per Solana Pay
+  scan whose wallet didn't match the merchant (written by `record_scan`, `ON CONFLICT DO NOTHING`). Created by
+  `data.setup` and also on first insert, so a server set up earlier needs no migration. Feeds `/stats/impact`.
 - `scans_hourly`: 1-hour buckets per `(scam_type, verdict)`. Real-time (`materialized_only = false`), so rows
   newer than the last refresh still show up. The policy runs every 5 min and refreshes `[now - 3 days, now - 1 min]`.
 - Row mapping (`scan_row`): `domain` = `domain`, else hostname of `final_url or url`, lowercased. No scan_id, no URL path, no location.
@@ -245,6 +249,8 @@ python3 -m data.setup && uvicorn api.main:app --reload    # app/.env.local: NEXT
 | GET | `/scans/search` | `q` (default `""`, max 200; `""` or `*` = browse), `verdict`, `scam_type`, `lat`+`lng` (both or neither), `radius_km` (default 5, max 100), `page` (default 1, 1..100), `per_page` (default 20, 1..100) | see below |
 | GET | `/stats/hourly` | `hours` (default 24, 1..720) | `{"hours": 24, "rows": [{"hour", "scam_type", "verdict", "total", "avg_score", "avg_scan_ms"}]}` |
 | GET | `/stats/summary` | none | see below |
+| GET | `/stats/impact` | none | totals, `est_money_saved_usd` + `est_method`, `payments_refused`, `repeat_scams`; cached 15 s. Contract: `docs/UI_API.md` |
+| GET | `/stats/domain/{domain}` | hostname (422 `bad_domain` otherwise) | `{domain, times_checked, times_flagged, first_seen, last_seen, verdicts}`; cached 15 s |
 
 - Errors: 503 `{"detail": {"error": "typesense_not_configured" | "tiger_not_configured", "service", "message"}}`;
   502 `{"detail": {"error": "typesense_error" | "tiger_data_error", ...}}`; 422 for bad params or a body that isn't a valid ScanResult.

@@ -6,6 +6,8 @@ Every endpoint returns a clear 503 if its service isn't configured, 502 if the s
 from __future__ import annotations
 
 import logging
+import re
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -13,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from pydantic import BaseModel, ConfigDict
 
-from api import recent_scans
+from api import impact, recent_scans
 from api.schema import ScamType, ScanResult, Verdict
 from data import scan_search, tiger_store, typesense_store
 
@@ -56,6 +58,21 @@ def record_scan(result: ScanResult) -> None:
             scan_search.index_scan(result)
     except Exception as e:  # noqa: BLE001
         log.warning("index_scan failed: %s", type(e).__name__)
+    record_payment_refusal(result)
+
+
+def record_payment_refusal(result: ScanResult) -> None:
+    """A Solana Pay code whose wallet doesn't match the merchant it names: ScanSafe refuses it
+    (the app shows no Pay button, and POST /pay would answer merchant_not_verified). Counted once
+    per scan_id for /stats/impact. Never raises."""
+    try:
+        if (result.payment is None or result.payment.merchant_verified or result.verdict != "malicious"
+                or not result.scan_id or not tiger_store.is_configured()):
+            return
+        tiger_store.log_payment_refusal(result.scan_id, "merchant_not_verified",
+                                        impact.refused_amount_sol(result.payment.amount_sol), "scan")
+    except Exception as e:  # noqa: BLE001
+        log.warning("record_payment_refusal failed: %s", type(e).__name__)
 
 
 def flagged_before(result: ScanResult, radius_km: float = 5) -> int:
@@ -165,5 +182,61 @@ def stats_summary() -> dict:
     _need_tiger()
     try:
         return tiger_store.summary()
+    except Exception as e:  # noqa: BLE001
+        raise _upstream("tiger_data", e)
+
+
+STATS_CACHE_S = 15
+_impact_cache = impact.TTLCache(STATS_CACHE_S, max_items=1)
+_domain_cache = impact.TTLCache(STATS_CACHE_S, max_items=1000)
+_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"   # one hostname label: no leading/trailing dash
+DOMAIN_RE = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*$")
+
+
+def _impact_now() -> dict:
+    counts = tiger_store.impact_counts()
+    loss = impact.loss_per_scam_usd()
+    blocked = counts["by_verdict"]["malicious"]
+    return {
+        "scans_total": counts["scans_total"],
+        "scans_24h": counts["scans_24h"],
+        "scams_blocked": blocked,
+        "warned": counts["by_verdict"]["suspicious"],
+        "safe": counts["by_verdict"]["safe"],
+        "est_money_saved_usd": impact.money_saved_usd(blocked, loss),
+        "est_method": impact.est_method(loss),
+        "payments_refused": {
+            **counts["payments_refused"],
+            "note": "Solana Pay codes refused because the wallet didn't match the merchant. "
+                    "Devnet test SOL, not converted to USD.",
+        },
+        "repeat_scams": counts["repeat_scams"],
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/stats/impact")
+def stats_impact() -> dict:
+    """Headline impact numbers (all time) and an estimate of money kept from scammers.
+    Cached 15 s, so polling every 30 s is cheap; generated_at says when it was computed."""
+    _need_tiger()
+    try:
+        return _impact_cache.get_or_set("impact", _impact_now)
+    except Exception as e:  # noqa: BLE001
+        raise _upstream("tiger_data", e)
+
+
+@router.get("/stats/domain/{domain}")
+def stats_domain(domain: str) -> dict:
+    """How many times this domain was checked, and how often it was flagged ("checked N times").
+    Counts scans, not people (nothing about who scanned is stored). Cached 15 s per domain."""
+    domain = domain.strip().lower()
+    if len(domain) > 253 or not DOMAIN_RE.match(domain):
+        raise HTTPException(422, detail={"error": "bad_domain",
+                                         "message": "domain must be a hostname: a-z, 0-9, dots and dashes, "
+                                                    "at most 253 characters."})
+    _need_tiger()
+    try:
+        return _domain_cache.get_or_set(domain, lambda: tiger_store.domain_stats(domain))
     except Exception as e:  # noqa: BLE001
         raise _upstream("tiger_data", e)
