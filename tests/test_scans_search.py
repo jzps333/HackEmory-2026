@@ -386,3 +386,15 @@ def test_report_adds_location_to_scan_doc(client, ts):
     ts.reply[("PATCH", patches[0].url.path)] = httpx.Response(404, json={})
     assert client.post("/report", json={"scan_id": r.scan_id}).json()["stored"] is True
     recent_scans.clear()
+
+
+def test_safe_scans_index_only_domain_not_url_or_title():
+    from api.schema import ScanResult
+    import json
+    from pathlib import Path
+    data = json.loads((Path(__file__).resolve().parent.parent / "shared" / "mock_safe.json").read_text())
+    data.update(verdict="safe", url="https://docs.example.com/d/SECRET-DOC-ID/edit",
+                final_url="https://docs.example.com/d/SECRET-DOC-ID/edit", page_title="My private doc")
+    doc = scan_search.result_document(ScanResult(**data))
+    assert "url" not in doc and "final_url" not in doc and "page_title" not in doc
+    assert "SECRET-DOC-ID" not in json.dumps(doc)

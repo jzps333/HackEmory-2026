@@ -123,6 +123,10 @@ def _clip(text: str | None, n: int) -> str | None:
 def result_document(result: ScanResult) -> dict:
     """The document record_scan indexes for a live scan. Never includes the location."""
     doc = row_document(_tiger_row(result))
+    if result.verdict == "safe":
+        # Privacy: /scans/search is public, and a link's path can hold private things (a shared
+        # document's id, a booking code). Safe scans keep only domain, verdict and time.
+        return doc
     extras = {
         "url": clean_url(result.url),
         "final_url": clean_url(result.final_url),
