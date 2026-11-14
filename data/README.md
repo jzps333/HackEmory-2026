@@ -125,9 +125,45 @@ SELECT add_continuous_aggregate_policy('scans_hourly',
 - `payment_refusals (time, scan_id PRIMARY KEY, reason, amount_sol, source)`: plain table, one row per Solana Pay
   scan whose wallet didn't match the merchant (written by `record_scan`, `ON CONFLICT DO NOTHING`). Created by
   `data.setup` and also on first insert, so a server set up earlier needs no migration. Feeds `/stats/impact`.
+- `accounts` and `linked_accounts` (saved accounts, `data/accounts_store.py`): see "Tiger Data: saved accounts" below.
 - `scans_hourly`: 1-hour buckets per `(scam_type, verdict)`. Real-time (`materialized_only = false`), so rows
   newer than the last refresh still show up. The policy runs every 5 min and refreshes `[now - 3 days, now - 1 min]`.
 - Row mapping (`scan_row`): `domain` = `domain`, else hostname of `final_url or url`, lowercased. No scan_id, no URL path, no location.
+
+### Tiger Data: saved accounts (`accounts_store.ACCOUNTS_SQL`)
+```sql
+CREATE TABLE IF NOT EXISTS accounts (
+    phone_hash        TEXT PRIMARY KEY,          -- sha256(E.164 phone + ACCOUNT_PEPPER), hex
+    plate             TEXT,                      -- uppercased, 2-10 of A-Z 0-9 space dash
+    preferred_payment TEXT,                      -- 'solana_devnet' | 'virtual_card' | NULL
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS linked_accounts (
+    id          BIGSERIAL PRIMARY KEY,
+    phone_hash  TEXT NOT NULL,
+    provider    TEXT NOT NULL,                   -- 'dogwood' (generic: more providers later)
+    secret_enc  TEXT NOT NULL,                   -- Fernet(ACCOUNT_KEY) of a small JSON; '' once revoked
+    meta        JSONB NOT NULL DEFAULT '{}'::jsonb,   -- display only: {account_name, scope}
+    linked_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revoked_at  TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX IF NOT EXISTS linked_accounts_one_active
+    ON linked_accounts (phone_hash, provider) WHERE revoked_at IS NULL;
+```
+- **Migration:** none needed. Both tables and the index are created on the first saved-accounts request (like
+  `payment_refusals`) and by `python3 -m data.setup` (`OK   Tiger Data: accounts + linked_accounts ready`). Plain tables, not hypertables.
+- **No phone numbers and no plaintext tokens are stored.** `secret_enc` decrypts (with `ACCOUNT_KEY`) to
+  `{"access_token", "account_id"}` for Dogwood (a demo operator token). Virtual cards (Lithic sandbox) are never stored here:
+  they are minted per payment, closed right after, and only their last4 + Lithic card token are kept (in `/pay/status` and the
+  Dogwood session).
+  Linking again revokes the previous active row; Disconnect sets `revoked_at` and wipes `secret_enc` (rows stay as history).
+- `ACCOUNT_PEPPER` and `ACCOUNT_KEY` must never change once rows exist (new pepper = everyone's account looks empty;
+  new key = links unreadable, users reconnect). Setup steps: `docs/UI_API.md` section 9.
+- Backend switch: `ACCOUNTS_STORE=tiger|memory` (unset = Tiger when `TIGER_DATABASE_URL` is set, else the routes answer 503
+  `accounts_not_configured`). `memory` is for tests/local dev only.
+- Handy: `psql "$TIGER_DATABASE_URL" -c "SELECT provider, count(*) FILTER (WHERE revoked_at IS NULL) AS active, count(*) FROM linked_accounts GROUP BY 1;"`
+  (never `SELECT secret_enc`).
 
 ## 3. Env vars
 
@@ -136,6 +172,8 @@ SELECT add_continuous_aggregate_policy('scans_hourly',
 | `TYPESENSE_HOST` | Full URL including the protocol (no trailing slash). Cloud: `https://<cluster-host>.a1.typesense.net` (no port). Self-hosted on the agent server: `http://127.0.0.1:8108` | Cloud: your cluster's page (node hostname). Self-hosted: fixed, see 3b |
 | `TYPESENSE_API_KEY` | The **Admin** API key. A search-only key can't create collections or write docs | Cloud: cluster page, "Generate API Keys". Self-hosted: generated on the server, see 3b |
 | `TIGER_DATABASE_URL` | `postgres://tsdbadmin:<password>@<host>:<port>/tsdb?sslmode=require` | Copy the value of `TIMESCALE_SERVICE_URL` from the downloaded `tiger-cloud-db-…-credentials.env` |
+| `ACCOUNT_KEY` | Fernet key (44 chars, urlsafe base64) | Generate on the server: `python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())'` |
+| `ACCOUNT_PEPPER` | Any long random string | Generate on the server (`python3 -c 'import secrets;print(secrets.token_urlsafe(32))'`); if unset, generated once into `~/.scansafe-account-pepper` |
 
 - Typesense counts as configured only if **both** of its vars are set.
 - Keys go only in the repo-root `.env` (copy of `.env.example`, gitignored). On the agent server that is
@@ -208,7 +246,7 @@ refresh policy. **Idempotent**: everything is `IF NOT EXISTS` / `if_not_exists`,
 | `SKIP <service>: not configured` | Env vars missing. Nothing was attempted |
 | `FAIL <service>: <ErrorType> (HTTP <code>)` | Only the error type is printed, because messages can contain secrets |
 
-Exit code is 0 only if all three say OK (a SKIP gives 1). Common FAILs: `HTTPStatusError (HTTP 401)` = wrong or
+It also prints `OK   Tiger Data: accounts + linked_accounts ready` (saved accounts). Exit code is 0 only if all four say OK (a SKIP gives 1). Common FAILs: `HTTPStatusError (HTTP 401)` = wrong or
 search-only key; `UnsupportedProtocol` = host is missing `https://`; `ConnectError` = wrong host;
 `OperationalError` = bad Tiger URL or the service is paused; `ModuleNotFoundError` = run the pip install.
 
@@ -338,7 +376,8 @@ curl -s -G "$TS/collections/scans/documents/search" -H "$H" --data-urlencode 'q=
   string, `page_title` and `explanation`, plus a location only once a scan is reported. **Never stored anywhere**:
   screenshots, page text (not in ScanResult at all), URL query strings in `scans`, non-web QR content (WIFI:, vCard...),
   the location of unreported scans, `redirect_chain`, `checks`, `payment`, and who scanned or reported (there is no user,
-  device or IP field).
+  device or IP field). Saved accounts (`accounts`, `linked_accounts`) are keyed by a peppered phone hash, are never
+  joined to scans, and hold provider tokens only encrypted.
 - `/scans/search` is public, like `/pins`: anyone can browse every scan's domain, URL path and time. Fine for the demo. `/report` receives the
   whole ScanResult, screenshots included, and drops everything except the pin fields.
 - Pins store the **full** final URL (path and query), and for `solana:` codes the whole payment request. `/pins` returns it.

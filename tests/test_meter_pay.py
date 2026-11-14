@@ -315,9 +315,10 @@ def test_status_after_pay_and_no_double_pay(client, wallet, monkeypatch):
     assert client.get(f"/pay/status/{sid}").json() == {"scan_id": sid, "state": "none"}
     assert client.post("/pay", json={"scan_id": sid, "hours": 2, "approved": True}).status_code == 200
     st = client.get(f"/pay/status/{sid}").json()
+    assert isinstance(st.pop("paid_at"), int)
     assert st == {"scan_id": sid, "state": "paid", "signature": FAKE_SIG,
                   "explorer_url": solana_pay.explorer_url(FAKE_SIG), "amount_sol": 0.02,
-                  "hours": 2, "merchant": "Dogwood Lot & Meter Co."}
+                  "hours": 2, "merchant": "Dogwood Lot & Meter Co.", "method": "solana_devnet"}
     n = len(calls)
     r = client.post("/pay", json={"scan_id": sid, "hours": 2, "approved": True})   # double tap
     assert r.status_code == 409 and r.json()["error"] == "already_paid"

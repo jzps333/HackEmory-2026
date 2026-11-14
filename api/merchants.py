@@ -12,7 +12,9 @@ MERCHANT_METERS: merchants that sell parking by the hour. For them the server se
 """
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 KNOWN_MERCHANTS: dict[str, str] = {
     "Dogwood Lot & Meter Co.": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL",
@@ -56,3 +58,34 @@ def is_verified(label: str, recipient: str) -> bool:
 def meter_for(label: str) -> MeterConfig | None:
     """The merchant's meter config, or None if it charges a fixed amount (or isn't known)."""
     return MERCHANT_METERS.get(label or "")
+
+
+# --- USD prices (one-time virtual cards pay Dogwood in test USD; Solana pays in test SOL) -------
+
+def env_decimal(name: str, default: str) -> Decimal:
+    """A positive, finite number from env, else the default."""
+    try:
+        d = Decimal(os.getenv(name, "").strip() or default)
+        if d.is_finite() and d > 0:
+            return d
+    except ArithmeticError:
+        pass
+    return Decimal(default)
+
+
+def dogwood_rate_usd() -> Decimal:
+    """USD per hour for Dogwood meters paid with a one-time virtual card (env DOGWOOD_RATE_USD)."""
+    return env_decimal("DOGWOOD_RATE_USD", "2.50")
+
+
+def usd(value) -> Decimal:
+    """Round to cents. Raises ValueError for something that isn't a number."""
+    try:
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        raise ValueError("not an amount") from None
+
+
+def meter_usd(hours: int) -> Decimal:
+    """What `hours` of Dogwood parking costs in USD (same number the quote shows and the card is capped at)."""
+    return usd(dogwood_rate_usd() * hours)

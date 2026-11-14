@@ -1,12 +1,13 @@
 # ScanSafe API contract for the web UI
 
 For whoever builds the UI (and their AI assistant). Every shape below is taken from the route code:
-`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py` (+ `api/meter_pay.py`), `api/routes_result.py`.
+`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py` (+ `api/meter_pay.py`), `api/routes_result.py`,
+`api/routes_accounts.py`, `api/dogwood.py`, `api/lithic_cards.py`, `api/session.py`.
 If this file and the code disagree, the code wins. Please tell the backend owner.
 
-- **Base URL:** `https://api.scansafe.nyc`. CORS is open (`*`, any method or header), so call it straight from the browser.
+- **Base URL:** `https://api.scansafe.nyc`. CORS is an **allowlist with credentials**: `https://scansafe.nyc`, `https://app.scansafe.nyc`, `https://scansafe-demo-sites.vercel.app`, `http://localhost:3000`, `:3300`, `:3400` (plus the old alias `https://app-blond-xi-88.vercel.app`; more via server env `CORS_EXTRA_ORIGINS`). Other origins get no CORS headers.
 - JSON in, JSON out (`Content-Type: application/json`). Times are unix seconds (`scanned_at`) or ISO-8601 UTC strings (`hour`, `first_seen`, `generated_at`).
-- **Auth:** only `/call-me` and `/auth/me` read a token, sent as `Authorization: Bearer <token>`. Every other endpoint is public.
+- **Auth:** the phone sign-in token, sent as `Authorization: Bearer <token>` **or** the `ss_session` cookie (set by `/auth/phone/verify`; use `fetch(..., {credentials: "include"})`). Read by `/call-me`, `/auth/me`, `/auth/logout`, `/me*`, `/link/dogwood/*`, `/pay` with a virtual card, and (optionally) `/pay/quote`. Everything else is public. Section 9.
 - Treat page-derived text (`page_title`, `explanation`, `url`) as plain text. Never render it as HTML. The only exception is `/scans/search` `highlight`, which is escaped and contains only `<mark>` tags.
 
 ## Error shapes (they differ by router)
@@ -18,7 +19,9 @@ If this file and the code disagree, the code wins. Please tell the backend owner
 | same, bad input we check ourselves | 422 | `{"detail": {"error": "bad_location" \| "bad_domain", "message": "..."}}` |
 | Phone sign-in, `/call-me` | 400 / 403 / 429 / 502 / 503 / 504 | `{"detail": "<human-readable string>"}` |
 | `/result/{scan_id}` | 404 | `{"detail": "We couldn't find this check. It may have expired."}` |
-| `/pay`, `/pay/quote`, `GET /pay/quote/{id}` | 400 / 403 / 404 / 409 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` (codes in section 6 and 8) |
+| `/pay`, `/pay/quote`, `GET /pay/quote/{id}` | 400 / 401 / 402 / 403 / 404 / 409 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` (codes in section 6, 8 and 9) |
+| `/me*`, `/link/*/start`, `/operators/dogwood/app-*`, `/operators/dogwood/api/sessions` (bad input) | 400 / 401 / 403 / 404 / 409 / 502 / 503 | same `{"ok": false, "error", "message"}` shape (section 9) |
+| `/operators/dogwood/oauth/*`, `/operators/dogwood/api/*` (auth) | 400 / 401 / 403 | OAuth shape `{"error": "<code>", "error_description": "..."}` |
 | Any route, body or params that fail validation | 422 | FastAPI default: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` |
 
 ## 1. Phone sign-in (reverse OTP)
@@ -44,7 +47,8 @@ The user texts us a code from their phone, so no SMS provider is involved. The t
 - Each request id yields a token **once**. Replaying a verified request returns `{"verified": false}`.
 - The text must come from a number ending in the same 4 digits as `phone` and contain the code (case-insensitive).
 - Start rate limits (429, `detail` is a string): 5 starts a minute per device/IP (`"too many sign-ins from this device; try again in a minute"`), one start per phone every 10 s (`"please wait a few seconds"`), at most 10 pending codes per device, plus a global backstop.
-- **Token:** valid for 30 days. Store it in `localStorage`. On app load call `/auth/me`. If it returns `{"signed_in": false}`, drop the stored token and show "Sign in". Sign-out happens on the client: forget the token. There is no server revoke endpoint, so the token stays valid until it expires.
+- **Token:** valid for 30 days. The verify response also sets it as the cookie `ss_session` (HttpOnly, Secure, SameSite=Lax, `Domain=.scansafe.nyc`, 30 days), so pages on `*.scansafe.nyc` are signed in with `credentials: "include"` and no JS-visible token. Keeping the token in `localStorage` and sending it as Bearer still works (and is the only option from `localhost`, where the `.scansafe.nyc` cookie isn't sent). On app load call `/auth/me`. If it returns `{"signed_in": false}`, drop the stored token and show "Sign in".
+- **Sign out:** `POST /auth/logout` (with the cookie and/or the Bearer token) revokes the token on the server and clears the cookie. Always 200 `{"ok": true, "signed_in": false, "revoked": true|false}`. Then forget any stored token.
 - `/auth/me` always answers 200. A missing, malformed, unknown or expired token gives `{"signed_in": false}`. It never returns the full number. The response has `Cache-Control: no-store`.
 
 ## 2. Scanning
@@ -153,7 +157,7 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 
 ## 6. Payments (devnet) and health
 
-- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`.
+- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`. Optional `"payment_method": "solana_devnet"` (default) or `"virtual_card"` (a one-time Lithic sandbox card, signed in with Dogwood linked; section 9).
 - Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `unknown_scan` (404); `not_a_payment`, `hours_required`, `bad_hours`, `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `already_paid`, `payment_in_progress` (409); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
 - `GET /health` returns `{"ok": true, "mock_mode": false}`.
 
@@ -282,4 +286,224 @@ curl -s $B/pay/status/$SID
 curl -s -X POST $B/call-me -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"url\":\"$QR\",\"scan_id\":\"$SID\"}"
 # pays 0.03 devnet test SOL for real (devnet only)
 curl -s -X POST $B/pay -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true}"
+```
+
+## 9. Saved accounts, linked Dogwood, one-time virtual cards
+
+**Test money only.** Payments are Solana **devnet** test SOL or a **one-time virtual card from Lithic's SANDBOX** (no real card network, no real money). **Dogwood Lot & Meter Co. is a fictional operator**: ScanSafe hosts its demo OAuth server and API under `/operators/dogwood`, and its pages live on `https://scansafe-demo-sites.vercel.app/dogwood/...`. Label those screens "Demo" / "Sandbox".
+
+Everything here needs the phone sign-in (section 1): the `ss_session` cookie (`fetch(url, {credentials: "include"})`) or `Authorization: Bearer <token>`. A cookie only counts for POST/PUT/DELETE when the request comes from an allowlisted origin. **Linking Dogwood needs the cookie** (the callback is a browser redirect, which carries cookies but never a Bearer header), so link from a page on `*.scansafe.nyc`. Errors are `{"ok": false, "error": "<code>", "message": "<plain words>"}`; the table at the end says what to show.
+
+### Flows
+
+```
+Accounts page (app.scansafe.nyc/accounts)
+  GET /me                                       -> profile + linked accounts + which payment methods work
+  PUT /me {"plate": "gx 4242"}                  -> saved as "GX 4242"
+  PUT /me {"preferred_payment": "virtual_card"} -> preselects the card on the pay sheet
+
+Connect Dogwood (demo OAuth, authorization code)
+  1. fetch GET /link/dogwood/start (credentials: "include")
+                                                -> {"authorize_url": "https://scansafe-demo-sites.vercel.app/dogwood/authorize?..."}
+                                                   + sets cookie ss_link_nonce (Path=/link, 10 min)
+  2. window.location.href = authorize_url       (same tab; the consent page is the other team's)
+  3. consent page -> POST /operators/dogwood/oauth/authorize -> browser goes to api.scansafe.nyc/link/dogwood/callback
+  4. the callback checks the nonce cookie + that this browser is signed in as the same person, trades the
+     code for a Dogwood token, stores it encrypted, and 302s to
+     APP_BASE_URL/accounts?linked=dogwood        (or ?link_error=<code>&provider=dogwood)
+
+Disconnect: DELETE /me/linked/dogwood
+
+Pay sheet (scan -> result -> pay)
+  POST /pay/quote {"scan_id","hours"}           -> amount_sol AND amount_usd (the virtual-card price)
+  POST /pay {"scan_id","hours","approved":true,"payment_method":"solana_devnet"|"virtual_card"}
+    virtual_card: the server mints a SINGLE_USE Lithic sandbox card capped at exactly amount_usd, Dogwood
+    charges it server to server (simulated authorization + clearing in Lithic's sandbox), the card is closed.
+
+FaceTime agent's live Dogwood app (agent + demo-sites, not the ScanSafe app)
+  agent:   POST /operators/dogwood/app-session {"scan_id"}  (X-Agent-Key) -> {"app_url", "plate", "linked"}
+  browser: GET  /operators/dogwood/app-state?s=<token>       -> meter, plate, hours, amount, status, receipt
+  browser: POST /operators/dogwood/app-state?s=<token> {"hours": 3}
+```
+
+`APP_BASE_URL` is a server setting (`https://app.scansafe.nyc`). If it isn't set, link callbacks go to `https://scansafe.nyc/?linked=...` instead.
+
+### App routes to build (teammate)
+
+**`app.scansafe.nyc/accounts`**
+- Signed out (`GET /me` gives `{"signed_in": false}`): "Sign in with your phone" (section 1).
+- Profile: masked phone (`phone_masked`), **plate** input (2 to 10 letters, numbers, spaces or dashes; show it uppercased; save with `PUT /me {"plate"}`; empty clears it), **preferred payment**: "Devnet wallet (test SOL)" or "One-time virtual card" (`PUT /me {"preferred_payment": "solana_devnet" | "virtual_card"}`; disable the card option when `payment_methods.virtual_card` is false).
+- **Linked accounts**: Dogwood Parking row. Linked: `display` + "linked <date>" (`linked_at`) + **Disconnect** (`DELETE /me/linked/dogwood`, then reload `/me`). Not linked: **Connect Dogwood** (`fetch("/link/dogwood/start", {credentials: "include"})`, then `location.href = authorize_url`).
+- On load, read `?linked=dogwood` ("Dogwood Parking connected.") or `?link_error=<code>&provider=dogwood` (table below), show a toast once, remove the query with `history.replaceState`, and reload `/me`.
+
+**Scan -> pay sheet**: after the result screen (section 8 for meters), the Pay button opens a sheet with a **method choice** preselected from `preferred_payment`:
+- **"Pay with devnet wallet"**: total = quote `amount_sol` ("0.03 test SOL"), exactly as in section 8.
+- **"Pay with a one-time virtual card"**: only for Dogwood meters, only when `payment_methods.virtual_card` is true, Dogwood is in `linked` and `plate` is set (otherwise show what's missing with a link to `/accounts`). Total = quote `amount_usd` ("$7.50, sandbox card"). Small print: "A new card is made for exactly this amount, used once by Dogwood, then closed."
+- Confirm step as in section 8, then `POST /pay` with `"payment_method"`. Always send it; when it's missing the server uses `solana_devnet`, whatever the preference. Use a 45 s client timeout for the card (several sandbox calls).
+- Receipt: devnet: `explorer_url`. Card: "Paid $7.50 with a one-time virtual card ••4142 (Lithic sandbox)" from `card_last4` + `amount_usd`.
+
+### GET /me
+```
+-> 200 {"signed_in": false}                       (not signed in; never an error)
+-> 200 {"signed_in": true, "phone_masked": "•••9861", "plate": "GX 4242", "preferred_payment": "solana_devnet",
+        "linked": [{"provider": "dogwood", "display": "Dogwood Parking", "linked_at": "2026-11-14T22:41:05.123+00:00"}],
+        "providers": {"dogwood": true},
+        "payment_methods": {"solana_devnet": true, "virtual_card": true},
+        "virtual_card_usd_per_hour": 2.5}
+```
+- `plate` is null until set. `preferred_payment` is `"solana_devnet"` until set. `linked` lists only active links. `payment_methods.virtual_card` is false when Lithic isn't configured on the server.
+- Errors: 503 `accounts_not_configured`, 502 `accounts_store_error`.
+
+### PUT /me
+Body `{"plate"?: string|null, "preferred_payment"?: "solana_devnet"|"virtual_card"|null}`. Fields you leave out are unchanged; `null` (or `""` for plate) clears. Returns the same JSON as `GET /me`.
+- 400 `bad_plate` (`"Plates are 2 to 10 letters, numbers, spaces or dashes."`), 400 `bad_preferred_payment`, 401 `not_signed_in`. A non-string plate gets FastAPI's 422.
+
+### GET /me/linked, DELETE /me/linked/{provider}
+- `GET /me/linked` -> `{"linked": [...]}` (same items as `/me`). 401 `not_signed_in`.
+- `DELETE /me/linked/dogwood` -> `{"ok": true, "provider": "dogwood", "revoked": true}` (`false`: it wasn't linked; still 200). The Dogwood token is revoked at the operator too and the stored ciphertext is wiped. 404 `unknown_provider`, 401 `not_signed_in`.
+
+### GET /link/dogwood/start
+```
+-> 200 {"authorize_url": "https://scansafe-demo-sites.vercel.app/dogwood/authorize?client_id=scansafe
+        &redirect_uri=https%3A%2F%2Fapi.scansafe.nyc%2Flink%2Fdogwood%2Fcallback&scope=pay_parking
+        &state=<signed, 10 min>&display=%E2%80%A2%E2%80%A2%E2%80%A29861"}
+   Set-Cookie: ss_link_nonce=<random>; HttpOnly; Secure; SameSite=Lax; Domain=.scansafe.nyc; Path=/link; Max-Age=600
+```
+- `state` is signed by the server, holds the account and sha256 of the nonce cookie, is valid 10 minutes and works once. `display` is the masked phone for the consent page.
+- 401 `not_signed_in`, 503 `accounts_not_configured` (no store or no `ACCOUNT_KEY`).
+
+### Dogwood consent page -> POST /operators/dogwood/oauth/authorize (other team's page)
+```
+POST /operators/dogwood/oauth/authorize
+{"client_id": "scansafe", "redirect_uri": "https://api.scansafe.nyc/link/dogwood/callback",
+ "scope": "pay_parking", "state": "<state from the URL>", "decision": "allow"}
+-> 200 {"redirect": "https://api.scansafe.nyc/link/dogwood/callback?code=dwc_...&state=..."}
+decision "deny" -> 200 {"redirect": "...callback?error=access_denied&state=..."}
+scope other than pay_parking -> 200 {"redirect": "...callback?error=invalid_scope&state=..."}
+```
+- The page then sets `window.location.href = redirect`.
+- 400 (OAuth shape, no redirect): `invalid_client` (client_id isn't `scansafe`), `invalid_redirect_uri` (anything but the exact registered URI: no prefixes, extra path, query or slash), `invalid_state` (tampered, for another purpose, or older than 10 min; `error_description` says "This link expired. Go back to ScanSafe and tap Connect again."), `invalid_request` (decision isn't allow/deny).
+- The code is single use and expires after 5 minutes; reusing it revokes the token it was exchanged for. Dogwood has no login of its own: the demo account comes from the ScanSafe sign-in that started the link (`/api/me` name "Demo driver •••9861").
+
+### GET /link/dogwood/callback?code&state (browser, from the consent page)
+Links only when **all** hold, else 302 `...?link_error=<code>&provider=dogwood`: the `ss_link_nonce` cookie is present and matches the state (`invalid_state` otherwise), this browser is signed in with `ss_session` (`sign_in_first`) as the same person who started (`signed_in_as_someone_else`), and the state wasn't used before (`invalid_state`; a refused try also spends it). Then it exchanges the code in-process with the operator token endpoint (`POST /operators/dogwood/oauth/token`, form `grant_type=authorization_code&code&redirect_uri&client_id&client_secret`; also open over HTTP, answers `{"access_token", "token_type": "Bearer", "expires_in", "scope", "account_id"}`), stores the Dogwood access token **encrypted** as provider `dogwood` (meta `{"account_name": "Dogwood Parking", "scope": "pay_parking"}`), revokes any previous Dogwood link, clears the nonce cookie, and answers **302** to `APP_BASE_URL/accounts?linked=dogwood`. Never JSON.
+
+### Dogwood operator API (Bearer = the Dogwood access token; ScanSafe keeps it encrypted)
+| Call | Response |
+|---|---|
+| `GET /operators/dogwood/api/me` | `{"account_id": "dw_...", "name": "Demo driver •••9861"}` |
+| `POST /operators/dogwood/api/sessions` `{"meter_id": "42", "plate": "GX 4242", "hours": 3}` | `{"session_id": "dws_...", "meter_id": "42", "plate": "GX 4242", "hours": 3, "amount_sol": 0.03, "amount_usd": 7.5, "status": "pending_payment"}` |
+| `GET /operators/dogwood/api/sessions/{session_id}` | same object (+ `"payment"` once paid); only the account that created it, else 404 `unknown_session` |
+| `POST /operators/dogwood/api/sessions/{session_id}/pay` `{"card": {"token", "pan", "cvv", "exp_month", "exp_year", "last_four"}}` (the Lithic card object) | session with `"status": "paid"`, `"payment": {"method": "virtual_card", "provider": "lithic_sandbox", "card_last4", "card_token", "authorization_token", "settled", "simulated": true, "amount_usd", "paid_at"}` |
+
+- `/pay` runs `POST /v1/simulate/authorize {"amount": <amount_usd in cents>, "descriptor": "DOGWOOD LOT & METER", "pan", "mcc": "7523"}` on Lithic's sandbox (the card's own spend limit really applies) and then `/v1/simulate/clearing`. Dogwood keeps **only** `card_last4` + the Lithic `card_token`. The body is never echoed: bad card -> 400 `card_invalid`, a decline -> 402 `card_declined`, already paid -> 409 `already_paid`. ScanSafe's own `/pay` calls this in-process (server to server); nobody else needs to.
+- 401 `{"error": "invalid_token"}` (+ `WWW-Authenticate: Bearer`) for a missing, revoked or expired token; 403 `insufficient_scope`; 404 `unknown_meter` (only meter `42`); 400 `bad_plate`, `bad_hours` (1 to 4).
+
+### Agent live view: POST /operators/dogwood/app-session, GET/POST /operators/dogwood/app-state
+```
+POST /operators/dogwood/app-session      X-Agent-Key: <AGENT_INTERNAL_KEY>      (agent server only)
+{"scan_id": "3f9a1c2b7d4e"}
+-> 200 {"app_url": "https://scansafe-demo-sites.vercel.app/dogwood/app?s=<one-time token>",
+        "plate": "GX 4242", "linked": true, "expires_in": 900}
+
+GET /operators/dogwood/app-state?s=<token>          (the Dogwood web app polls this from the browser)
+-> 200 {"meter_id": "42", "operator": "Dogwood Lot & Meter Co.", "plate": "GX 4242",
+        "hours": 3, "rate_per_hour_sol": 0.01, "amount_sol": 0.03, "min_hours": 1, "max_hours": 4,
+        "status": "waiting_for_approval"}
+   paid with the devnet wallet -> also "payment_method": "solana_devnet",
+        "receipt": {"signature": "5Kx...", "explorer_url": "https://explorer.solana.com/tx/...?cluster=devnet",
+                    "paid_at": 1794696115, "method": "solana_devnet"}
+   paid with a virtual card -> "payment_method": "virtual_card", "amount_usd": 7.5,
+        "receipt": {"method": "virtual_card", "provider": "lithic_sandbox", "card_last4": "4142", "amount_usd": 7.5,
+                    "paid_at": 1794696115, "signature": null, "explorer_url": null, "dogwood_session_id": "dws_...",
+                    "text": "Paid with a one-time virtual card ••4142 (Lithic sandbox)"}
+
+POST /operators/dogwood/app-state?s=<token>   {"hours": 2}   -> the new app-state
+```
+- `status`: `choose` (no hours picked yet), `waiting_for_approval` (hours picked in the ScanSafe app or the Dogwood app; waiting for the user's confirm in ScanSafe), `paid`. It mirrors `/pay/quote` and `/pay/status` for that scan. `hours`/`amount_sol` are null while `choose`. `paid_at` is unix seconds. Show `receipt.text` as is.
+- `plate`/`linked`: from the saved account of the person this scan belongs to: the person `/call-me` rang for this meter code (or the first signed-in `/pay/quote` / `/pay` for it). Null/false otherwise.
+- The token in `app_url` is signed, works only for that scan, lasts **15 minutes**, and a newer `app-session` for the same scan **replaces** it (the old link gets 401 `app_link_invalid`). Expired: 401 `app_link_expired`.
+- `POST app-state` changes the scan's quote (what the agent says and shows). It **never pays**; only the ScanSafe app's confirm button pays, with its own hours. 409 `already_paid` once paid; 400 `bad_hours`.
+- app-session errors: 401 `bad_agent_key`, 503 `agent_key_not_configured`, 404 `unknown_scan`, 400 `not_a_meter` / `not_dogwood` / `not_a_payment`, 403 `merchant_not_verified`.
+
+### POST /pay with a one-time virtual card (Lithic sandbox)
+```
+POST /pay   (cookie or Bearer)
+{"scan_id": "3f9a1c2b7d4e", "hours": 3, "approved": true, "payment_method": "virtual_card"}
+-> 200 {"ok": true, "scan_id": "3f9a1c2b7d4e", "method": "virtual_card", "provider": "lithic_sandbox",
+        "amount_usd": 7.5, "currency": "USD", "hours": 3, "merchant": "Dogwood Lot & Meter Co.",
+        "card_last4": "4142", "card_token": "<lithic card token>", "authorization_token": "<lithic tx token>",
+        "settled": true, "simulated": true, "card_closed": true, "dogwood_session_id": "dws_...",
+        "paid_at": 1794696115, "payment": {...}}
+GET /pay/status/3f9a1c2b7d4e
+-> 200 {"scan_id": "...", "state": "paid", "method": "virtual_card", "provider": "lithic_sandbox",
+        "card_last4": "4142", "card_token": "...", "amount_usd": 7.5, "authorization_token": "...", ...}
+```
+- Needs: signed in, `approved: true`, explicit `hours` (the stored quote is never used), a **verified Dogwood meter** code, **Dogwood linked** and a **plate** saved. One payment per `scan_id` whichever method (a second one gets 409 `already_paid`).
+- Amount: `hours x DOGWOOD_RATE_USD` (default $2.50/h: 3 h = $7.50; the quote's `amount_usd`). The server mints a Lithic `SINGLE_USE` card with `spend_limit` = exactly that in cents (`spend_limit_duration: TRANSACTION`, memo `ScanSafe · Dogwood meter 42 · <scan_id>`), opens a Dogwood parking session for your plate, has Dogwood charge the card (above), then closes the card. The card is also closed on any failure. Demo cap $25 (`VIRTUAL_CARD_MAX_USD`).
+- The card number, CVV and expiry never leave the server: they are not logged, stored or returned. Only `card_last4` and the Lithic `card_token` are kept.
+- Solana's `/pay` response is unchanged; its status now also has `"method": "solana_devnet"` and `"paid_at"`.
+- Errors: 401 `not_signed_in`, 403 `dogwood_not_linked`, 400 `plate_required`, 400 `not_a_meter` / `not_dogwood` (fixed-price codes: devnet wallet only), 400 `over_cap`, 400 `bad_payment_method`, 402 `card_declined` (status becomes `failed`; the user may retry, with a fresh card), 400 `card_invalid`, 409 `dogwood_relink_needed`, 503 `lithic_not_configured` / `lithic_sandbox_only`, 502 `lithic_unreachable` / `lithic_auth_failed` / `lithic_error` / `lithic_no_pan` / `dogwood_error`.
+
+### Errors and what to show (plain words)
+
+| Where | `error` / `link_error` | Show |
+|---|---|---|
+| any | `not_signed_in` (401) | "Sign in with your phone first." -> sign-in |
+| `/me*`, link start | `accounts_not_configured` (503) | "Saved accounts aren't available right now." |
+| `/me*` | `accounts_store_error` (502) | "We couldn't reach your saved account. Try again in a minute." |
+| `PUT /me` | `bad_plate` (400) | "Plates are 2 to 10 letters, numbers, spaces or dashes." |
+| `/pay` card | `dogwood_not_linked` (403) | "Connect Dogwood Parking first." (link to /accounts) |
+| `/pay` card | `plate_required` (400) | "Add your plate first." (link to /accounts) |
+| `/pay` card | `lithic_not_configured`, `lithic_sandbox_only` (503) | "Virtual cards aren't available right now." (hide the option) |
+| `/pay` card | `card_declined` (402) | "The card was declined. Nothing was charged." |
+| `/pay` card | `dogwood_relink_needed` (409) | "Please reconnect Dogwood Parking in your account." |
+| `/pay` card | `lithic_*`, `dogwood_error`, `card_invalid` (502/400) | "Couldn't pay with a virtual card. Nothing was charged. Try again or use the devnet wallet." |
+| callback | `access_denied` | "You didn't allow ScanSafe to use your Dogwood account." |
+| callback | `sign_in_first` | "Sign in on this browser first, then tap Connect again." |
+| callback | `link_expired` | "That took too long. Tap Connect again." |
+| callback | `invalid_state` | "That link didn't work. Tap Connect again (in this same browser)." |
+| callback | `signed_in_as_someone_else` | "You're signed in with a different phone in this browser. Sign out and try again." |
+| callback | `dogwood_refused`, `dogwood_error`, `server_error` | "We couldn't connect that account. Try again." |
+
+### Server setup (agent server `~/HackEmory-2026/.env`, never commit values, never paste them in chat)
+
+1. **Lithic sandbox key:** sign up at the Lithic Dashboard (lithic.com, free sandbox), open Program settings / API keys **in Sandbox**, and copy the sandbox API key. It only works against `https://sandbox.lithic.com`, which is the only host the code ever calls.
+2. On the server:
+```bash
+ssh root@144.202.25.65
+cd ~/HackEmory-2026
+python3 -c 'import cryptography'      # must print nothing (it's installed: 50.0.2); else pip install cryptography
+# Generate on the server and append without echoing (each line prints nothing):
+echo "ACCOUNT_KEY=$(python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')" >> .env
+echo "ACCOUNT_PEPPER=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> .env
+echo "AGENT_INTERNAL_KEY=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> .env
+echo "APP_BASE_URL=https://app.scansafe.nyc" >> .env
+echo "LITHIC_ENV=sandbox" >> .env
+nano .env      # paste LITHIC_API_KEY=<sandbox key>   (optional DOGWOOD_RATE_USD=2.50, VIRTUAL_CARD_MAX_USD=25)
+chmod 600 .env
+python3 -m data.setup       # optional: "OK   Tiger Data: accounts + linked_accounts ready" (tables are also created on first use)
+systemctl restart scansafe-api scansafe-agent    # .env is read at start; the agent needs AGENT_INTERNAL_KEY too
+```
+- `ACCOUNT_PEPPER`: if it's missing the API generates one into `~/.scansafe-account-pepper` (chmod 600) on first use. **Never change or lose it** once accounts exist: every saved account is keyed by `sha256(phone + pepper)`, and the OAuth-state / app-link signing keys and the Dogwood demo client secret derive from it.
+- `ACCOUNT_KEY`: losing or rotating it makes stored Dogwood links unreadable (users reconnect; `/pay` answers `dogwood_relink_needed`).
+- `LITHIC_ENV` must be exactly `sandbox`, or card payments answer 503 `lithic_sandbox_only`.
+- Dogwood operator tokens and sessions live in `~/.scansafe-dogwood-operator.json` (chmod 600, token hashes, card last4 + Lithic card tokens only); override with `DOGWOOD_OPERATOR_FILE`.
+- Optional: `API_BASE_URL` (default `https://api.scansafe.nyc`, builds the redirect URI), `DOGWOOD_SITE_URL` (default `https://scansafe-demo-sites.vercel.app`), `SESSION_COOKIE_DOMAIN` (default `.scansafe.nyc`; empty = host-only, for local dev), `CORS_EXTRA_ORIGINS`, `ACCOUNTS_STORE=memory` (local dev only, forgets on restart).
+
+### curl
+```bash
+B=https://api.scansafe.nyc; H="Authorization: Bearer $TOKEN"
+curl -s $B/me -H "$H"
+curl -s -X PUT $B/me -H "$H" -H 'Content-Type: application/json' -d '{"plate":"gx 4242","preferred_payment":"virtual_card"}'
+curl -s $B/me/linked -H "$H"
+curl -s -X DELETE $B/me/linked/dogwood -H "$H"
+curl -s -X POST $B/auth/logout -H "$H"
+# (linking Dogwood is a browser flow: it needs the ss_session + ss_link_nonce cookies)
+# pays $7.50 with a one-time Lithic SANDBOX card (test money; needs Dogwood linked + a plate)
+curl -s -X POST $B/pay -H "$H" -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true,\"payment_method\":\"virtual_card\"}"
+curl -s $B/pay/status/$SID
+# agent server only
+curl -s -X POST localhost:8000/operators/dogwood/app-session -H "X-Agent-Key: $AGENT_INTERNAL_KEY" -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\"}"
+curl -s "$B/operators/dogwood/app-state?s=<token from app_url>"
 ```

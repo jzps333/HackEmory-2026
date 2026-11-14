@@ -14,7 +14,9 @@ from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
 
-from api import config, recent_scans, result_store
+from api import config, recent_scans, result_store, session
+from api.dogwood import router as dogwood_router
+from api.routes_accounts import router as accounts_router
 from api.routes_data import flagged_before, record_scan
 from api.routes_data import router as data_router
 from api.routes_call import router as call_router
@@ -27,12 +29,16 @@ from api.schema import ScanResult
 
 log = logging.getLogger("scansafe.scan")
 app = FastAPI(title="ScanSafe")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Explicit origins (not "*") so browsers may send the ss_session cookie (api/session.py).
+app.add_middleware(CORSMiddleware, allow_origins=session.allowed_origins(), allow_credentials=True,
+                   allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"], allow_headers=["*"])
 app.include_router(data_router)   # /report, /pins, /search, /stats/*
 app.include_router(pay_router)    # /pay (devnet only)
 app.include_router(chert_router)  # /chert/webhook (Chert call + message events, signed)
 app.include_router(call_router)   # /call-me (Chert FaceTimes the person, agent walks the link live)
 app.include_router(result_router) # /result/{scan_id} (the page linked from follow-up texts)
+app.include_router(accounts_router)  # /me, /me/linked, /link/dogwood/* (saved accounts)
+app.include_router(dogwood_router)   # /operators/dogwood/* (DEMO: fictional operator's OAuth + API)
 
 
 class ScanRequest(BaseModel):

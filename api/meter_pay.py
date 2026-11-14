@@ -26,6 +26,9 @@ _lock = threading.Lock()
 _quotes: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
 _status: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
 _paying: set[str] = set()
+# scan_id -> phone_hash of the signed-in person this meter scan belongs to (set by /call-me,
+# claimed by a signed-in /pay/quote or /pay). Only used to show their plate in the Dogwood app.
+_owners: "OrderedDict[str, tuple[float, dict]]" = OrderedDict()
 
 
 class PayStateError(Exception):
@@ -112,10 +115,13 @@ def make_quote(scan_id: str, raw_hours: Any) -> dict:
     """Validate and store the latest quote for scan_id. Raises PayStateError."""
     _scan, payment, meter = meter_scan(scan_id)
     hours = parse_hours(raw_hours, meter)
+    from api.merchants import dogwood_rate_usd, meter_usd
     quote = {"scan_id": scan_id, "merchant": payment.label,
              "rate_per_hour_sol": meter.rate_per_hour_sol, "hours": hours,
              "amount_sol": meter.amount_sol(hours), "min_hours": meter.min_hours,
              "max_hours": meter.max_hours, "meter_url": meter.meter_url,
+             # the same hours paid with a one-time virtual card instead (Lithic sandbox, test USD)
+             "rate_per_hour_usd": float(dogwood_rate_usd()), "amount_usd": float(meter_usd(hours)),
              "updated_at": round(time.time(), 3)}
     with _lock:
         _put(_quotes, scan_id, quote)
@@ -154,8 +160,30 @@ def finish_payment(scan_id: str, status: dict) -> None:
             _put(_status, scan_id, {"scan_id": scan_id, **status})
 
 
+def set_owner(scan_id: str, phone_hash: str) -> None:
+    """The person on the FaceTime call for this scan (replaces an earlier claim)."""
+    if scan_id and phone_hash:
+        with _lock:
+            _put(_owners, scan_id, {"phone_hash": phone_hash})
+
+
+def claim_owner(scan_id: str, phone_hash: str) -> None:
+    """Record a signed-in person as the owner, unless someone already is."""
+    if scan_id and phone_hash:
+        with _lock:
+            if _get(_owners, scan_id) is None:
+                _put(_owners, scan_id, {"phone_hash": phone_hash})
+
+
+def get_owner(scan_id: str) -> Optional[str]:
+    with _lock:
+        o = _get(_owners, scan_id)
+    return o["phone_hash"] if o else None
+
+
 def clear() -> None:  # tests
     with _lock:
         _quotes.clear()
         _status.clear()
         _paying.clear()
+        _owners.clear()
