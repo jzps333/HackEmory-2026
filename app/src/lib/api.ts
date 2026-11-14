@@ -195,13 +195,43 @@ export async function pay(result: ScanResult): Promise<PayResponse> {
   return { tx_signature: res.signature, explorer_url: res.explorer_url };
 }
 
-export async function report(result: ScanResult): Promise<void> {
+/** What POST /report did. `pinned` is the only code where `stored` is true. */
+export type ReportCode = "pinned" | "not_malicious" | "no_location" | "unknown_scan" | "not_pinned";
+export interface ReportResult {
+  stored: boolean;
+  code: ReportCode;
+  /** The backend's own plain sentence, when it gave one. */
+  reason: string;
+}
+
+const REPORT_CODES: readonly string[] = ["pinned", "not_malicious", "no_location", "unknown_scan", "not_pinned"];
+
+/**
+ * Report a scan for the scam map. Sends only the scan_id: the backend looks the scan up itself.
+ * A 200 always resolves (pinned or not, see `code`); a non-2xx (503 map not set up, 502 upstream) or a
+ * network failure throws.
+ */
+export async function report(result: ScanResult): Promise<ReportResult> {
   if (DEMO_MODE) {
     await wait(600);
-    return;
+    // Same rules as the backend, so the demo shows the real messages. Nothing is saved.
+    if (result.verdict !== "malicious") return { stored: false, code: "not_malicious", reason: "Demo mode: nothing was saved." };
+    if (!result.location) return { stored: false, code: "no_location", reason: "Demo mode: nothing was saved." };
+    return { stored: true, code: "pinned", reason: "Demo mode: nothing was saved." };
   }
-  await request<unknown>("/report", { method: "POST", body: JSON.stringify(result) });
+  const res = await request<{ stored?: unknown; code?: unknown; reason?: unknown } | null>("/report", {
+    method: "POST",
+    body: JSON.stringify({ scan_id: result.scan_id }),
+  });
+  const stored = res?.stored === true;
+  const raw = typeof res?.code === "string" ? res.code : "";
+  // Keep `stored` and `code` in step: only a stored pin counts as "pinned"; anything unknown is "not_pinned".
+  const code: ReportCode = stored ? "pinned" : REPORT_CODES.includes(raw) && raw !== "pinned" ? (raw as ReportCode) : "not_pinned";
+  return { stored, code, reason: typeof res?.reason === "string" ? res.reason : "" };
 }
+
+/** Why sample data is showing: no API URL is set ("demo_mode"), or the live API failed or isn't set up ("unavailable"). */
+export type SampleReason = "demo_mode" | "unavailable";
 
 /** Accept a bare array, {pins:[...]}, {results:[...]} or a raw Typesense {hits:[{document}]}. */
 function toPins(data: unknown): Pin[] {
@@ -216,34 +246,42 @@ function toPins(data: unknown): Pin[] {
     .filter((p) => Array.isArray(p?.location) && p.location.length === 2 && isFinite(p.location[0]) && isFinite(p.location[1]));
 }
 
-export async function getPins(lat: number, lng: number, radiusKm = 5): Promise<{ pins: Pin[]; demo: boolean }> {
-  if (DEMO_MODE) return { pins: mockPins(), demo: true };
+/** `demo` is true whenever sample data is returned; `reason` says why (null = live data). */
+export async function getPins(
+  lat: number,
+  lng: number,
+  radiusKm = 5,
+): Promise<{ pins: Pin[]; demo: boolean; reason: SampleReason | null }> {
+  if (DEMO_MODE) return { pins: mockPins(), demo: true, reason: "demo_mode" };
   try {
     const data = await request<unknown>(`/pins?lat=${lat}&lng=${lng}&radius_km=${radiusKm}`, undefined, 15000);
-    return { pins: toPins(data), demo: false };
+    return { pins: toPins(data), demo: false, reason: null };
   } catch {
-    return { pins: mockPins(), demo: true };
+    // 503 (map not set up), 502, or network: keep the page useful with sample pins, and say so.
+    return { pins: mockPins(), demo: true, reason: "unavailable" };
   }
 }
 
-export async function searchPins(q: string): Promise<{ pins: Pin[]; demo: boolean }> {
+export async function searchPins(q: string): Promise<{ pins: Pin[]; demo: boolean; reason: SampleReason | null }> {
   const local = () => {
     const s = q.toLowerCase();
     return mockPins().filter((p) =>
       [p.url, p.domain, p.explanation, p.scam_type].some((f) => (f || "").toLowerCase().includes(s)),
     );
   };
-  if (DEMO_MODE) return { pins: local(), demo: true };
+  if (DEMO_MODE) return { pins: local(), demo: true, reason: "demo_mode" };
   try {
     const data = await request<unknown>(`/search?q=${encodeURIComponent(q)}`, undefined, 15000);
-    return { pins: toPins(data), demo: false };
+    return { pins: toPins(data), demo: false, reason: null };
   } catch {
-    return { pins: local(), demo: true };
+    return { pins: local(), demo: true, reason: "unavailable" };
   }
 }
 
-export async function getStats(hours = 24): Promise<{ summary: StatsSummary; hourly: HourlyBucket[]; demo: boolean }> {
-  if (DEMO_MODE) return { summary: mockSummary(), hourly: mockHourly(hours), demo: true };
+export async function getStats(
+  hours = 24,
+): Promise<{ summary: StatsSummary; hourly: HourlyBucket[]; demo: boolean; reason: SampleReason | null }> {
+  if (DEMO_MODE) return { summary: mockSummary(), hourly: mockHourly(hours), demo: true, reason: "demo_mode" };
   try {
     const [raw, hourlyRaw] = await Promise.all([
       request<BackendSummary>("/stats/summary", undefined, 15000),
@@ -267,9 +305,9 @@ export async function getStats(hours = 24): Promise<{ summary: StatsSummary; hou
       if (row.verdict === "malicious") b.malicious += row.total;
       byHour.set(row.hour, b);
     }
-    return { summary, hourly: [...byHour.values()], demo: false };
+    return { summary, hourly: [...byHour.values()], demo: false, reason: null };
   } catch {
-    return { summary: mockSummary(), hourly: mockHourly(hours), demo: true };
+    return { summary: mockSummary(), hourly: mockHourly(hours), demo: true, reason: "unavailable" };
   }
 }
 

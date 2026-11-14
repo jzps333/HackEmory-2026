@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import { getPins, searchPins } from "@/lib/api";
+import { getPins, searchPins, type SampleReason } from "@/lib/api";
 import { percent, scamLabel, timeAgo } from "@/lib/labels";
 import type { Pin } from "@/lib/types";
 
@@ -16,7 +16,7 @@ const ATLANTA: [number, number] = [33.79, -84.32];
 export default function MapClient() {
   const [center, setCenter] = useState<[number, number]>(ATLANTA);
   const [pins, setPins] = useState<Pin[]>([]);
-  const [demo, setDemo] = useState(false);
+  const [sample, setSample] = useState<SampleReason | null>(null);
   const [status, setStatus] = useState("Loading reported scams…");
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Pin[] | null>(null);
@@ -26,7 +26,7 @@ export default function MapClient() {
     setStatus("Loading reported scams…");
     const res = await getPins(c[0], c[1], 5);
     setPins(res.pins);
-    setDemo(res.demo);
+    setSample(res.reason);
     setStatus(`${res.pins.length} reported scam${res.pins.length === 1 ? "" : "s"} within 5 kilometers.`);
   }, []);
 
@@ -59,7 +59,7 @@ export default function MapClient() {
     setStatus("Searching…");
     const res = await searchPins(term);
     setResults(res.pins);
-    if (res.demo) setDemo(true);
+    if (res.reason) setSample(res.reason);
     if (res.pins.length) setPins((prev) => {
       const seen = new Set(prev.map((p) => p.id ?? `${p.url}|${p.reported_at}`));
       return [...prev, ...res.pins.filter((p) => !seen.has(p.id ?? `${p.url}|${p.reported_at}`))];
@@ -71,7 +71,8 @@ export default function MapClient() {
     <>
       <h1>Scam map</h1>
       <p>Red pins show scam QR codes that people reported. Tap a pin to see what it was.</p>
-      {demo && <p className="notice"><span className="demo-badge">Demo</span> Showing sample pins around Atlanta.</p>}
+      {sample === "demo_mode" && <p className="notice"><span className="demo-badge">Demo</span> Showing sample pins around Atlanta.</p>}
+      {sample === "unavailable" && <p className="notice" role="status">The live scam map isn&apos;t connected yet. You&apos;re seeing sample pins.</p>}
 
       <form onSubmit={onSearch} role="search" aria-label="Search reported scams">
         <div className="search-row">

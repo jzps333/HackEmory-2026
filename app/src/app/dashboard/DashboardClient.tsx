@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getStats } from "@/lib/api";
+import { getStats, type SampleReason } from "@/lib/api";
 import { scamLabel } from "@/lib/labels";
 import type { HourlyBucket, StatsSummary } from "@/lib/types";
 
@@ -14,7 +14,7 @@ function hourLabel(h: string | number): string {
 export default function DashboardClient() {
   const [summary, setSummary] = useState<StatsSummary | null>(null);
   const [hourly, setHourly] = useState<HourlyBucket[]>([]);
-  const [demo, setDemo] = useState(false);
+  const [sample, setSample] = useState<SampleReason | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -23,7 +23,7 @@ export default function DashboardClient() {
       if (!alive) return;
       setSummary(res.summary);
       setHourly(res.hourly);
-      setDemo(res.demo);
+      setSample(res.reason);
     };
     void load();
     const t = setInterval(load, 30000);
@@ -41,7 +41,8 @@ export default function DashboardClient() {
     <>
       <h1>Stats</h1>
       <p>What people checked with ScanSafe. Updates every 30 seconds.</p>
-      {demo && <p className="notice"><span className="demo-badge">Demo</span> Sample numbers. No server is connected.</p>}
+      {sample === "demo_mode" && <p className="notice"><span className="demo-badge">Demo</span> Sample numbers. No server is connected.</p>}
+      {sample === "unavailable" && <p className="notice" role="status">Live stats aren&apos;t available right now. You&apos;re seeing sample numbers.</p>}
 
       <section aria-labelledby="tiles-h">
         <h2 id="tiles-h" className="sr-only">Totals</h2>
