@@ -1,0 +1,34 @@
+{
+  "scan_id": "mock-safe-001",
+  "url": "solana:7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU?amount=0.02&label=Peachtree%20Parking%20Co.&message=Meter%2042&reference=4Zs6N8Wm2uqv3kG8ePp1oZ5hJ7cXy9tBnRdLfQaVwE2s",
+  "final_url": null,
+  "redirect_chain": [],
+  "domain": null,
+  "page_title": null,
+  "verdict": "safe",
+  "jev_score": 0.06,
+  "scam_type": "none",
+  "explanation": "This looks safe. It's a payment of 0.02 test SOL, about three dollars and fifty cents, to Peachtree Parking Co., and the wallet matches their verified wallet.",
+  "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.88,
+    "asks_password_p": 0.0,
+    "asks_payment_p": 1.0,
+    "prompt_injection_p": 0.0,
+    "malicious_p": 0.06
+  },
+  "screenshots": [],
+  "flagged_before": 0,
+  "payment": {
+    "recipient": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+    "amount_sol": 0.02,
+    "label": "Peachtree Parking Co.",
+    "message": "Meter 42",
+    "reference": "4Zs6N8Wm2uqv3kG8ePp1oZ5hJ7cXy9tBnRdLfQaVwE2s",
+    "merchant_verified": true,
+    "tx_signature": null
+  },
+  "location": null,
+  "scanned_at": 1794672060,
+  "scan_ms": 300
+}

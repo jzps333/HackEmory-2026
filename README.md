@@ -208,3 +208,42 @@ Report dataset size and limitations alongside metrics. Do not claim production p
 
 Any future payment flow needs its own trusted execution path, a visible merchant and amount, and explicit user approval. Payment credentials and wallet keys must never enter the scanning worker.
 
+
+---
+
+## What's built so far (setup commit)
+
+The first working code uses a simpler layout than the proposal above. Rename it to the proposed
+layout later if the team prefers; nothing depends on folder names except imports in `api/`.
+
+| Folder | What's in it | Owner |
+|---|---|---|
+| `api/` | FastAPI: `POST /scan` (synchronous for now, mock mode until the sandbox is live), Jev typed checks, verdict policy, Gemini explanation, Solana Pay wallet check | everyone calls this |
+| `sandbox/` | Playwright scanner in a locked-down throwaway Docker container + token-protected runner for a separate Vultr VM with no keys | Person 1 |
+| `chert/` | Chert FaceTime agent (LiveKit) + iMessage follow-ups | Person 2 |
+| `data/` | Typesense map + search, Tiger Data scan log + dashboard | Person 3 |
+| `app/` | Next.js web app: scanner, results, map | Person 4 |
+| `shared/` | `scan_result` format + safe/malicious mocks everyone builds against | |
+
+See [TEAM.md](TEAM.md) for roles, checkpoints and the Devpost checklist.
+
+```bash
+cp .env.example .env        # your own keys; never commit .env
+pip install -r requirements.txt
+uvicorn api.main:app --reload
+python -m pytest -q
+```
+
+## Built with
+
+- [FastAPI](https://fastapi.tiangolo.com/), [httpx](https://www.python-httpx.org/), [Pydantic](https://docs.pydantic.dev/)
+- [Playwright](https://playwright.dev/) + Docker, hosted on [Vultr](https://www.vultr.com/)
+- [Jev](https://typesafe.ai/) by TypeSafe AI, via the OpenRouter Decisions API
+- [Google Gemini API](https://ai.google.dev/)
+- [Chert](https://www.trychert.com/) (FaceTime + iMessage) and [LiveKit](https://livekit.io/)
+- [Typesense](https://typesense.org/), [Tiger Data](https://www.tigerdata.com/)
+- [Solana](https://solana.com/) devnet + Solana Pay
+- [Next.js](https://nextjs.org/), [Leaflet](https://leafletjs.com/) + OpenStreetMap
+- Built with [Cursor](https://cursor.com/); pushes reviewed by Grok Bot (GitHub Actions) and
+  [Entire](https://entire.io/) Trails; sessions captured with the Entire CLI
+- Jev client adapted from our earlier project [Relay](https://github.com/jzps333/relay)

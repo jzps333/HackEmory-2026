@@ -1,0 +1,9 @@
+# Backend (api/)
+fastapi
+uvicorn
+httpx
+pydantic>=2
+python-dotenv
+
+# Tests
+pytest

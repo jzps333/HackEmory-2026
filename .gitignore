@@ -1,0 +1,29 @@
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*-credentials.*
+id.json
+*.keypair.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+dist/
+
+# Sandbox output
+sandbox/out/
+screenshots/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

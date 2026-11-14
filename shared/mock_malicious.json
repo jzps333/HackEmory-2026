@@ -1,0 +1,30 @@
+{
+  "scan_id": "mock-mal-001",
+  "url": "https://bit.ly/peachtree-park-42",
+  "final_url": "https://peachtree-parking-pay.xyz/meter/42",
+  "redirect_chain": [
+    "https://bit.ly/peachtree-park-42",
+    "https://trk.redirect-hub.top/r?id=8812",
+    "https://peachtree-parking-pay.xyz/meter/42"
+  ],
+  "domain": "peachtree-parking-pay.xyz",
+  "page_title": "Peachtree Parking Co. - Pay Your Meter",
+  "verdict": "malicious",
+  "jev_score": 0.94,
+  "scam_type": "fake_parking_or_toll",
+  "explanation": "Don't pay this. It's a fake parking page. It uses the Peachtree Parking name, but the website is not theirs, and it went through two hidden redirects before asking for your card number.",
+  "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 0.91,
+    "asks_password_p": 0.08,
+    "asks_payment_p": 0.97,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.94
+  },
+  "screenshots": ["mock/mal-1.png", "mock/mal-2.png"],
+  "flagged_before": 3,
+  "payment": null,
+  "location": [33.7925, -84.3240],
+  "scanned_at": 1794672000,
+  "scan_ms": 4200
+}
