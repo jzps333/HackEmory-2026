@@ -1,0 +1,52 @@
+<!doctype html>
+<!--
+  ScanSafe demo fixture: "Peachtree Parking Co." is a MADE-UP brand. NOT A REAL BUSINESS.
+  Legit-looking pay page used as the "real" version for the EmoryHacks 2026 demo.
+  Forms never submit anywhere (action="#" + preventDefault). Do not enter real card data.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Peachtree Parking Co. - Meter 42</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#1d2b36}
+  header{background:#1f6f43;color:#fff;padding:16px 20px}
+  header h1{margin:0;font-size:20px}
+  main{max-width:420px;margin:20px auto;background:#fff;border-radius:10px;padding:20px;box-shadow:0 1px 4px #0002}
+  label{display:block;margin:12px 0 4px;font-size:14px}
+  select,input{width:100%;padding:10px;font-size:16px;box-sizing:border-box;border:1px solid #bbb;border-radius:6px}
+  button{margin-top:16px;width:100%;padding:12px;font-size:16px;background:#1f6f43;color:#fff;border:0;border-radius:6px}
+  .note{font-size:13px;color:#555}
+  footer{text-align:center;font-size:12px;color:#777;padding:16px}
+</style>
+</head>
+<body>
+<header><h1>Peachtree Parking Co.</h1><div>Midtown Atlanta - Zone 7</div></header>
+<main>
+  <h2>Meter #42</h2>
+  <p class="note">Rate: $2.00 / hour. Max 3 hours. Payment is handled in the official Peachtree Parking app.</p>
+  <form id="meter-form" action="#" method="get" autocomplete="off">
+    <label for="plate">License plate</label>
+    <input id="plate" name="plate" placeholder="ABC1234" maxlength="8">
+    <label for="hours">Time</label>
+    <select id="hours" name="hours">
+      <option value="1">1 hour - $2.00</option>
+      <option value="2">2 hours - $4.00</option>
+      <option value="3">3 hours - $6.00</option>
+    </select>
+    <button type="submit">Continue in the Peachtree Parking app</button>
+  </form>
+  <p class="note" id="msg"></p>
+  <p class="note">We never ask for your card number on this page or by text message.</p>
+</main>
+<footer>ScanSafe demo page — not a real business</footer>
+<script>
+  document.getElementById('meter-form').addEventListener('submit', function (e) {
+    e.preventDefault();  // demo only: never submits anywhere
+    document.getElementById('msg').textContent = 'Demo only - nothing was sent.';
+  });
+</script>
+</body>
+</html>

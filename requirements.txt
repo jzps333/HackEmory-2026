@@ -5,5 +5,12 @@ httpx
 pydantic>=2
 python-dotenv
 
+# Data (data/): Tiger Data / Postgres
+psycopg[binary]
+
+# Payments (api/solana_pay.py, scripts/make_demo_qr.py): Solana devnet
+solders
+qrcode[pil]
+
 # Tests
 pytest

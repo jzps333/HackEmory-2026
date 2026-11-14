@@ -3,16 +3,21 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from api import config
+from api.routes_data import flagged_before, record_scan
+from api.routes_data import router as data_router
+from api.routes_pay import router as pay_router
 from api.scan import scan
 from api.schema import ScanResult
 
 app = FastAPI(title="ScanSafe")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.include_router(data_router)   # /report, /pins, /search, /stats/*
+app.include_router(pay_router)    # /pay (devnet only)
 
 
 class ScanRequest(BaseModel):
@@ -27,6 +32,9 @@ def health() -> dict:
 
 
 @app.post("/scan", response_model=ScanResult)
-def scan_endpoint(req: ScanRequest) -> ScanResult:
+def scan_endpoint(req: ScanRequest, background_tasks: BackgroundTasks) -> ScanResult:
     location = [req.lat, req.lng] if req.lat is not None and req.lng is not None else None
-    return scan(req.url.strip(), location)
+    result = scan(req.url.strip(), location)
+    result.flagged_before = flagged_before(result)   # "reported N times near you"; never raises
+    background_tasks.add_task(record_scan, result)   # log to Tiger Data off the request path
+    return result

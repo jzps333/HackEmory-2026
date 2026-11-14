@@ -9,13 +9,13 @@ Fields: `url`, `domain` (facet), `scam_type` (facet), `jev_score` (float), `expl
 Only pin **malicious** scans, only when the user taps Report, never store who reported.
 
 ## Tiger Data: every scan over time (`scans` hypertable)
-```sql
-CREATE TABLE scans (time TIMESTAMPTZ NOT NULL, domain TEXT, verdict TEXT, scam_type TEXT,
-                    jev_score DOUBLE PRECISION, scan_ms INTEGER);
-SELECT create_hypertable('scans', 'time');
-CREATE MATERIALIZED VIEW scans_hourly WITH (timescaledb.continuous) AS
-SELECT time_bucket('1 hour', time) AS hour, scam_type, count(*) AS total, avg(jev_score) AS avg_score
-FROM scans GROUP BY hour, scam_type;
-```
+Schema lives in `data/tiger_store.py` (`scans` hypertable + `scans_hourly` continuous aggregate
+bucketed by hour, scam_type, verdict with count / avg jev_score / avg scan_ms, real-time, refreshed every 5 min).
 Dashboard: scans per hour (safe vs malicious), top scam types, average sandbox time, Jev score spread.
 Connection string goes in `.env` as `TIGER_DATABASE_URL`, never in git.
+
+## Setup and endpoints
+Env: `TYPESENSE_HOST` (full https URL), `TYPESENSE_API_KEY`, `TIGER_DATABASE_URL`.
+Run once: `python -m data.setup` (prints OK / FAIL / SKIP per service, never secrets).
+Endpoints (`api/routes_data.py`): `POST /report`, `GET /pins?lat&lng&radius_km`, `GET /search?q`,
+`GET /stats/hourly?hours`, `GET /stats/summary`. 503 if a service isn't configured, 502 if it errors.

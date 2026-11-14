@@ -12,7 +12,7 @@
   "verdict": "malicious",
   "jev_score": 0.94,
   "scam_type": "fake_parking_or_toll",
-  "explanation": "Don't pay this. It's a fake parking page. It uses the Peachtree Parking name, but the website is not theirs, and it went through two hidden redirects before asking for your card number.",
+  "explanation": "Don't pay this. It's a fake parking page. It uses the Peachtree Parking name, but the website is not theirs, and it secretly sent you through two other websites before asking for your card number.",
   "checks": {
     "impersonates": "fake_parking_or_toll",
     "impersonates_p": 0.91,
