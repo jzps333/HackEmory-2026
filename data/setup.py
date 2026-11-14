@@ -1,4 +1,7 @@
-"""One-time setup: `python -m data.setup` creates the Typesense collection and Tiger Data schema.
+"""One-time setup: `python -m data.setup` creates the Typesense collections and Tiger Data schema.
+
+Typesense: `scam_pins` (the map) and `scans` (search over the scan log; fill it with
+`python3 -m data.sync_scans`).
 
 Prints OK / FAIL / SKIP per service. Never prints keys or connection strings.
 """
@@ -6,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-from data import tiger_store, typesense_store
+from data import scan_search, tiger_store, typesense_store
 
 
 def _run(name: str, configured: bool, fn) -> bool:
@@ -26,9 +29,11 @@ def _run(name: str, configured: bool, fn) -> bool:
 def main() -> int:
     ok_ts = _run("Typesense", typesense_store.is_configured(),
                  lambda: "created scam_pins" if typesense_store.ensure_collection() else "scam_pins exists")
+    ok_scans = _run("Typesense", typesense_store.is_configured(),
+                    lambda: "created scans" if scan_search.ensure_collection() else "scans exists")
     ok_tg = _run("Tiger Data", tiger_store.is_configured(),
                  lambda: (tiger_store.ensure_schema(), "scans + scans_hourly ready")[1])
-    return 0 if ok_ts and ok_tg else 1
+    return 0 if ok_ts and ok_scans and ok_tg else 1
 
 
 if __name__ == "__main__":
