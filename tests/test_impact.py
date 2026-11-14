@@ -267,8 +267,8 @@ def test_stats_impact_route(client, tiger_env, monkeypatch):
     j = r.json()
     assert {k: j[k] for k in ("scans_total", "scans_24h", "scams_blocked", "warned", "safe")} == \
         {"scans_total": 50, "scans_24h": 12, "scams_blocked": 7, "warned": 3, "safe": 40}
-    assert j["est_money_saved_usd"] == 7 * 380
-    assert j["est_method"]["loss_per_scam_usd"] == 380 and j["est_method"]["sources"][:2] == [FTC_2024, FTC_TEXT]
+    assert j["est_money_saved_usd"] == 7 * 110
+    assert j["est_method"]["loss_per_scam_usd"] == 110 and j["est_method"]["sources"][:2] == [FTC_2024, FTC_TEXT]
     assert j["payments_refused"]["count"] == 2 and j["payments_refused"]["sol_total"] == 0.03
     assert "USD" in j["payments_refused"]["note"]
     assert j["repeat_scams"] == COUNTS["repeat_scams"]
