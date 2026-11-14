@@ -1,0 +1,12 @@
+{
+  "name": "hackemory-2026",
+  "private": true,
+  "workspaces": [
+    "app"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace scansafe-app",
+    "build": "npm run build --workspace scansafe-app",
+    "start": "npm run start --workspace scansafe-app"
+  }
+}
