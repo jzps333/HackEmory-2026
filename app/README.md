@@ -1,15 +1,25 @@
-# Web app (Person 4)
+# ScanSafe onboarding web app
 
-Next.js PWA, deployed on Vercel at `scansafe.nyc` (backup: `scansafe.vercel.app`).
-The camera only works over HTTPS.
+This Next.js app implements the three-screen onboarding flow:
 
-- **Scan page:** camera QR scanner (`html5-qrcode`) → `POST /scan` → results screen.
-- **Results:** big verdict, `explanation`, Jev score, screenshots, buttons:
-  Continue / Pay (devnet) / Nevermind / Report scam (pre-fills an FTC report the user submits).
-- **Map page:** Leaflet + OpenStreetMap + markercluster, pins from Typesense.
-- **Accessibility (Coder for Good):** large text, high contrast, big buttons, labels on every
-  control for VoiceOver, plain words ("fake website", not "phishing"), read-aloud option.
-- **Solana Pay:** `api/scan.py` already parses `solana:` QR codes and checks the wallet against
-  `KNOWN_MERCHANTS`. Put your devnet demo wallets there. Devnet only; user approves every payment.
+1. Collect a name, email address, and phone number.
+2. Request the device's real location with the browser Geolocation API.
+3. Offer the optional Solana wallet setup screen. Wallet connectivity is intentionally not implemented.
 
-Build against `shared/mock_safe.json` and `shared/mock_malicious.json` until the sandbox is live.
+## Run locally
+
+```bash
+cd app
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). Browser geolocation requires a secure context; `localhost` is supported for local development, while deployed environments must use HTTPS. Location permission is requested only after the user selects **Use my location**.
+
+## Backend integration
+
+Form data and coordinates are held in the onboarding flow's client-side state while the user moves between steps. No data is sent to or stored by the backend yet. The `OnboardingCompletionHandler` type in `src/lib/onboarding.ts` defines the callback seam for a future backend integration; pass a handler to `OnboardingFlow` to submit the completed `OnboardingData`.
+
+The app does not connect a Solana wallet and does not call Gemini or any other AI service.
+
+Run `npm run typecheck` and `npm run build` to validate the frontend.

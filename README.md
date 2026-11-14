@@ -222,7 +222,7 @@ layout later if the team prefers; nothing depends on folder names except imports
 | `sandbox/` | Playwright scanner in a locked-down throwaway Docker container + token-protected runner for a separate Vultr VM with no keys | Person 1 |
 | `chert/` | Chert FaceTime agent (LiveKit) + iMessage follow-ups | Person 2 |
 | `data/` | Typesense map + search, Tiger Data scan log + dashboard | Person 3 |
-| `app/` | Next.js web app: scanner, results, map | Person 4 |
+| `app/` | Next.js frontend with the three-screen onboarding flow; scanner, results, and map remain planned | Person 4 |
 | `shared/` | `scan_result` format + safe/malicious mocks everyone builds against | |
 
 See [TEAM.md](TEAM.md) for roles, checkpoints and the Devpost checklist.
