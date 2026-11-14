@@ -1,8 +1,9 @@
 <!doctype html>
 <!--
   ScanSafe demo fixture: "Dogwood Lot & Meter Co." is a MADE-UP brand. NOT A REAL BUSINESS.
-  Legit-looking pay page used as the "real" version for the EmoryHacks 2026 demo.
-  Forms never submit anywhere (action="#" + preventDefault). Do not enter real card data.
+  Parking meter display for the EmoryHacks 2026 demo. The FaceTime agent shows it live with
+  ?hours=N (1-4, default 1) while the person picks hours in the ScanSafe app.
+  Inert: no form, nothing is submitted, no network requests. Payment happens only in the app.
 -->
 <html lang="en">
 <head>
@@ -11,42 +12,64 @@
 <meta name="robots" content="noindex,nofollow">
 <title>Dogwood Lot &amp; Meter Co. - Meter 42</title>
 <style>
-  body{font-family:system-ui,sans-serif;margin:0;background:#f4f6f8;color:#1d2b36}
+  body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f4f6f8;color:#1d2b36}
   header{background:#1f6f43;color:#fff;padding:16px 20px}
-  header h1{margin:0;font-size:20px}
-  main{max-width:420px;margin:20px auto;background:#fff;border-radius:10px;padding:20px;box-shadow:0 1px 4px #0002}
-  label{display:block;margin:12px 0 4px;font-size:14px}
-  select,input{width:100%;padding:10px;font-size:16px;box-sizing:border-box;border:1px solid #bbb;border-radius:6px}
-  button{margin-top:16px;width:100%;padding:12px;font-size:16px;background:#1f6f43;color:#fff;border:0;border-radius:6px}
-  .note{font-size:13px;color:#555}
+  header h1{margin:0;font-size:22px}
+  header div{font-size:15px;opacity:.9}
+  main{max-width:420px;margin:16px auto;background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px #0002}
+  h2{margin:0 0 14px;font-size:20px}
+  .screen{background:#10241a;color:#b9f6c9;border-radius:10px;padding:18px 16px;font-variant-numeric:tabular-nums}
+  .screen .label{font-size:15px;color:#7fc79a;margin:0}
+  .screen .big{font-size:40px;font-weight:700;margin:2px 0 12px;color:#e8ffef}
+  .screen .row{display:flex;justify-content:space-between;font-size:18px;margin:6px 0}
+  .screen .total{font-size:26px;font-weight:700;color:#e8ffef;border-top:1px solid #2d5a40;padding-top:10px;margin-top:10px}
+  .hours{display:flex;gap:8px;margin:18px 0 6px}
+  .hours button{flex:1;padding:14px 0;font-size:20px;font-weight:700;border-radius:8px;border:2px solid #1f6f43;background:#fff;color:#1f6f43}
+  .hours button[aria-pressed="true"]{background:#1f6f43;color:#fff}
+  .note{font-size:14px;color:#555;margin:10px 0 0}
   footer{text-align:center;font-size:12px;color:#777;padding:16px}
 </style>
 </head>
 <body>
 <header><h1>Dogwood Lot &amp; Meter Co.</h1><div>Midtown Atlanta - Zone 7</div></header>
 <main>
-  <h2>Meter #42</h2>
-  <p class="note">Rate: $2.00 / hour. Max 3 hours. Payment is handled in the official Dogwood Lot &amp; Meter parking app.</p>
-  <form id="meter-form" action="#" method="get" autocomplete="off">
-    <label for="plate">License plate</label>
-    <input id="plate" name="plate" placeholder="ABC1234" maxlength="8">
-    <label for="hours">Time</label>
-    <select id="hours" name="hours">
-      <option value="1">1 hour - $2.00</option>
-      <option value="2">2 hours - $4.00</option>
-      <option value="3">3 hours - $6.00</option>
-    </select>
-    <button type="submit">Continue in the Dogwood Lot &amp; Meter parking app</button>
-  </form>
-  <p class="note" id="msg"></p>
-  <p class="note">We never ask for your card number on this page or by text message.</p>
+  <h2 id="meter">Meter 42 · Dogwood Lot &amp; Meter Co.</h2>
+  <div class="screen" aria-live="polite">
+    <p class="label">Parking time:</p>
+    <p class="big" id="hours-text">1 hour</p>
+    <div class="row"><span>Rate:</span><span>0.01 SOL per hour</span></div>
+    <div class="row total"><span>Total:</span><span><span id="total">0.01</span> SOL</span></div>
+  </div>
+  <div class="hours" role="group" aria-label="Hours">
+    <button type="button" data-hours="1" aria-pressed="true">1</button>
+    <button type="button" data-hours="2" aria-pressed="false">2</button>
+    <button type="button" data-hours="3" aria-pressed="false">3</button>
+    <button type="button" data-hours="4" aria-pressed="false">4</button>
+  </div>
+  <p class="note">Hours: 1 to 4. Devnet test SOL only.</p>
+  <p class="note">To pay, scan the code on the meter with the ScanSafe app. This page never asks for card details.</p>
 </main>
-<footer>ScanSafe demo page — not a real business</footer>
+<footer>ScanSafe demo — fictional · not a real business</footer>
 <script>
-  document.getElementById('meter-form').addEventListener('submit', function (e) {
-    e.preventDefault();  // demo only: never submits anywhere
-    document.getElementById('msg').textContent = 'Demo only - nothing was sent.';
-  });
+  // Demo only: reads ?hours=N (1-4, default 1) and shows it. No forms, no network requests.
+  (function () {
+    var RATE_CENTS = 1;   // 0.01 SOL per hour, in hundredths of a SOL
+    function show(n) {
+      document.getElementById('hours-text').textContent = n + (n === 1 ? ' hour' : ' hours');
+      document.getElementById('total').textContent = (n * RATE_CENTS / 100).toFixed(2);
+      var buttons = document.querySelectorAll('.hours button');
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute('aria-pressed', String(Number(buttons[i].getAttribute('data-hours')) === n));
+      }
+    }
+    var m = /[?&]hours=(\d+)(?:&|#|$)/.exec(location.search);
+    var n = m ? parseInt(m[1], 10) : 1;
+    show(Math.min(4, Math.max(1, n || 1)));
+    document.querySelector('.hours').addEventListener('click', function (e) {
+      var h = e.target && e.target.getAttribute && Number(e.target.getAttribute('data-hours'));
+      if (h >= 1 && h <= 4) show(h);   // only changes this screen; nothing is sent anywhere
+    });
+  })();
 </script>
 </body>
 </html>

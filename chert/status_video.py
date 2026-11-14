@@ -12,6 +12,12 @@ Screens:
   replay   - right after the result: the same checklist again with the real findings
              (where the link went, the page title, what the AI checks found), one step a beat.
   verdict  - the result banner over the full page picture.
+Parking meter calls (chert/meter_pay.py) add:
+  checking - with meter info set (begin_meter_view), the live header names the meter, hours and
+             total instead of the scan step.
+  meter    - "3 hours" banner (total, meter) over the picture of the meter page.
+  paid     - green "Paid" banner with a tick: "Paid · 2 hours · 0.02 SOL", over the meter page
+             picture when it shows the same hours, else a big tick card.
 """
 from __future__ import annotations
 
@@ -40,14 +46,25 @@ STEPS = [
 REPLAY_STEP_S = 1.1          # how long each finding stays as "newest" during the replay
 
 COLORS = {"idle": (30, 58, 95), "checking": (32, 40, 56), "safe": (22, 128, 61),
-          "suspicious": (180, 110, 10), "malicious": (185, 28, 28), "error": (90, 90, 90)}
+          "suspicious": (180, 110, 10), "malicious": (185, 28, 28), "error": (90, 90, 90),
+          "meter": (30, 58, 95), "paid": (22, 128, 61)}
 LABELS = {"idle": "Hold the QR code up", "checking": "Checking...", "safe": "Looks safe",
-          "suspicious": "Be careful", "malicious": "Don't pay this", "error": "Try again"}
+          "suspicious": "Be careful", "malicious": "Don't pay this", "error": "Try again",
+          "meter": "Parking meter", "paid": "Paid"}
 VERDICTS = ("safe", "suspicious", "malicious")
 TEXT_W = 720 - 130 - 36       # room for step text right of the icons
 LIVE_TOP = 250                # live-screen layout: header above, sandbox browser picture below
 LIVE_RED = (220, 38, 38)
 WHITE, DIM, GREEN, RED, AMBER = (255, 255, 255), (165, 175, 190), (74, 222, 128), (248, 113, 113), (251, 191, 36)
+
+
+def hours_text(n: int) -> str:
+    return f"{n} hour" if n == 1 else f"{n} hours"
+
+
+def sol_text(amount: float) -> str:
+    s = f"{float(amount):.9f}".rstrip("0").rstrip(".")
+    return s or "0"
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -144,6 +161,11 @@ class StatusVideo:
     W, H, FPS = 720, 1280, 10
     BANNER = 200
     COLORS, LABELS = COLORS, LABELS
+    # Parking meter calls only (class defaults, so a bare StatusVideo still works):
+    meter: Optional[dict] = None          # {"label", "hours", "amount"} while following a meter
+    meter_label = ""                      # "Meter 42 · Dogwood Lot & Meter Co."
+    meter_shot: Optional[Image.Image] = None
+    meter_shot_hours: Optional[int] = None
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -166,6 +188,7 @@ class StatusVideo:
     def begin_check(self, code: str) -> None:
         self.state, self.result, self.shot, self.thumb = "checking", None, None, None
         self.live, self.live_host, self.code = None, "", code
+        self.meter = None          # an ordinary check; begin_meter_view sets it again
         self.code_host = _host(code) or _clip(code, 28)
         self.check_started = time.monotonic()
 
@@ -212,6 +235,34 @@ class StatusVideo:
     def reset(self) -> None:
         self.state, self.shot, self.thumb, self.result = "idle", None, None, None
         self.live, self.live_host, self.code = None, "", ""
+        self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
+
+    # --- parking meter calls -------------------------------------------------------------------
+
+    def begin_meter_view(self, url: str, hours: int, amount: float) -> None:
+        """Live view of the meter page for ``hours``: the checking screen, with the hours and
+        total in the header instead of the scan step."""
+        self.begin_check(url)
+        self.meter = {"label": self.meter_label, "hours": int(hours), "amount": float(amount)}
+
+    def set_meter_view(self, result: dict, hours: int, amount: float) -> None:
+        """The meter page's picture (from the scan result) under an hours/total banner. The
+        page's verdict is not shown: the payment itself was checked against our merchant list."""
+        shots = result.get("screenshots") or []
+        self.show_screenshot(shots[0] if shots else None)
+        self.result = None
+        self.meter = {**(self.meter or {}), "hours": int(hours), "amount": float(amount)}
+        self.meter_shot, self.meter_shot_hours = self.shot, int(hours)
+        self.state = "meter"
+        self.live = None
+
+    def set_paid(self, hours: int, amount: float) -> None:
+        """The app's payment went through: green Paid banner."""
+        self.meter = {**(self.meter or {}), "hours": int(hours), "amount": float(amount)}
+        self.shot = self.meter_shot if self.meter_shot_hours == int(hours) else None
+        self.result = None
+        self.state = "paid"
+        self.live = None
 
     def show_screenshot(self, data_uri: Optional[str]) -> bool:
         """Decode the sandbox's picture of the page (a data: URI JPEG). It is only a picture:
@@ -303,7 +354,10 @@ class StatusVideo:
         # a frame means the sandbox is already open, so never show "Reading the code" here
         current = max(1, max(j for j, s in enumerate(STEPS) if elapsed >= s[2]))
         self._spinner(d, 60, 106, now)
-        d.text((96, 86), _fit(STEPS[current][0] + "…", f["step"], self.W - 136), font=f["step"], fill=WHITE)
+        meter = self.meter
+        head = (f"{hours_text(meter['hours'])} · {sol_text(meter['amount'])} SOL" if meter
+                else STEPS[current][0] + "…")
+        d.text((96, 86), _fit(head, f["step"], self.W - 136), font=f["step"], fill=WHITE)
         host = self.live_host or self.code_host
         lead = "Now on: "
         d.text((40, 142), lead, font=f["detail"], fill=DIM)
@@ -336,6 +390,49 @@ class StatusVideo:
             img.paste(self.shot, (x, y))
             d.rectangle((x - 6, y - 6, x + self.shot.width + 5, y + self.shot.height + 5), outline=col, width=8)
 
+    def _meter_banner(self, img: Image.Image, paid: bool) -> None:
+        d = ImageDraw.Draw(img)
+        f = self._f
+        m = self.meter or {"hours": 1, "amount": 0.0, "label": ""}
+        d.rectangle((0, 0, self.W, self.BANNER), fill=COLORS["paid" if paid else "meter"])
+        if paid:
+            cx, cy = 80, 64
+            d.ellipse((cx - 38, cy - 38, cx + 38, cy + 38), fill=WHITE)
+            d.line((cx - 19, cy, cx - 5, cy + 15, cx + 21, cy - 14), fill=COLORS["paid"], width=9,
+                   joint="curve")
+            d.text((140, 28), "Paid", font=f["big"], fill=WHITE)
+            line = f"{hours_text(m['hours'])} · {sol_text(m['amount'])} SOL"
+            d.text((42, 112), _fit(line, f["label"], self.W - 80), font=f["label"], fill=WHITE)
+        else:
+            d.text((40, 36), hours_text(m["hours"]), font=f["big"], fill=WHITE)
+            line = f"Total {sol_text(m['amount'])} test SOL · tap Pay in the app"
+            d.text((44, 124), _fit(line, f["small"], self.W - 80), font=f["small"], fill=WHITE)
+        if m.get("label"):
+            d.text((44, 164), _fit(m["label"], f["tag"], self.W - 80), font=f["tag"], fill=WHITE)
+
+    def _meter_screen(self, img: Image.Image, now: float) -> None:
+        """meter / paid: banner, then the meter page picture (or a big card without one)."""
+        paid = self.state == "paid"
+        self._meter_banner(img, paid)
+        d = ImageDraw.Draw(img)
+        f = self._f
+        col = COLORS["paid" if paid else "meter"]
+        if self.shot is not None:
+            x, y = (self.W - self.shot.width) // 2, self.BANNER + 20
+            img.paste(self.shot, (x, y))
+            d.rectangle((x - 6, y - 6, x + self.shot.width + 5, y + self.shot.height + 5), outline=col, width=8)
+            return
+        cy = 640
+        if paid:
+            d.ellipse((self.W // 2 - 130, cy - 130, self.W // 2 + 130, cy + 130), fill=col)
+            cx = self.W // 2
+            d.line((cx - 62, cy, cx - 16, cy + 48, cx + 68, cy - 46), fill=WHITE, width=26, joint="curve")
+            sub = "Your receipt is in the app"
+        else:
+            self._spinner(d, self.W // 2, cy, now)
+            sub = "Opening the meter…"
+        d.text((60, cy + 190), _fit(sub, f["label"], self.W - 120), font=f["label"], fill=WHITE)
+
     def _idle(self, img: Image.Image, now: float) -> None:
         d = ImageDraw.Draw(img)
         d.text((60, 420), "ScanSafe", font=_font(110, True), fill=WHITE)
@@ -355,11 +452,17 @@ class StatusVideo:
         """Frames that look the same share a key, so we draw them once. Only the spinner and the
         replay change over time; the verdict screen is fully static."""
         if self.state == "checking":
+            m = self.meter or {}
             return ("checking", int((now - self.check_started) * 8), id(self.result),
-                    self.live_seq if self.live is not None else None, self.live_host)
+                    self.live_seq if self.live is not None else None, self.live_host,
+                    m.get("hours"), m.get("amount"))
         if self.state in VERDICTS:
             n = self._replaying(now)
             return ("verdict", self.state, n, id(self.result), id(self.shot))
+        if self.state in ("meter", "paid"):
+            m = self.meter or {}
+            spin = int(now * 8) if self.shot is None and self.state == "meter" else 0
+            return (self.state, m.get("hours"), m.get("amount"), m.get("label"), id(self.shot), spin)
         return ("idle", self.state, int(now * 4) % 24)
 
     def _draw(self) -> bytes:
@@ -377,6 +480,8 @@ class StatusVideo:
             live = self.live                         # read once: the scan thread may swap it
             if live is not None:
                 self._live(img, now, live)
+            elif self.meter is not None:
+                self._meter_screen(img, now)         # "Opening the meter…" until frames arrive
             else:
                 self._checklist(img, now, None)
         elif self.state in VERDICTS:
@@ -385,6 +490,8 @@ class StatusVideo:
                 self._checklist(img, now, min(n, len(STEPS)))
             else:
                 self._verdict(img)
+        elif self.state in ("meter", "paid"):
+            self._meter_screen(img, now)
         else:
             img = Image.new("RGB", (self.W, self.H), COLORS.get(self.state, COLORS["idle"]))
             self._idle(img, now)

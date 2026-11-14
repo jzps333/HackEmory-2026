@@ -89,7 +89,9 @@ def test_refuses_non_devnet_rpc(client, wallet, rpc, monkeypatch):
 
 
 def test_refuses_over_cap(client, wallet, rpc):
-    r = client.post("/pay", json=body(amount=0.51))
+    # A fixed-amount merchant (Dogwood is a parking meter: the server prices it, see test_meter_pay).
+    r = client.post("/pay", json=body(recipient=KNOWN_MERCHANTS["Magnolia Diner"], amount=0.51,
+                                      label="Magnolia Diner"))
     assert r.status_code == 400 and r.json()["error"] == "over_cap"
     assert rpc == []
 
@@ -109,9 +111,10 @@ def test_503_without_keypair(client, rpc, monkeypatch):
 
 
 def test_happy_path(client, wallet, rpc):
-    r = client.post("/pay", json=body())
+    r = client.post("/pay", json={**body(), "hours": 2})     # Dogwood meter: 2 h x 0.01 SOL
     assert r.status_code == 200, r.text
     j = r.json()
+    assert j["amount_sol"] == 0.02 and j["hours"] == 2
     assert j["signature"] == FAKE_SIG
     assert j["explorer_url"] == f"https://explorer.solana.com/tx/{FAKE_SIG}?cluster=devnet"
     assert j["payment"]["tx_signature"] == FAKE_SIG
