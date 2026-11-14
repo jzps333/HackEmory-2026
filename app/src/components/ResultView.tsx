@@ -4,16 +4,32 @@ import { useEffect, useRef, useState } from "react";
 import ConfirmDialog from "./ConfirmDialog";
 import FaceTimeCard from "@/components/FaceTimeCard";
 import VerdictIcon from "./VerdictIcon";
-import { DEMO_MODE, pay, report, screenshotSrc } from "@/lib/api";
+import { DEMO_MODE, pay, report, screenshotSrc, type ReportCode } from "@/lib/api";
 import { VERDICT_TEXT, isWebLink, percent, scamLabel } from "@/lib/labels";
 import type { ScanResult } from "@/lib/types";
 
 const FTC_URL = "https://reportfraud.ftc.gov/";
 
+/** What the report button led to: a code from the backend, or "unavailable" (503/502/network). */
+type ReportState = "idle" | "busy" | ReportCode | "unavailable";
+
+/** Plain-words message for each report outcome. */
+const REPORT_MSG: Record<ReportCode | "unavailable", string> = {
+  pinned: "Added to the scam map. Thank you for warning your neighbors.",
+  not_malicious: "Thank you. We only put confirmed scams on the map, so this one isn't pinned.",
+  no_location: "Thank you. You didn't share your location, so we couldn't pin it on the map.",
+  unknown_scan: "We couldn't find this check anymore. Please scan the code again, then report it.",
+  not_pinned: "Thank you. We couldn't put this one on the map. You can try again.",
+  unavailable: "The scam map isn't available right now. Please try again later.",
+};
+
 function ftcSummary(r: ScanResult): string {
   const when = new Date(r.scanned_at * 1000).toLocaleString();
+  const kind = r.scam_type && r.scam_type !== "none" ? ` (${scamLabel(r.scam_type).toLowerCase()})` : "";
   const lines = [
-    `I scanned a QR code that led to a scam website (${scamLabel(r.scam_type).toLowerCase()}).`,
+    r.verdict === "malicious"
+      ? `I scanned a QR code that led to a scam website${kind}.`
+      : `I scanned a QR code that I think led to a scam website${kind}.`,
     `When: ${when}`,
     r.location ? `Where (approximate): ${r.location[0]}, ${r.location[1]}` : null,
     `What the QR code contained: ${r.url}`,
@@ -59,7 +75,7 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
   const [canSpeak, setCanSpeak] = useState(false);
   const [dialog, setDialog] = useState<"pay" | "report" | null>(null);
   const [payState, setPayState] = useState<{ status: "idle" | "busy" | "done" | "error"; msg?: string; link?: string }>({ status: "idle" });
-  const [reportState, setReportState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const [reportState, setReportState] = useState<ReportState>("idle");
   const [copied, setCopied] = useState(false);
 
   const v = VERDICT_TEXT[r.verdict] ?? VERDICT_TEXT.suspicious;
@@ -68,6 +84,18 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
   const canPay = r.verdict === "safe" && !!r.payment && r.payment.merchant_verified && !r.payment.tx_signature;
   const chain = r.redirect_chain?.length ? r.redirect_chain : r.final_url && r.final_url !== r.url ? [r.url, r.final_url] : [];
   const summary = ftcSummary(r);
+  // The backend only pins malicious scans that came with a location; say so before the user confirms.
+  const willPin = r.verdict === "malicious" && !!r.location;
+  const reported = reportState !== "idle" && reportState !== "busy";
+  // Retry makes sense when the map was down, the check wasn't found yet, or the pin didn't save.
+  const canRetry = reportState === "unavailable" || reportState === "unknown_scan" || reportState === "not_pinned";
+  const reportLocked = reportState === "busy" || (reported && !canRetry);
+  const reportLabel =
+    reportState === "busy" ? "Sending report…"
+    : reportState === "pinned" ? "Reported"
+    : canRetry ? "Try reporting again"
+    : reported ? "Not added to the map"
+    : r.verdict === "safe" ? "Report scam anyway" : "Report scam";
   const scoreColor = r.jev_score >= 0.7 ? "var(--bad-strong)" : r.jev_score >= 0.35 ? "var(--warn-strong)" : "var(--safe-strong)";
 
   useEffect(() => {
@@ -112,10 +140,10 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
     setDialog(null);
     setReportState("busy");
     try {
-      await report(r);
-      setReportState("done");
+      const res = await report(r);
+      setReportState(res.code);
     } catch {
-      setReportState("error");
+      setReportState("unavailable");
     }
   }
 
@@ -183,8 +211,8 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
           </button>
         )}
         {(
-          <button type="button" className={`btn ${r.verdict === "safe" ? "" : "btn-danger"}`} onClick={() => setDialog("report")} disabled={reportState === "busy" || reportState === "done"}>
-            {reportState === "busy" ? "Sending report…" : reportState === "done" ? "Reported. Thank you" : r.verdict === "safe" ? "Report scam anyway" : "Report scam"}
+          <button type="button" className={`btn ${r.verdict === "safe" ? "" : "btn-danger"}`} onClick={() => setDialog("report")} disabled={reportLocked}>
+            {reportLabel}
           </button>
         )}
         <button type="button" className="btn" onClick={onDone}>
@@ -199,13 +227,19 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
             {payState.link && <a href={payState.link} target="_blank" rel="noopener noreferrer">See the receipt<span className="sr-only"> (opens in a new tab)</span></a>}
           </p>
         )}
-        {reportState === "error" && <p className="notice bad" role="alert">We couldn't send your report. You can still tell the FTC below.</p>}
+        {reported && (
+          <div className={`notice ${reportState === "unavailable" ? "bad" : ""}`} role={reportState === "unavailable" ? "alert" : "status"}>
+            <p style={{ margin: 0 }}>{REPORT_MSG[reportState]}</p>
+            {reportState === "no_location" && (
+              <p className="hint" style={{ margin: "0.5rem 0 0" }}>Next time, turn on “Share my rough location” on the main screen before you scan.</p>
+            )}
+          </div>
+        )}
       </div>
 
-      {(reportState === "done" || reportState === "error") && (
+      {reported && (
         <section className="card" aria-labelledby="ftc-h">
           <h2 id="ftc-h" style={{ marginTop: 0 }}>Tell the FTC too</h2>
-          {reportState === "done" && <p>Thanks. We added this to the scam map so people nearby are warned.</p>}
           <p>The FTC (the U.S. government&apos;s consumer protection office) collects scam reports. We wrote a summary for you. Copy it, open their website, and paste it in. You send it yourself.</p>
           <label htmlFor="ftc-summary">Summary to paste</label>
           <textarea id="ftc-summary" readOnly value={summary} />
@@ -264,8 +298,16 @@ export default function ResultView({ result: r, onDone, facetime }: Props) {
         onConfirm={doReport}
         onCancel={() => setDialog(null)}
       >
-        <p>We&apos;ll add a warning pin to the scam map so people nearby know. We never save who reported it.</p>
-        <p>We send the web address, what we found{r.location ? ", and the rough area where you scanned it" : ""}.</p>
+        {willPin ? (
+          <>
+            <p>We&apos;ll add a warning pin to the scam map so people nearby know. We never save who reported it.</p>
+            <p>The pin shows the web address, what we found, and the rough area where you scanned it.</p>
+          </>
+        ) : r.verdict === "malicious" ? (
+          <p>You didn&apos;t share your location, so we can&apos;t put a pin on the map. We never save who reported it, and we&apos;ll help you tell the FTC.</p>
+        ) : (
+          <p>We only put confirmed scams on the map, so this one won&apos;t get a pin. We never save who reported it, and we&apos;ll help you tell the FTC.</p>
+        )}
       </ConfirmDialog>
     </article>
   );
