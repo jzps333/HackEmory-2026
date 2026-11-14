@@ -7,6 +7,8 @@ const LINKS = [
   { href: "/", label: "Scan" },
   { href: "/map", label: "Scam map" },
   { href: "/dashboard", label: "Stats" },
+  { href: "/cities", label: "Dense cities" },
+  { href: "/websites", label: "Sample sites" },
 ];
 
 export default function Nav() {

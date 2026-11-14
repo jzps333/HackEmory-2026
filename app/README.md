@@ -42,6 +42,15 @@ That is the only setting. No keys or secrets belong in this folder.
 - `/map`: Leaflet + OpenStreetMap, clustered red pins, popups, search box, plus a text list of the
   same pins for screen readers. Leaflet loads client-side only.
 - `/dashboard`: totals, a 24-hour bar chart (plain divs + data table), most common scam types.
+- `/cities`: a sample visual guide to densely populated cities, with a QR code that links to the
+  current page URL for sharing. Its page implementation lives in `../websites/cities/`; the app
+  route re-exports it so the URL stays `/cities`.
+- `/websites`: a gallery of four fictional sample sites—coffee shop, hiking guide, space journal,
+  and retro arcade—implemented in `../websites/` and available at `/websites/cafe`, `/websites/trails`,
+  `/websites/orbit`, and `/websites/arcade`.
+  Morrow Coffee and Pixel Palace include clearly labeled phishing-awareness QR simulations; their
+  links stay on the sample site and no information is requested or collected. In app demo mode,
+  scanning either non-payment QR returns the built-in sample malicious result.
 
 ## Backend endpoints it calls
 
@@ -68,7 +77,8 @@ results, `prefers-reduced-motion` respected, plain words ("fake website", never 
 
 ## Files
 
-- `src/app/` pages, layout, `manifest.ts` (web manifest), `globals.css`
+- `src/app/` routes, layout, `manifest.ts` (web manifest), `globals.css`
 - `src/components/` Scanner, ResultView, ConfirmDialog, VerdictIcon, ScamMap, Nav
+- `../websites/cities/` city showcase page and QR sharing component
 - `src/lib/` `api.ts` (all backend calls + demo fallbacks), `types.ts` (mirrors `api/schema.py`), `labels.ts`, `mockData.ts`
 - `public/icons/` home-screen icons, `public/mock/` sample screenshots for demo mode
