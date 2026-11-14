@@ -1,7 +1,7 @@
 # ScanSafe API contract for the web UI
 
 For whoever builds the UI (and their AI assistant). Every shape below is taken from the route code:
-`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py`, `api/routes_result.py`.
+`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py` (+ `api/meter_pay.py`), `api/routes_result.py`.
 If this file and the code disagree, the code wins. Please tell the backend owner.
 
 - **Base URL:** `https://api.scansafe.nyc`. CORS is open (`*`, any method or header), so call it straight from the browser.
@@ -18,7 +18,7 @@ If this file and the code disagree, the code wins. Please tell the backend owner
 | same, bad input we check ourselves | 422 | `{"detail": {"error": "bad_location" \| "bad_domain", "message": "..."}}` |
 | Phone sign-in, `/call-me` | 400 / 403 / 429 / 502 / 503 / 504 | `{"detail": "<human-readable string>"}` |
 | `/result/{scan_id}` | 404 | `{"detail": "We couldn't find this check. It may have expired."}` |
-| `/pay` | 400 / 403 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` |
+| `/pay`, `/pay/quote`, `GET /pay/quote/{id}` | 400 / 403 / 404 / 409 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` (codes in section 6 and 8) |
 | Any route, body or params that fail validation | 422 | FastAPI default: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` |
 
 ## 1. Phone sign-in (reverse OTP)
@@ -93,7 +93,7 @@ POST /call-me   Authorization: Bearer <token>
 -> 200 {"call_id": "...", "room": "scansafe-out-...", "status": "allocated"}
 ```
 - The number that gets called is **the token's phone**. When you send a valid token, you can leave `phone` out of the body; it is ignored anyway. Without a token, the body needs `"phone"` and only the server's demo allowlist works (anyone else gets 403).
-- Only `http(s)` URLs (400 `"only web links (http/https) can be walked through on a call"`). One call at a time server-wide: 429 `"one call at a time: try again in N s"` (gap of about 30 s).
+- Only `http(s)` URLs, or a **verified parking meter payment code** (`solana:...`, see section 8). Anything else gets 400 `"only web links (http/https) or a verified parking meter payment code can be walked through on a call"`. One call at a time server-wide: 429 `"one call at a time: try again in N s"` (gap of about 30 s).
 - 403 `"sign in with your phone first: ..."` means no or invalid token and the number isn't allowlisted, so send the user to sign-in. 503 means calling isn't configured on the server. 504 means the agent didn't get ready (about 20 s). 502 means LiveKit or Chert failed. The request itself can take 20 to 40 s, so use a 45 s client timeout.
 - Status: `GET /call-me/{call_id}` returns `{"call_id", "status", "answered", "terminal_reason", "events": [...]}` (404 for ids this server didn't place).
 
@@ -153,7 +153,8 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 
 ## 6. Payments (devnet) and health
 
-- `POST /pay` `{"scan_id", "payment": <ScanResult.payment>, "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
+- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`.
+- Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `unknown_scan` (404); `not_a_payment`, `hours_required`, `bad_hours`, `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `already_paid`, `payment_in_progress` (409); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
 - `GET /health` returns `{"ok": true, "mock_mode": false}`.
 
 ## 7. curl
@@ -180,4 +181,105 @@ curl -s -G $B/scans/search --data-urlencode q=wikipedia
 curl -s "$B/pins?lat=33.79&lng=-84.32&radius_km=5"
 curl -s -G $B/search --data-urlencode q=parking
 curl -s -X POST $B/report -H 'Content-Type: application/json' -d '{"scan_id":"<scan_id from /scan>"}'
+```
+
+## 8. Parking meter: pay by the hour
+
+Demo merchant **Dogwood Lot & Meter Co.** (`fixtures/qr/real_meter.png`, a Solana Pay code on **devnet**) sells parking by the hour: **0.01 test SOL per hour, 1 to 4 hours**. The server sets the price. **The app never sends its own amount**: it sends `hours`, and the server computes rate x hours. Fixed-price codes (Magnolia Diner) work exactly as before (section 6) and have no hours picker.
+
+### User flow
+
+1. **Scan** the meter's QR code (`POST /scan` or `/scan/stream`, body `{"url": "solana:..."}`). The ScanResult has `verdict: "safe"`, `payment.merchant_verified: true`, `payment.label: "Dogwood Lot & Meter Co."` and a `scan_id`. Keep the `scan_id`: every call below uses it.
+2. **Result screen:** show the verified merchant ("Dogwood Lot & Meter Co. · verified wallet"), and right away call `POST /pay/quote {"scan_id", "hours": 1}`. Its answer tells you it's a meter (`rate_per_hour_sol`, `min_hours`, `max_hours`). Show the rate ("0.01 test SOL per hour"), an **hours picker 1 to 4** (from `min_hours`/`max_hours`), and the **total from the quote's `amount_sol`** (don't compute it yourself). If the quote answers 400 `not_a_meter`, it's a fixed-price code: show `payment.amount_sol` and no picker.
+3. **Optional "Watch on FaceTime"** button (only when signed in): `POST /call-me` with `Authorization: Bearer <token>` and `{"url": "<the solana: code exactly as scanned>", "scan_id": "<scan_id>"}`. ScanSafe FaceTimes the user. The agent says who the code belongs to and the rate, and shows the meter page live on its video.
+4. **Changing hours:** each change calls `POST /pay/quote {"scan_id", "hours": n}`, **debounced about 500 ms** (send only the last value after the user stops tapping). Update the total from the response. If a FaceTime call is on, the agent picks up the new hours within about 2 to 4 s, says "Okay, 3 hours, 0.03 SOL." and the live meter page on the call updates.
+5. **Pay:** the Pay button opens a **confirm step** ("Pay 0.03 test SOL to Dogwood Lot & Meter Co. for 3 hours? [Cancel] [Pay]"). Only the confirm button sends `POST /pay {"scan_id", "hours": 3, "approved": true}`. Disable it while the request runs (one payment per scan; a second one gets 409).
+6. **Receipt:** from the `/pay` response: hours, `amount_sol`, merchant, and a link to `explorer_url` ("View on Solana Explorer (devnet)"). `GET /pay/status/{scan_id}` gives the same facts later (e.g. after a reload). On a call, the agent says "Paid. 3 hours on meter 42. Your receipt is in the app." and its video shows a green "Paid" banner.
+
+The agent never pays and can't change the hours. Only the app's confirm button pays.
+
+### POST /pay/quote
+```
+POST /pay/quote
+{"scan_id": "3f9a1c2b7d4e", "hours": 3}
+-> 200 {"scan_id": "3f9a1c2b7d4e", "merchant": "Dogwood Lot & Meter Co.",
+        "rate_per_hour_sol": 0.01, "hours": 3, "amount_sol": 0.03,
+        "min_hours": 1, "max_hours": 4,
+        "meter_url": "https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html",
+        "updated_at": 1794672123.456}
+```
+- `scan_id` must be a scan this server ran (kept 2 h in memory, 7 days on disk). The latest quote per `scan_id` is kept in memory (2 h; an API restart forgets it, so just quote again).
+- A quote is only "what the user is looking at": it gives you the total to show and drives the FaceTime agent's live view. **`/pay` never reads it.** Always send the confirmed `hours` to `/pay`.
+- `hours` must be a whole number from `min_hours` to `max_hours` (JSON number; `3` or `3.0`, not `"3"`).
+- `updated_at` is unix seconds (float).
+
+### GET /pay/quote/{scan_id}
+Returns the latest quote (same JSON as above), or 404 `{"ok": false, "error": "no_quote", ...}` if no hours were picked yet. The FaceTime agent polls this; the app normally doesn't need it.
+
+### POST /pay (meter)
+```
+POST /pay
+{"scan_id": "3f9a1c2b7d4e", "hours": 3, "approved": true}
+-> 200 {"ok": true, "scan_id": "3f9a1c2b7d4e",
+        "signature": "5Kx...", "explorer_url": "https://explorer.solana.com/tx/5Kx...?cluster=devnet",
+        "amount_sol": 0.03, "hours": 3,
+        "payment": {"recipient": "6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL", "amount_sol": 0.03,
+                    "label": "Dogwood Lot & Meter Co.", "message": "Meter 42 - 3 hours",
+                    "reference": "...", "merchant_verified": true, "tx_signature": "5Kx..."}}
+```
+- `hours` is **required** for meters: the hours the user confirmed. Without it: 400 `hours_required` (`"hours is required: pick 1 to 4 hours."`). The server never falls back to the stored quote. (Fixed-price codes ignore `hours`.)
+- Do **not** send `amount_sol`. If a `payment` object is sent anyway, its amount is ignored for meters and its recipient is ignored whenever the server has the scan.
+- Takes a few seconds (devnet). Use a 30 s client timeout.
+
+### GET /pay/status/{scan_id}
+```
+-> 200 {"scan_id": "3f9a1c2b7d4e", "state": "none"}
+-> 200 {"scan_id": "...", "state": "paid", "signature": "5Kx...", "explorer_url": "https://explorer.solana.com/tx/...?cluster=devnet",
+        "amount_sol": 0.03, "hours": 3, "merchant": "Dogwood Lot & Meter Co."}
+-> 200 {"scan_id": "...", "state": "failed", "error": "payer_unfunded", "message": "...", "amount_sol": 0.03, "hours": 3, "merchant": "..."}
+```
+Always 200. `state` is `none` (not paid, or unknown id), `paid`, or `failed` (the last attempt failed; the user may try again, and a success replaces it). `hours` is `null` for fixed-price codes. Kept in memory for 2 h.
+
+### POST /call-me (meter code)
+```
+POST /call-me   Authorization: Bearer <token>
+{"url": "solana:6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL?amount=0.01&reference=...&label=Dogwood%20Lot%20%26%20Meter%20Co.&message=Meter%2042",
+ "scan_id": "3f9a1c2b7d4e"}
+-> 200 {"call_id": "...", "room": "scansafe-out-...", "status": "allocated", "scan_id": "3f9a1c2b7d4e"}
+```
+- `url` is the code exactly as scanned. Only codes that pay a **verified** merchant **that sells by the hour** are accepted. A fake sticker, a fixed-price code or any other `solana:` code gets 400 (string `detail`, see section 3).
+- `scan_id` should be the app's scan of this code, so the agent follows *your* quotes and payment. If you leave it out, the server makes its own scan and returns its `scan_id`: use that one for quotes and `/pay`.
+- 404 `"we couldn't find that scan; scan the meter code again"` (unknown or expired `scan_id`), 400 `"scan_id belongs to a different code"`. Other errors as in section 3.
+
+### Errors and what to show (plain words)
+
+| Status | `error` | Show |
+|---|---|---|
+| 400 | `hours_required` | Bug in the app: `/pay` for a meter was sent without `hours` |
+| 400 | `bad_hours` | "Pick 1 to 4 hours." (the `message` says the exact range) |
+| 400 | `not_a_meter` | Not an error: fixed-price code, hide the hours picker |
+| 400 | `not_a_payment` | "This code isn't a payment." |
+| 404 | `unknown_scan` | "This scan expired. Please scan the meter code again." |
+| 403 | `merchant_not_verified` | "Don't pay this. The money wouldn't go to Dogwood Lot & Meter Co." (red, no Pay button) |
+| 403 | `not_approved` | Bug in the app: `/pay` was sent without the confirm step |
+| 409 | `already_paid` | "Already paid. Here's your receipt." then load `GET /pay/status/{scan_id}` |
+| 409 | `payment_in_progress` | "Paying..." (keep the button disabled, poll `/pay/status` in 2 s) |
+| 400 | `over_cap` | "This demo only pays up to 0.05 test SOL." |
+| 503 | `payer_unfunded` | "The demo wallet is out of test money. Please tell the ScanSafe team." |
+| 502 / 503 | `rpc_unreachable`, `rpc_error`, `no_wallet`, `bad_wallet` | "Couldn't reach the payment network. Nothing was paid. Try again in a minute." |
+
+Show the `message` field only in a details/debug area; the table's wording is for the user.
+
+### curl
+```bash
+B=https://api.scansafe.nyc
+QR='solana:6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL?amount=0.01&label=Dogwood%20Lot%20%26%20Meter%20Co.&message=Meter%2042'
+SID=$(curl -s -X POST $B/scan -H 'Content-Type: application/json' -d "{\"url\":\"$QR\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["scan_id"])')
+curl -s -X POST $B/pay/quote -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3}"
+curl -s $B/pay/quote/$SID
+curl -s $B/pay/status/$SID
+# rings the signed-in phone for real; the agent follows the quotes above
+curl -s -X POST $B/call-me -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"url\":\"$QR\",\"scan_id\":\"$SID\"}"
+# pays 0.03 devnet test SOL for real (devnet only)
+curl -s -X POST $B/pay -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true}"
 ```

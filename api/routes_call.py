@@ -52,6 +52,7 @@ class CallRequest(BaseModel):
     phone: str = ""                   # ignored when signed in (the token's phone is used)
     lat: Optional[float] = None
     lng: Optional[float] = None
+    scan_id: Optional[str] = None     # parking meter codes: the app's scan of this code
 
 
 CHERT_MESSAGES_API = os.getenv("CHERT_API_BASE", "https://app.trychert.com/api/v1").rstrip("/")
@@ -333,10 +334,28 @@ def _take_rate_slot() -> None:
         _last_call_at = now
 
 
+URL_REFUSED = ("only web links (http/https) or a verified parking meter payment code can be "
+               "walked through on a call")
+
+
+def meter_code(url: str):
+    """(payment, meter config) when ``url`` is a Solana Pay code that pays a VERIFIED merchant
+    that sells parking by the hour; otherwise None. No other payment code gets a call."""
+    from api.merchants import meter_for
+    from api.scan import parse_solana_pay
+    payment = parse_solana_pay(url)
+    if payment is None or not payment.merchant_verified:
+        return None
+    meter = meter_for(payment.label)
+    return (payment, meter) if meter is not None else None
+
+
 def validate(req: CallRequest, signed_in: bool = False) -> tuple[str, str]:
     url, phone = req.url.strip(), req.phone.strip().replace(" ", "")
-    if not url or len(url) > 2000 or not re.match(r"^https?://", url, re.I):
-        raise HTTPException(status_code=400, detail="only web links (http/https) can be walked through on a call")
+    if not url or len(url) > 2000:
+        raise HTTPException(status_code=400, detail=URL_REFUSED)
+    if not re.match(r"^https?://", url, re.I) and not (url.startswith("solana:") and meter_code(url)):
+        raise HTTPException(status_code=400, detail=URL_REFUSED)
     if not PHONE_RE.match(phone):
         raise HTTPException(status_code=400, detail="phone must be in international format, e.g. +14045550123")
     if not signed_in and phone not in allowed_phones():
@@ -370,8 +389,34 @@ def bridge_token(room: str, identity: str) -> str:
             .to_jwt())
 
 
-async def place_call(url: str, phone: str) -> dict:
-    """Steps 1-4 above. Raises HTTPException with a short reason on failure."""
+def meter_job(url: str, scan_id: Optional[str]) -> dict:
+    """Extra agent job metadata for a parking meter code: which scan to follow (the app's
+    quotes and payment for it) and the meter page to show live. ``scan_id`` must be the
+    server's own scan of this same code; without one the server makes its own (no sandbox
+    needed for a payment code) and returns its id. Raises HTTPException."""
+    from api import recent_scans, result_store
+    from api.meter_pay import lookup_scan
+    from api.scan import payment_result
+    payment, meter = meter_code(url)
+    if scan_id:
+        scan = lookup_scan(scan_id)
+        if scan is None:
+            raise HTTPException(status_code=404, detail="we couldn't find that scan; scan the meter code again")
+        if (scan.payment is None or scan.payment.recipient != payment.recipient
+                or scan.payment.label != payment.label):
+            raise HTTPException(status_code=400, detail="scan_id belongs to a different code")
+    else:
+        scan = payment_result(url, payment)
+        recent_scans.remember(scan)
+        result_store.save(scan)
+        scan_id = scan.scan_id
+    return {"scan_id": scan_id, "meter_url": meter.meter_url,
+            "meter": {"merchant": payment.label, **meter.as_dict()}}
+
+
+async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict:
+    """Steps 1-4 above. Raises HTTPException with a short reason on failure.
+    ``extra``: more job metadata for the agent (parking meter codes, see meter_job)."""
     from livekit import api as lk
     room = f"scansafe-out-{uuid.uuid4().hex[:12]}"
     lkapi = lk.LiveKitAPI(_livekit_http_url(), os.getenv("LIVEKIT_API_KEY"), os.getenv("LIVEKIT_API_SECRET"))
@@ -379,7 +424,8 @@ async def place_call(url: str, phone: str) -> dict:
         await lkapi.room.create_room(lk.CreateRoomRequest(name=room, empty_timeout=300, max_participants=4))
         await lkapi.agent_dispatch.create_dispatch(lk.CreateAgentDispatchRequest(
             agent_name=os.getenv("AGENT_NAME", "scansafe-agent"), room=room,
-            metadata=json.dumps({"scansafe_outbound": True, "scan_url": url, "phone": phone})))
+            metadata=json.dumps({"scansafe_outbound": True, "scan_url": url, "phone": phone,
+                                 **(extra or {})})))
 
         agent_identity, deadline = None, time.monotonic() + AGENT_READY_TIMEOUT_S
         while time.monotonic() < deadline:
@@ -436,6 +482,8 @@ async def _cleanup(lkapi, room: str) -> None:
 @router.post("/call-me")
 async def call_me(req: CallRequest, authorization: str = Header(default="")) -> dict:
     """Ring the person on FaceTime; our agent opens `url` in the sandbox and shows it live.
+    A verified parking meter code (solana:...) instead gets the pay-by-the-hour walkthrough:
+    the agent shows the meter page live and follows the app's hours and payment for scan_id.
     Who gets called comes from the phone sign-in token (Authorization: Bearer <token>), not from
     the request body. Without a token only the server's own allowlist (the demo phone) works."""
     token = bearer_token(authorization)
@@ -443,8 +491,12 @@ async def call_me(req: CallRequest, authorization: str = Header(default="")) -> 
     if signed_in:
         req = req.model_copy(update={"phone": signed_in})
     url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
+    extra = await asyncio.to_thread(meter_job, url, req.scan_id) if url.startswith("solana:") else None
     _take_rate_slot()
-    return await place_call(url, phone)
+    if extra is None:
+        return await place_call(url, phone)
+    out = await place_call(url, phone, extra=extra)
+    return {**out, "scan_id": extra["scan_id"]}
 
 
 @router.get("/call-me/{call_id}")

@@ -14,3 +14,12 @@ def _no_rdap(monkeypatch):
     with signals._lock:
         signals._cache.clear()
         signals._inflight.clear()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_pay_state():
+    """Parking quotes and payment statuses (api/meter_pay.py) never leak between tests."""
+    from api import meter_pay
+    meter_pay.clear()
+    yield
+    meter_pay.clear()

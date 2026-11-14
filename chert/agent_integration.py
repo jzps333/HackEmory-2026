@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -40,7 +41,7 @@ from livekit import rtc
 from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunContext, cli,
                             function_tool, room_io)
 
-from chert import imessage
+from chert import imessage, meter_pay
 from chert.qr_reader import read_qr
 from chert.scansafe_tools import CodeDebouncer, scan_url_stream, speech_for
 
@@ -236,6 +237,9 @@ def speak(session: AgentSession, text: str):
 class ScanSafeCall:
     """State for one FaceTime call: video watcher, debounce, cache, iMessage follow-up."""
 
+    meter_flow: Optional["meter_pay.MeterPayFlow"] = None   # parking meter calls only
+    ignore_codes: frozenset = frozenset()                   # codes the camera loop skips
+
     def __init__(self, session: AgentSession, room: rtc.Room) -> None:
         self.session = session
         self.room = room
@@ -251,6 +255,8 @@ class ScanSafeCall:
         self.greeted = asyncio.Event()   # set once FaceTime is up and the greeting has been said
         self.code_before_greeting = False
         self._speech_lock = asyncio.Lock()
+        self.meter_flow = None
+        self.ignore_codes = set()
 
     async def say(self, text: str) -> None:
         """Say one fixed line and wait until it has played. One at a time: two overlapping
@@ -270,6 +276,8 @@ class ScanSafeCall:
         Returns True if a check was running."""
         self.generation += 1
         busy = bool(self._inflight) or self.video.state == "checking"
+        if self.meter_flow is not None:
+            self.meter_flow.stop()  # no more polling, live views or meter speech
         for task in self._inflight.values():
             task.cancel()          # its stream thread sees the new generation and hangs up
         self._inflight.clear()
@@ -314,8 +322,45 @@ class ScanSafeCall:
             should_stop=lambda: gen != self.generation,
         )
 
+    async def meter_live(self, url: str, hours: int, amount: float) -> Optional[dict]:
+        """Parking meter calls: show the meter page (``url`` has ?hours=N) live on our video
+        through the same sandbox stream as a check, then its picture under an hours banner.
+        Nothing is spoken and nothing is texted; the page's verdict isn't used. When cancelled
+        (hours changed, or stop) it hangs up the stream and waits for that thread to finish
+        before giving up, so two live views never run at once."""
+        gen, cancel = self.generation, threading.Event()
+        self.video.begin_meter_view(url, hours, amount)
+        fut = asyncio.ensure_future(asyncio.to_thread(self._meter_scan, url, gen, cancel))
+        try:
+            result = await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            cancel.set()
+            try:
+                await fut
+            except Exception:   # noqa: BLE001 - it's over either way
+                pass
+            raise
+        if result is None or cancel.is_set() or gen != self.generation:
+            return None
+        if self.video.state == "checking" and self.video.code == url:
+            self.video.set_meter_view(result, hours, amount)
+        return result
+
+    def _meter_scan(self, url: str, gen: int, cancel: threading.Event) -> Optional[dict]:
+        def showing() -> bool:
+            return (gen == self.generation and not cancel.is_set()
+                    and self.video.state == "checking" and self.video.code == url)
+        return scan_url_stream(
+            url,
+            on_frame=lambda jpeg: showing() and self.video.set_live_frame(jpeg),
+            on_nav=lambda u: showing() and self.video.note_nav(u),
+            should_stop=lambda: gen != self.generation or cancel.is_set(),
+        )
+
     async def _on_code(self, code: str) -> None:
         """Auto path: the video loop saw a code."""
+        if code in self.ignore_codes:
+            return                 # the meter code this call is already about
         if not self.debouncer.should_handle(code):
             return
         log.info("QR seen (%d chars)", len(code))
@@ -388,8 +433,8 @@ class ScanSafeCall:
 
 
 class ScanSafeAgent(Agent):
-    def __init__(self, call: Optional[ScanSafeCall] = None) -> None:
-        super().__init__(instructions=SYSTEM_INSTRUCTIONS)
+    def __init__(self, call: Optional[ScanSafeCall] = None, extra_instructions: str = "") -> None:
+        super().__init__(instructions=SYSTEM_INSTRUCTIONS + extra_instructions)
         self.call = call
 
     @function_tool
@@ -601,6 +646,32 @@ async def prepublish_audio(session: AgentSession, timeout: float = 5.0) -> bool:
     return getattr(out, "_publication", None) is not None
 
 
+async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room) -> None:
+    """Parking meter call, once FaceTime is up: greet, show the meter page live for the hours the
+    app has picked, then follow the app's quotes and payment (chert/meter_pay.py). The agent
+    never pays; the app's Pay button does."""
+    call.ignore_codes.add(meter["scan_url"])    # the person may be standing at that very sticker
+    label = " · ".join(x for x in (f"Meter {meter['meter_id']}" if meter.get("meter_id") else "",
+                                   meter.get("merchant") or "") if x)
+    call.video.meter_label = label
+
+    def connected() -> bool:
+        try:
+            return bool(room.isconnected())
+        except Exception:   # noqa: BLE001 - unknown: keep going (MAX_FLOW_S still ends it)
+            return True
+    flow = meter_pay.MeterPayFlow(meter, say=call.say, show_live=call.meter_live,
+                                  show_paid=call.video.set_paid, alive=connected)
+    call.meter_flow = flow
+    greet = asyncio.create_task(call.say(meter_pay.greeting(meter)))   # the first thing said
+    await asyncio.sleep(0)                      # let it take the speech lock
+    hours = await flow.initial_hours()
+    await flow.render(hours)                    # live view starts while the greeting plays
+    await greet
+    call.greeted.set()
+    await flow.run()
+
+
 # 2-vCPU box: video encode + QR decode push CPU past the 0.7 default during a call, which marks
 # the worker unavailable and can leave the next call without an agent.
 server = AgentServer(load_threshold=0.95)
@@ -609,6 +680,8 @@ server = AgentServer(load_threshold=0.95)
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
+    out = outbound_job(ctx.job.metadata)
+    meter = meter_pay.meter_job(out)          # a parking meter payment call (from /call-me)
     session = AgentSession(llm=make_model())
     call = ScanSafeCall(session, ctx.room)
     call.watcher.start()                      # before connect, so no track event is missed
@@ -625,7 +698,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(
         room=ctx.room,
-        agent=ScanSafeAgent(call),
+        agent=ScanSafeAgent(call, meter_pay.INSTRUCTIONS if meter else ""),
         # Also lets Gemini see the caller (it implements push_video). TODO(verify): RoomIO only
         # forwards camera/screenshare-source tracks; if Chert's bridge track has another source,
         # Gemini won't see video, but our QRWatcher still reads every video track.
@@ -636,7 +709,6 @@ async def entrypoint(ctx: JobContext) -> None:
         _participant(p)
     await call.video.publish(ctx.room)
 
-    out = outbound_job(ctx.job.metadata)
     if out:
         # Chert is about to FaceTime the person (/call-me waits for our audio+video first).
         # Our own room has no chert_bridge_ready signal, so poll the call instead.
@@ -646,6 +718,9 @@ async def entrypoint(ctx: JobContext) -> None:
         if not await wait_for_outbound_answer(ctx.room):
             log.info("outbound call not answered or ended; leaving")
             ctx.shutdown(reason="outbound call not answered")
+            return
+        if meter:
+            await run_meter_call(call, meter, ctx.room)
             return
         check = asyncio.create_task(call.check_now(out["scan_url"]))   # live view starts now
         await call.say(OUTBOUND_GREETING)    # takes the speech lock first, so it's said first

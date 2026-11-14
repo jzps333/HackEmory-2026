@@ -124,16 +124,17 @@ def client():
     return TestClient(app)
 
 
-def pay_body(qr: str, approved: bool = True) -> dict:
-    """Exactly what the app sends: the scan's payment object plus approved: true."""
+def pay_body(qr: str, approved: bool = True, scan_id: str = "devnet-test") -> dict:
+    """Exactly what the app sends: the scan's payment object plus approved: true (and hours,
+    which the Dogwood parking meter requires and fixed-amount merchants ignore)."""
     p = parse_solana_pay(qr)
-    return {"scan_id": "devnet-test", "payment": p.model_dump(), "approved": approved}
+    return {"scan_id": scan_id, "payment": p.model_dump(), "approved": approved, "hours": 1}
 
 
 def test_pays_each_real_qr(client, wallet, monkeypatch):
     for name in ("real_meter.png", "magnolia_table.png"):
         calls = mock_rpc(monkeypatch, solana_pay.DEVNET_GENESIS_HASH)
-        r = client.post("/pay", json=pay_body(decode(name)))
+        r = client.post("/pay", json=pay_body(decode(name), scan_id=f"devnet-{name}"))   # one pay per scan
         assert r.status_code == 200, r.text
         assert r.json()["explorer_url"].endswith("?cluster=devnet")
         assert calls == ["getGenesisHash", "getLatestBlockhash", "sendTransaction"]
@@ -173,8 +174,8 @@ def test_refuses_non_devnet_urls_without_any_rpc(client, wallet, monkeypatch, ur
 
 def test_cap_is_tiny(client, wallet, monkeypatch):
     calls = mock_rpc(monkeypatch, solana_pay.DEVNET_GENESIS_HASH)
-    m = KNOWN_MERCHANTS["Dogwood Lot & Meter Co."]
-    r = client.post("/pay", json=pay_body(f"solana:{m}?amount=0.06&label=Dogwood%20Lot%20%26%20Meter%20Co."))
+    m = KNOWN_MERCHANTS["Magnolia Diner"]     # fixed amount; meter prices are capped in test_meter_pay
+    r = client.post("/pay", json=pay_body(f"solana:{m}?amount=0.06&label=Magnolia%20Diner"))
     assert r.status_code == 400 and r.json()["error"] == "over_cap"
     assert calls == []
 
