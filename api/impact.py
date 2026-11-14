@@ -18,7 +18,7 @@ log = logging.getLogger("scansafe.impact")
 
 DEFAULT_LOSS_PER_SCAM_USD = 110
 EXPLANATION = ("In 2024, 11% of fraud reports about scams that began with a text involved a loss, and the "
-               "median loss was $1,000, so each blocked scam avoids about $110 on average (estimate).").")
+               "median loss was $1,000, so each blocked scam avoids about $110 on average (estimate).")
 SOURCES = [
     "https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024",
     "https://www.ftc.gov/news-events/news/press-releases/2025/04/new-ftc-data-show-top-text-message-scams-2024-overall-losses-text-scams-hit-470-million",
