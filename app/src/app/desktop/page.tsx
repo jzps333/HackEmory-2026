@@ -1,3 +1,8 @@
-export default function DesktopHome() {
-  return <h1 className="desk-page-title">Check a link before you open it.</h1>;
+import type { Metadata } from "next";
+import DeskHome from "@/components/desktop/DeskHome";
+
+export const metadata: Metadata = { title: "ScanSafe" };
+
+export default function DesktopHomePage() {
+  return <DeskHome />;
 }

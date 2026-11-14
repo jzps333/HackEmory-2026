@@ -64,3 +64,19 @@ main:has(> .desk) { max-width: none; padding: 0; }
 .desk-body { max-width: 1200px; margin: 0 auto; padding: 0 2rem 6rem; }
 
 .desk-page-title { margin-top: 2rem; }
+
+/* LiveCheck (shared component) sets its own light palette on its card; recolor it here. */
+.desk section[aria-labelledby="live-h"] {
+  --ink: #ffffff; --muted: #b8b8b8; --purple: #0ae448; --blue: #abff84; --line: #2c2c2c;
+  --grad: linear-gradient(105deg, #abff84 0%, #0ae448 100%);
+  background: #0b0b0b; box-shadow: 0 0 60px rgb(10 228 68 / 10%);
+}
+.desk section[aria-labelledby="live-h"] > div:first-of-type { border-color: #2c2c2c; background: #111; box-shadow: 0 0 40px rgb(10 228 68 / 15%); }
+.desk section[aria-labelledby="live-h"] > div:first-of-type > div { background: #111; }
+
+/* Leaflet: dark map tiles (pins live in another pane, so they stay red). */
+.desk .leaflet-container { background: #000; }
+.desk .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) grayscale(1) brightness(0.85) contrast(0.95); }
+.desk .leaflet-popup-content-wrapper, .desk .leaflet-popup-tip { background: #0b0b0b; color: #fff; border: 1px solid #2c2c2c; }
+.desk .leaflet-control-attribution { background: rgb(0 0 0 / 70%) !important; color: #8c8c8c; }
+.desk .leaflet-control-attribution a { color: #abff84; }
