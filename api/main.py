@@ -12,12 +12,14 @@ from api.routes_data import flagged_before, record_scan
 from api.routes_data import router as data_router
 from api.routes_pay import router as pay_router
 from api.scan import scan
+from chert.imessage import router as chert_router
 from api.schema import ScanResult
 
 app = FastAPI(title="ScanSafe")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(data_router)   # /report, /pins, /search, /stats/*
 app.include_router(pay_router)    # /pay (devnet only)
+app.include_router(chert_router)  # /chert/webhook (Chert call + message events, signed)
 
 
 class ScanRequest(BaseModel):

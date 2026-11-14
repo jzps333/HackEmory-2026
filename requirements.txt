@@ -14,3 +14,7 @@ qrcode[pil]
 
 # Tests
 pytest
+
+# Chert agent (chert/): QR reading from video frames
+opencv-python-headless
+numpy
