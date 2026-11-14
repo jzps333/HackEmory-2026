@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import PhishingSimulation from "../components/PhishingSimulation";
+import FictionalFooter from "../components/FictionalFooter";
 
 export const metadata: Metadata = {
   title: "Morrow Coffee | Sample Website",
@@ -47,6 +48,7 @@ export default function CafePage() {
         hook="Offer expires in 10 minutes. Scan to verify your Morrow Rewards account and claim your surprise."
       />
       <footer className="cafe-footer" id="visit"><span>17 WILLOW LANE · EVERYDAY 7–3</span><span>COME AS YOU ARE ☺</span></footer>
+      <FictionalFooter />
     </div>
   );
 }

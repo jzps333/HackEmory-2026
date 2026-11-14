@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>ScanSafe demo QR sheet</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  @page { size: letter; margin: 0.4in; }
+  body { font-family: system-ui, -apple-system, Arial, sans-serif; margin: 0.4in; color: #111; background: #fff; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  p.sub { font-size: 11px; color: #444; margin: 0 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
+  .card { margin: 0; break-inside: avoid; border: 1px solid #ddd; border-radius: 6px; padding: 6px; }
+  .card img { width: 100%; max-width: 2.1in; display: block; margin: 0 auto; image-rendering: pixelated; }
+  figcaption { display: flex; flex-direction: column; gap: 1px; font-size: 11px; }
+  figcaption strong { font-size: 13px; }
+  figcaption span { color: #444; }
+  figcaption code { font-size: 9px; color: #666; word-break: break-all; }
+  .scam b { color: #b3261e; } .safe b { color: #1b6e3a; }
+</style></head><body>
+<h1>ScanSafe demo QR codes — every business is fictional</h1>
+<p class="sub">Base URL: https://scansafe-demo-sites.vercel.app · Expected verdict under each code (SCAM = malicious or suspicious) · HackEmory demo only, do not post in public.</p>
+<div class="grid">
+  <figure class="card safe">
+    <img src="sample-sites-index.png" alt="QR code for Sample Websites">
+    <figcaption><strong>Sample Websites</strong><span>Index of the four sample sites</span>
+    <b>Expected: SAFE</b><code>/websites</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="morrow-coffee.png" alt="QR code for Morrow Coffee">
+    <figcaption><strong>Morrow Coffee</strong><span>Cafe + fake &quot;free pastry&quot; rewards lure</span>
+    <b>Expected: SCAM</b><code>/websites/cafe</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="morrow-coffee-rewards-SCAM.png" alt="QR code for Morrow Coffee Rewards">
+    <figcaption><strong>Morrow Coffee Rewards</strong><span>&quot;Free year of coffee&quot;: card + password</span>
+    <b>Expected: SCAM</b><code>/websites/cafe/rewards</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="pixel-palace.png" alt="QR code for Pixel Palace">
+    <figcaption><strong>Pixel Palace</strong><span>Arcade + fake &quot;rare skin&quot; profile lure</span>
+    <b>Expected: SCAM</b><code>/websites/arcade</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="pixel-palace-prize-SCAM.png" alt="QR code for Pixel Palace Prize">
+    <figcaption><strong>Pixel Palace Prize</strong><span>&quot;500 free tokens&quot;: card + password</span>
+    <b>Expected: SCAM</b><code>/websites/arcade/prize</code></figcaption>
+  </figure>
+  <figure class="card safe">
+    <img src="trail-notes.png" alt="QR code for Trail Notes">
+    <figcaption><strong>Trail Notes</strong><span>Hiking field guide</span>
+    <b>Expected: SAFE</b><code>/websites/trails</code></figcaption>
+  </figure>
+  <figure class="card safe">
+    <img src="orbit-post.png" alt="QR code for Orbit Post">
+    <figcaption><strong>Orbit Post</strong><span>Space journal</span>
+    <b>Expected: SAFE</b><code>/websites/orbit</code></figcaption>
+  </figure>
+  <figure class="card safe">
+    <img src="urban-atlas-cities.png" alt="QR code for Urban Atlas">
+    <figcaption><strong>Urban Atlas</strong><span>World&#x27;s densest cities</span>
+    <b>Expected: SAFE</b><code>/cities</code></figcaption>
+  </figure>
+  <figure class="card safe">
+    <img src="magnolia-diner.png" alt="QR code for Magnolia Diner">
+    <figcaption><strong>Magnolia Diner</strong><span>Table menu</span>
+    <b>Expected: SAFE</b><code>/fixtures/safe/index.html</code></figcaption>
+  </figure>
+  <figure class="card safe">
+    <img src="safe-library-wifi.png" alt="QR code for Fernhollow Library Wi-Fi">
+    <figcaption><strong>Fernhollow Library Wi-Fi</strong><span>Free Wi-Fi, asks for nothing</span>
+    <b>Expected: SAFE</b><code>/websites/safe/library-wifi</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-wifi-login.png" alt="QR code for Bramblewick Cafe Wi-Fi">
+    <figcaption><strong>Bramblewick Cafe Wi-Fi</strong><span>Wi-Fi login asks for email password</span>
+    <b>Expected: SCAM</b><code>/websites/scams/wifi-login</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-hidden-ai-note.png" alt="QR code for Wrenfield Supply Co.">
+    <figcaption><strong>Wrenfield Supply Co.</strong><span>Checkout + hidden note to AI scanners</span>
+    <b>Expected: SCAM</b><code>/websites/scams/hidden-ai-note</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-unpaid-toll.png" alt="QR code for Kestrel Tollway">
+    <figcaption><strong>Kestrel Tollway</strong><span>Unpaid toll $4.99 or $50 late fee</span>
+    <b>Expected: SCAM</b><code>/websites/scams/unpaid-toll</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-redirect-chain.png" alt="QR code for Redirect chain">
+    <figcaption><strong>Redirect chain</strong><span>2 hops, then lands on the toll scam</span>
+    <b>Expected: SCAM</b><code>/r/a</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-package-fee.png" alt="QR code for Swiftlark Parcel">
+    <figcaption><strong>Swiftlark Parcel</strong><span>Package on hold: $1.99 redelivery fee</span>
+    <b>Expected: SCAM</b><code>/websites/scams/package-fee</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-menu-app.png" alt="QR code for Lumen Bistro">
+    <figcaption><strong>Lumen Bistro</strong><span>&quot;Download our app&quot;: starts .apk download</span>
+    <b>Expected: SCAM</b><code>/websites/scams/menu-app</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-robot-check.png" alt="QR code for Zephyrine Parking">
+    <figcaption><strong>Zephyrine Parking</strong><span>Fake &quot;verify you are human&quot; gate + card</span>
+    <b>Expected: SCAM</b><code>/websites/scams/robot-check</code></figcaption>
+  </figure>
+  <figure class="card scam">
+    <img src="scam-wallet-giveaway.png" alt="QR code for Glowfin Coin">
+    <figcaption><strong>Glowfin Coin</strong><span>Airdrop asks for 12-word recovery phrase</span>
+    <b>Expected: SCAM</b><code>/websites/scams/wallet-giveaway</code></figcaption>
+  </figure>
+</div>
+</body></html>

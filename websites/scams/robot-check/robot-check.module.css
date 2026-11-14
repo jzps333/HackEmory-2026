@@ -1,0 +1,9 @@
+/* CSS-only "challenge": ticking the box reveals the payment form. No script, no CAPTCHA provider. */
+.check { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.box { display: flex; align-items: center; gap: 14px; border: 1px solid #d3d3d3; border-radius: 4px; background: #f9f9f9;
+  padding: 16px 14px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); cursor: pointer; font-size: 16px; color: #222; }
+.tick { width: 28px; height: 28px; flex: none; border: 2px solid #c1c1c1; border-radius: 3px; background: #fff; }
+.check:focus-visible + .box .tick { outline: 3px solid #4a90e2; outline-offset: 2px; }
+.check:checked + .box .tick { border-color: #2e7d32; background: #2e7d32; }
+.hidden { display: none; margin-top: 18px; }
+.check:checked ~ .hidden { display: block; }

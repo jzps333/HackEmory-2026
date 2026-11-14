@@ -1,0 +1,9 @@
+# scansafe-demo-sites deploy: upload only the Next.js app and the shared websites/ source.
+/*
+!/app
+!/websites
+!/package.json
+!/package-lock.json
+/app/node_modules
+/app/.next
+/app/.vercel

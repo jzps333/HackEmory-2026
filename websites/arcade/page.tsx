@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import PhishingSimulation from "../components/PhishingSimulation";
+import FictionalFooter from "../components/FictionalFooter";
 
 export const metadata: Metadata = {
   title: "Pixel Palace | Sample Website",
@@ -44,6 +45,7 @@ export default function ArcadePage() {
         hook="Your bonus disappears tonight. Scan to verify your player profile and reveal the prize."
       />
       <footer className="arcade-footer" id="high-scores"><span>NO QUARTERS REQUIRED (THIS IS A WEBSITE)</span><span>PIXEL PALACE · OPEN EVERYWHEN</span></footer>
+      <FictionalFooter />
     </div>
   );
 }
