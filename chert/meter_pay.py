@@ -12,6 +12,14 @@ then polls the API about every 1.5 s:
 The agent NEVER pays: only the app's Pay button (POST /pay, approved: true) does. "Stop" stops
 all of it, including speech the polling would have triggered.
 
+Linked Dogwood account (POST /operators/dogwood/app-session says linked: true): the agent says it
+will use the official Dogwood app instead of the sticker, and the live view is the sandbox
+operating that app (install -> open -> plate -> hours -> "Pay with linked ScanSafe account",
+which only asks for approval in ScanSafe) instead of the meter page; DogwoodView below. Hours
+changes before payment re-run it (straight to the app, no second install); paid -> the receipt
+line and the Paid banner over the app's receipt. If the app path fails before Pay (sandbox not
+deployed yet, session refused), it falls back to the meter page for the rest of the call.
+
 No LiveKit imports here, so the logic is unit-testable: QuoteFollower is pure, and MeterPayFlow
 takes its speech, video and HTTP as plain callables.
 """
@@ -63,11 +71,27 @@ def paid_line(hours: int, meter_id: str = "") -> str:
     return f"Paid. {hours_text(hours)}{where}. Your receipt is in the app."
 
 
+LINKED_LINE = ("You've linked your Dogwood Parking account. "
+               "I'll use the official Dogwood app instead of the sticker.")
+APP_FALLBACK_LINE = "The Dogwood app isn't answering right now, so I'll show you the meter instead."
+
+
+def linked_greeting() -> str:
+    return f"Hi, this is ScanSafe. {LINKED_LINE}"
+
+
+def dogwood_paid_line(hours: int, meter_id: str = "", plate: str = "") -> str:
+    where = f" on meter {meter_id}" if meter_id else ""
+    car = f" for plate {plate}" if plate else ""
+    return f"Paid. {hours_text(hours)}{where}{car}. Your receipt is in the Dogwood app."
+
+
 INSTRUCTIONS = """
 This call is about paying a parking meter. The person picks the hours and pays in the ScanSafe
 app. You cannot pay, change the hours, or move money. If they ask you to pay or add time, tell
 them to pick the hours in the app and tap Pay there. Never say a payment went through unless you
-were told to say "Paid".
+were told to say "Paid". If you said you'd use the official Dogwood app, your video shows that
+app being filled in on our computer; it still can't pay: they approve the payment in ScanSafe.
 """
 
 
@@ -100,6 +124,24 @@ def meter_view_url(meter_url: str, hours: int) -> str:
     q = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if k != "hours"]
     q.append(("hours", str(int(hours))))
     return urlunparse(p._replace(query=urlencode(q)))
+
+
+def install_url_for(app_url: str) -> str:
+    """The Dogwood install page for this session (first run: Install, then Open).
+    /dogwood/app?s=T -> /dogwood/install?s=T; anything else is returned unchanged."""
+    p = urlparse(app_url)
+    if p.path.rstrip("/") == "/dogwood/app":
+        return urlunparse(p._replace(path="/dogwood/install"))
+    return app_url
+
+
+def app_page_url(app_url: str) -> str:
+    """The Dogwood app page itself (re-runs after an hours change: already installed).
+    /dogwood/install?s=T -> /dogwood/app?s=T; anything else is returned unchanged."""
+    p = urlparse(app_url)
+    if p.path.rstrip("/") == "/dogwood/install":
+        return urlunparse(p._replace(path="/dogwood/app"))
+    return app_url
 
 
 def amount_for(meter: dict, hours: int) -> float:
@@ -186,10 +228,20 @@ class MeterPayFlow:
                  alive: Callable[[], bool] = lambda: True,
                  poll_s: float = POLL_S, debounce_s: float = DEBOUNCE_S,
                  max_s: float = MAX_FLOW_S, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep) -> None:
+                 sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+                 view_url: Optional[Callable[[int], str]] = None,
+                 paid_text: Optional[Callable[[int], str]] = None,
+                 paid_grace_s: float = 0.0) -> None:
+        """view_url(hours): what the live view opens (default: the meter page with ?hours=N).
+        paid_text(hours): the line said once paid (default: paid_line).
+        paid_grace_s: once paid, let the live view finish by itself for up to this long (the
+        Dogwood app shows its receipt), then hang it up."""
         self.meter = meter
         self.scan_id = meter["scan_id"]
         self._say, self._show_live, self._show_paid = say, show_live, show_paid
+        self._view_url = view_url or (lambda h: meter_view_url(self.meter["meter_url"], h))
+        self._paid_text = paid_text or (lambda h: paid_line(h, str(self.meter.get("meter_id") or "")))
+        self.paid_grace_s = paid_grace_s
         self._fetch_quote = fetch_quote or self._get("/pay/quote/")
         self._fetch_status = fetch_status or self._get("/pay/status/")
         self.alive, self.poll_s, self.max_s = alive, poll_s, max_s
@@ -260,7 +312,7 @@ class MeterPayFlow:
             await self._cancel_live()
             if self.stopped or self.follower.paid:
                 return
-            url = meter_view_url(self.meter["meter_url"], hours)
+            url = self._view_url(hours)
             self._live = asyncio.create_task(self._show_live(url, hours, amount_for(self.meter, hours)))
 
     async def _paid(self, status: dict) -> None:
@@ -273,11 +325,15 @@ class MeterPayFlow:
         except (TypeError, ValueError):
             amount = amount_for(self.meter, hours)
         async with self._live_lock:
+            t = self._live
+            if self.paid_grace_s > 0 and t is not None and not t.done() and not self.stopped:
+                # wait() never raises for the view's own outcome and doesn't cancel it on timeout
+                await asyncio.wait({t}, timeout=self.paid_grace_s)
             await self._cancel_live()
         if self.stopped:
             return
         self._show_paid(hours, amount)
-        await self.say(paid_line(hours, str(self.meter.get("meter_id") or "")))
+        await self.say(self._paid_text(hours))
 
     # main loop -------------------------------------------------------------------------------
 
@@ -313,3 +369,65 @@ class MeterPayFlow:
             t.cancel()
         if self._live is not None:
             self._live.cancel()
+
+
+# --- linked Dogwood account: operate the official app instead of showing the sticker -----------
+
+OperateLive = Callable[[str, str, int, float, Callable[[str, str], Any]], Awaitable[Optional[dict]]]
+
+
+class DogwoodView:
+    """The live view for MeterPayFlow when the person linked their Dogwood Parking account.
+
+    session: {"app_url", "plate"} from POST /operators/dogwood/app-session (our server).
+    operate_live(url, plate, hours, amount, on_step) runs one sandbox /operate stream on the video
+    and returns its result (None if cancelled); meter_live(url, hours, amount) is today's meter
+    view, used as the fallback. Pass view_url / show to MeterPayFlow, and paid_text for the line.
+
+    First run opens the install page (Install, Open, ...); once a run has opened the app, later
+    runs (hours changed before payment) go straight to the app page. If a run fails before it
+    tapped Pay, the rest of the call uses the meter page instead, said once out loud.
+    """
+
+    def __init__(self, session: dict, meter: dict, *, operate_live: OperateLive,
+                 meter_live: Callable[[str, int, float], Awaitable[Any]],
+                 say: Callable[[str], Awaitable[Any]]) -> None:
+        self.app_url, self.plate = session["app_url"], session["plate"]
+        self.meter = meter
+        self._operate_live, self._meter_live, self._say = operate_live, meter_live, say
+        self.installed = False
+        self.fallen_back = False
+        self.runs = 0
+
+    def view_url(self, hours: int) -> str:
+        if self.fallen_back:
+            return meter_view_url(self.meter["meter_url"], hours)
+        return app_page_url(self.app_url) if self.installed else install_url_for(self.app_url)
+
+    def _on_step(self, _text: str, step: str) -> None:
+        if step in ("open_app", "plate", "hours", "pay", "wait", "paid"):
+            self.installed = True
+
+    async def show(self, url: str, hours: int, amount: float) -> Optional[dict]:
+        if self.fallen_back or url.startswith(self.meter["meter_url"]):
+            return await self._meter_live(url, hours, amount)
+        self.runs += 1
+        result = await self._operate_live(url, self.plate, hours, amount, self._on_step)
+        if not isinstance(result, dict):
+            return result                       # cancelled (hours changed, paid, or stop)
+        steps = result.get("steps") or []
+        if "open_app" in steps or "plate" in steps:
+            self.installed = True
+        if result.get("status") == "failed" and "pay" not in steps:
+            log.info("dogwood app failed before Pay (%s); meter page from now on",
+                     str(result.get("error") or "")[:120])
+            self.fallen_back = True
+            await self._say(APP_FALLBACK_LINE)
+            return await self._meter_live(meter_view_url(self.meter["meter_url"], hours), hours, amount)
+        return result
+
+    def paid_text(self, hours: int) -> str:
+        meter_id = str(self.meter.get("meter_id") or "")
+        if self.fallen_back:
+            return paid_line(hours, meter_id)
+        return dogwood_paid_line(hours, meter_id, self.plate)

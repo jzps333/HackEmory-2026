@@ -168,12 +168,180 @@ def scan_url_stream(url: str, on_frame: Callable[[bytes], Any],
     return scan_url(url, lat, lng, client=client)
 
 
-def _safe_call(fn: Callable, arg: Any) -> None:
+def _safe_call(fn: Callable, *args: Any) -> None:
     """A broken video callback must never break the scan itself."""
     try:
-        fn(arg)
+        fn(*args)
     except Exception:
         log.exception("live stream callback failed")
+
+
+# --- Dogwood Parking (operator mode): the official app instead of the sticker ------------------
+#
+# When the person linked their Dogwood account in ScanSafe, the agent drives the made-up official
+# Dogwood Parking app in the sandbox (install -> open -> plate -> hours -> Pay, which only asks for
+# approval in ScanSafe) and streams it on the FaceTime video. It never pays: the person taps Pay
+# in the ScanSafe app. The backend doesn't proxy /operate yet, so the agent server calls the
+# sandbox directly with SANDBOX_URL + SANDBOX_TOKEN from the repo .env (it already has them).
+
+DOGWOOD_HOST = "scansafe-demo-sites.vercel.app"
+APP_SESSION_TIMEOUT_S = 4.0
+OPERATE_TIMEOUT_S = 200.0   # sandbox: steps + up to 120 s waiting for approval (+ its own 180 s cap)
+_PLATE_RE = re.compile(r"^[A-Z0-9][A-Z0-9 -]{0,9}$")
+
+
+def sandbox_configured() -> bool:
+    return bool(os.getenv("SANDBOX_URL") and os.getenv("SANDBOX_TOKEN"))
+
+
+def dogwood_url_ok(url: Any) -> bool:
+    """https://scansafe-demo-sites.vercel.app/dogwood/... only (the sandbox checks it again)."""
+    if not isinstance(url, str) or len(url) > 2048 or any(c.isspace() for c in url):
+        return False
+    try:
+        from urllib.parse import unquote, urlsplit
+        u = urlsplit(url)
+        if u.port is not None:
+            return False
+    except ValueError:
+        return False
+    path = unquote(u.path)
+    return (u.scheme == "https" and u.netloc.lower() == DOGWOOD_HOST and path.startswith("/dogwood/")
+            and ".." not in path and "//" not in path and "\\" not in path)
+
+
+def clean_plate(plate: Any) -> Optional[str]:
+    """'ga 4821k' -> 'GA 4821K'; None unless 1-10 letters, digits, spaces or dashes."""
+    if not isinstance(plate, str):
+        return None
+    p = re.sub(r"\s+", " ", plate).strip().upper()
+    return p if _PLATE_RE.fullmatch(p) else None
+
+
+def dogwood_app_session(scan_id: Any, *, client: Optional[httpx.Client] = None,
+                        timeout: float = APP_SESSION_TIMEOUT_S) -> Optional[dict]:
+    """POST {SCANSAFE_API_URL}/operators/dogwood/app-session {scan_id} (X-Agent-Key header).
+
+    Returns {"app_url", "plate", "linked": True} only when the person linked Dogwood and the
+    answer is usable (app_url on our Dogwood pages, a sane plate). None otherwise: not linked,
+    no AGENT_INTERNAL_KEY, HTTP error, timeout, bad JSON. Never raises; never logs the key or
+    the session token in app_url."""
+    key = os.getenv("AGENT_INTERNAL_KEY") or ""
+    if not key or not isinstance(scan_id, str) or not scan_id:
+        return None
+    endpoint = f"{api_url()}/operators/dogwood/app-session"
+    try:
+        kw = dict(json={"scan_id": scan_id}, headers={"X-Agent-Key": key}, timeout=timeout)
+        r = client.post(endpoint, **kw) if client is not None else httpx.post(endpoint, **kw)
+        if r.status_code != 200:
+            log.info("dogwood app-session: HTTP %s; using the meter flow", r.status_code)
+            return None
+        data = r.json()
+    except (httpx.HTTPError, ValueError) as e:
+        log.info("dogwood app-session failed (%s); using the meter flow", type(e).__name__)
+        return None
+    if not isinstance(data, dict) or data.get("linked") is not True:
+        return None
+    plate = clean_plate(data.get("plate"))
+    if not dogwood_url_ok(data.get("app_url")) or plate is None:
+        log.warning("dogwood app-session: unusable app_url or plate; using the meter flow")
+        return None
+    return {"app_url": data["app_url"], "plate": plate, "linked": True}
+
+
+def operate_failed(why: str) -> dict:
+    return {"mode": "operate", "status": "failed", "paid": False, "steps": [], "error": why[:300],
+            "screenshots": []}
+
+
+def operate_stream(url: str, plate: str, hours: int, on_frame: Callable[[bytes], Any],
+                   on_nav: Optional[Callable[[str], Any]] = None,
+                   on_step: Optional[Callable[[str, str], Any]] = None,
+                   should_stop: Optional[Callable[[], bool]] = None,
+                   *, client: Optional[httpx.Client] = None,
+                   timeout: float = OPERATE_TIMEOUT_S) -> Optional[dict]:
+    """POST {SANDBOX_URL}/operate/stream {url, plate, hours} and watch the Dogwood app being used.
+
+    Blocking (run it with asyncio.to_thread). Same NDJSON as the scan stream:
+      {"type": "frame", "jpeg": ...}          -> on_frame(jpeg_bytes)
+      {"type": "nav", "url": ...}             -> on_nav(url)
+      {"type": "step", "text": ..., "step"}   -> on_step(text, step_id)
+      {"type": "result", "data": {...}}       -> returned ({"mode": "operate", "status": "paid" |
+                                                 "waiting" | "failed", "steps": [...], ...})
+    None if ``should_stop()`` turned True (the stream is closed; the sandbox removes the
+    container). Any failure (sandbox not configured or not deployed yet, HTTP error, bad JSON,
+    timeout, error line) returns ``operate_failed(why)``. Never raises, never falls back to a scan."""
+    def stopped() -> bool:
+        try:
+            return bool(should_stop and should_stop())
+        except Exception:
+            return False
+
+    base, token = os.getenv("SANDBOX_URL") or "", os.getenv("SANDBOX_TOKEN") or ""
+    if not base or not token:
+        return operate_failed("sandbox not configured")
+    endpoint = f"{base.rstrip('/')}/operate/stream"
+    deadline = time.monotonic() + timeout
+    result: Any = None
+    why = "stream ended without a result"
+    own = client is None
+    c = client or httpx.Client()
+    try:
+        with c.stream("POST", endpoint, json={"url": url, "plate": plate, "hours": int(hours)},
+                      headers={"Authorization": f"Bearer {token}"},
+                      timeout=httpx.Timeout(timeout, connect=STREAM_CONNECT_S)) as resp:
+            if resp.status_code != 200:
+                resp.read()
+                detail = ""
+                try:
+                    detail = str((resp.json() or {}).get("detail") or "")[:200]
+                except (ValueError, AttributeError):
+                    pass
+                why = f"HTTP {resp.status_code}" + (f": {detail}" if detail else "")
+            else:
+                for line in resp.iter_lines():
+                    if stopped():
+                        return None                  # leaving the with-block closes the stream
+                    if time.monotonic() > deadline:
+                        why = "stream timeout"
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    msg = json.loads(line)
+                    kind = msg.get("type") if isinstance(msg, dict) else None
+                    if kind == "frame":
+                        try:
+                            jpeg = base64.b64decode(msg.get("jpeg") or "", validate=False)
+                        except (binascii.Error, ValueError, TypeError):
+                            continue
+                        if jpeg:
+                            _safe_call(on_frame, jpeg)
+                    elif kind == "nav" and on_nav is not None and isinstance(msg.get("url"), str):
+                        _safe_call(on_nav, msg["url"])
+                    elif kind == "step" and on_step is not None and isinstance(msg.get("text"), str):
+                        _safe_call(on_step, msg["text"][:120], str(msg.get("step") or ""))
+                    elif kind == "result":
+                        result = msg.get("data")
+                        break
+                    elif kind == "error":
+                        why = str(msg.get("detail") or "sandbox error")[:300]
+                        break
+    except httpx.TimeoutException:
+        why = "stream timeout"
+    except Exception as e:    # connection refused, bad JSON, broken stream...
+        why = f"{type(e).__name__}: {e}"[:300]
+    finally:
+        if own:
+            c.close()
+    if stopped():
+        return None
+    if isinstance(result, dict) and result.get("status") in ("paid", "waiting", "failed"):
+        return result
+    if result is not None:
+        why = "unexpected result shape"
+    log.info("dogwood operate stream: %s", why)
+    return operate_failed(why)
 
 
 # --- Speech ------------------------------------------------------------------------------------

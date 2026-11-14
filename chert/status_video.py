@@ -18,6 +18,9 @@ Parking meter calls (chert/meter_pay.py) add:
   meter    - "3 hours" banner (total, meter) over the picture of the meter page.
   paid     - green "Paid" banner with a tick: "Paid · 2 hours · 0.02 SOL", over the meter page
              picture when it shows the same hours, else a big tick card.
+Linked Dogwood account: the live picture is the official Dogwood app being operated in the
+sandbox, and the line under the header says the step ("Now: Typing your plate GA 4821K")
+instead of the site (note_step). Paid shows over the app's receipt picture.
 """
 from __future__ import annotations
 
@@ -166,6 +169,7 @@ class StatusVideo:
     meter_label = ""                      # "Meter 42 · Dogwood Lot & Meter Co."
     meter_shot: Optional[Image.Image] = None
     meter_shot_hours: Optional[int] = None
+    live_step = ""                        # Dogwood app: what the sandbox is doing ("Tapping Install")
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -188,6 +192,7 @@ class StatusVideo:
     def begin_check(self, code: str) -> None:
         self.state, self.result, self.shot, self.thumb = "checking", None, None, None
         self.live, self.live_host, self.code = None, "", code
+        self.live_step = ""
         self.meter = None          # an ordinary check; begin_meter_view sets it again
         self.code_host = _host(code) or _clip(code, 28)
         self.check_started = time.monotonic()
@@ -219,6 +224,11 @@ class StatusVideo:
         """The sandbox browser went to ``url``: show its host in the live header."""
         self.live_host = _host(url) or _clip(url, 40)
 
+    def note_step(self, text: str) -> None:
+        """Operator mode: what the sandbox is doing now, shown instead of the host. ``text`` comes
+        from the sandbox's fixed step names, never from the page."""
+        self.live_step = _clip(text, 60)
+
     def set_result(self, result: dict) -> None:
         verdict = result.get("verdict")
         self.result = result
@@ -235,6 +245,7 @@ class StatusVideo:
     def reset(self) -> None:
         self.state, self.shot, self.thumb, self.result = "idle", None, None, None
         self.live, self.live_host, self.code = None, "", ""
+        self.live_step = ""
         self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
 
     # --- parking meter calls -------------------------------------------------------------------
@@ -358,11 +369,12 @@ class StatusVideo:
         head = (f"{hours_text(meter['hours'])} · {sol_text(meter['amount'])} SOL" if meter
                 else STEPS[current][0] + "…")
         d.text((96, 86), _fit(head, f["step"], self.W - 136), font=f["step"], fill=WHITE)
-        host = self.live_host or self.code_host
-        lead = "Now on: "
+        step = self.live_step
+        where = step or self.live_host or self.code_host
+        lead = "Now: " if step else "Now on: "
         d.text((40, 142), lead, font=f["detail"], fill=DIM)
         x = 40 + int(f["detail"].getlength(lead))
-        d.text((x, 142), _fit(host, f["detail"], self.W - 40 - x), font=f["detail"], fill=WHITE)
+        d.text((x, 142), _fit(where, f["detail"], self.W - 40 - x), font=f["detail"], fill=WHITE)
         # the LIVE tag, centered between header and picture
         tag_b, tag_r = "LIVE", " · on our computer, not your phone"
         fb, fr = f["tag_b"], f["tag"]
@@ -455,7 +467,7 @@ class StatusVideo:
             m = self.meter or {}
             return ("checking", int((now - self.check_started) * 8), id(self.result),
                     self.live_seq if self.live is not None else None, self.live_host,
-                    m.get("hours"), m.get("amount"))
+                    m.get("hours"), m.get("amount"), self.live_step)
         if self.state in VERDICTS:
             n = self._replaying(now)
             return ("verdict", self.state, n, id(self.result), id(self.shot))

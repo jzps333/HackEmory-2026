@@ -41,6 +41,37 @@ In the Vultr firewall, allow port 8080 **only from the agent/backend server's IP
 | `timings` | ms: `browser_ready_ms, first_load_ms, settled_ms, collected_ms, total_ms` |
 | `error` | null on success. Starts with `blocked:` if the destination itself was refused or a hop was served from a non-public IP; the backend must treat that as "Could not complete check" or worse, never as safe |
 
+## Operator mode (`POST /operate/stream`), not a scan
+
+For a person who linked their Dogwood account in ScanSafe, the FaceTime agent has the sandbox
+use the made-up **official Dogwood Parking app** on our demo site instead of the meter sticker.
+Same auth (`Authorization: Bearer $SANDBOX_TOKEN`), same NDJSON as `/run/stream`:
+
+```
+POST /operate/stream {"url": "https://scansafe-demo-sites.vercel.app/dogwood/install?s=...", "plate": "GA 4821K", "hours": 3}
+-> {"type":"step","text":"Tapping Install","step":"install"} / {"type":"frame",...} / {"type":"nav",...} ...
+-> {"type":"result","data":{"mode":"operate","status":"paid"|"waiting"|"failed","paid":bool,"steps":[...],
+                            "plate","hours","final_url","error","blocked_requests","screenshots","timings"}}
+```
+
+The container runs `run_scan.py --operate <url> <plate> <hours>`: open the install page, tap
+Install, tap Open, type the plate into `[data-testid=plate]`, tap `[data-testid=hours-N]`, tap
+"Pay with linked ScanSafe account" (which only shows "Waiting for your approval in ScanSafe":
+the person pays in the ScanSafe app), then keep streaming until the receipt shows or 120 s pass.
+Started on `/dogwood/app?s=...` it skips Install (used when the hours change and it re-runs).
+
+Fences (`operate.py`, pure, tested in `tests/test_operate.py`):
+- Only `https://scansafe-demo-sites.vercel.app/dogwood/...`: exact host, no port, no
+  credentials, no dot segments. Anything else is refused with 400 before a container starts,
+  and checked again inside it. Plate: 1-10 letters/digits/spaces/dashes; hours: 1-4.
+- In the browser, top-level pages must stay on `/dogwood/`; other requests may only reach the
+  demo site or `api.scansafe.nyc` (the app's polling). The network guard still checks every
+  request. WebSockets/service workers blocked, downloads cancelled, popups closed, as for scans.
+- Only fixed `data-testid` selectors are clicked and only the checked plate is typed. Scanning
+  (`scan()`) still never types; a test checks that typing only exists in `operate()`.
+- Limits: 180 s per container, 600 requests, 80 MB of output; the container is removed as soon
+  as the caller hangs up (a re-run never overlaps the old one).
+
 ## Network guard (SSRF protection)
 
 `netguard.py` is pure Python (no Playwright) and is used twice:
