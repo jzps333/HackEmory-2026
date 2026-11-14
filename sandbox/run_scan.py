@@ -780,6 +780,8 @@ def scan(url: str, stream: bool = False) -> dict:
 
         def on_nav(frame) -> None:
             if frame == page.main_frame and frame.url != "about:blank":
+                if out["redirect_chain"] and out["redirect_chain"][-1] == frame.url:
+                    return      # the same page announcing itself again is not a new hop
                 out["redirect_chain"].append(frame.url)
                 if stream:
                     _emit({"type": "nav", "url": frame.url[:300]})

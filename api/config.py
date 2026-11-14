@@ -20,3 +20,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 SANDBOX_URL = os.getenv("SANDBOX_URL", "")      # empty = return mock results
 SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "")
+
+# Detection extras (api/signals.py). Kill switches in case a lookup misbehaves during a demo.
+SIGNALS_RDAP = os.getenv("SIGNALS_RDAP", "1") != "0"   # domain age via rdap.org (3 s, cached)
+SECOND_LOOK = os.getenv("SECOND_LOOK", "1") != "0"     # Gemini double-checks "suspicious" pages

@@ -1,0 +1,980 @@
+{
+ "api": "https://api.scansafe.nyc",
+ "started": "2026-11-14T15:39:03.002702",
+ "results": [
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/cafe/rewards",
+   "label": "scam",
+   "note": "demo: free-coffee offer asking for card",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.975,
+   "scam_type": "fake_login_other",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/cafe/rewards",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/cafe/rewards",
+    "https://scansafe-demo-sites.vercel.app/websites/cafe/rewards"
+   ],
+   "page_title": "Morrow Coffee Rewards - Claim Your Free Year",
+   "checks": {
+    "impersonates": "fake_login_other",
+    "impersonates_p": 0.85,
+    "asks_password_p": 0.98,
+    "asks_payment_p": 0.98,
+    "prompt_injection_p": 0.16,
+    "malicious_p": 0.975
+   },
+   "explanation": "Scanning this QR code is not safe because it sends you to a fake website that tries to steal your login information. Never type your password into a page that pops up after scanning a code like this.",
+   "scan_ms": 5206,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/arcade/prize",
+   "label": "scam",
+   "note": "demo: prize offer asking for card",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.975,
+   "scam_type": "other",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/arcade/prize",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/arcade/prize",
+    "https://scansafe-demo-sites.vercel.app/websites/arcade/prize"
+   ],
+   "page_title": "Pixel Palace - You Won 500 Free Tokens",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.86,
+    "asks_password_p": 0.98,
+    "asks_payment_p": 0.98,
+    "prompt_injection_p": 0.2,
+    "malicious_p": 0.975
+   },
+   "explanation": "This QR code is not safe because it sends you to a fake website that tries to steal your personal sign-in information. Never scan it, and definitely do not type your passwords there!",
+   "scan_ms": 5200,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/hidden-ai-note",
+   "label": "scam",
+   "note": "demo: checkout with hidden prompt injection",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.98,
+   "scam_type": "other",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/hidden-ai-note",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/hidden-ai-note",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/hidden-ai-note"
+   ],
+   "page_title": "Wrenfield Supply Co. - Secure Checkout",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.65,
+    "asks_password_p": 0.06,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 0.99,
+    "malicious_p": 0.98
+   },
+   "explanation": "This QR code is not safe because it sends you to another website that is a fake. Do not put any personal information there, as scammers are trying to trick you.",
+   "scan_ms": 5378,
+   "elapsed_s": 5.5
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll",
+   "label": "scam",
+   "note": "demo: fake toll notice with card form",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.935,
+   "scam_type": "fake_parking_or_toll",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll"
+   ],
+   "page_title": "Kestrel Tollway - Unpaid Toll Notice",
+   "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 0.97,
+    "asks_password_p": 0.05,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 0.16,
+    "malicious_p": 0.935
+   },
+   "explanation": "This QR code is not safe because it sends you to a fake website about unpaid tolls. Do not click the buttons or type in your personal information.",
+   "scan_ms": 5275,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/package-fee",
+   "label": "scam",
+   "note": "demo: fake parcel fee",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.965,
+   "scam_type": "fake_delivery",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/package-fee",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/package-fee",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/package-fee"
+   ],
+   "page_title": "Swiftlark Parcel - Your Package Is On Hold",
+   "checks": {
+    "impersonates": "fake_delivery",
+    "impersonates_p": 0.99,
+    "asks_password_p": 0.04,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 0.15,
+    "malicious_p": 0.965
+   },
+   "explanation": "This QR code is unsafe because it sends you to a fake delivery website. Do not tap any buttons, as scammers are trying to steal your personal information.",
+   "scan_ms": 5136,
+   "elapsed_s": 5.3
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/wifi-login",
+   "label": "scam",
+   "note": "demo: wi-fi page asking for email password",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.925,
+   "scam_type": "other",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/wifi-login",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/wifi-login",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/wifi-login"
+   ],
+   "page_title": "Bramblewick Caf\u00e9 Free Wi-Fi - Sign In",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.78,
+    "asks_password_p": 0.99,
+    "asks_payment_p": 0.03,
+    "prompt_injection_p": 0.18,
+    "malicious_p": 0.925
+   },
+   "explanation": "This QR code is unsafe because it sends you to a fake website that tries to trick you into signing in. Do not use it, as it is a trick to steal your information.",
+   "scan_ms": 5216,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/menu-app",
+   "label": "scam",
+   "note": "demo: menu that downloads an app",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.895,
+   "scam_type": "malware_download",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/menu-app",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/menu-app",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/menu-app"
+   ],
+   "page_title": "Lumen Bistro - Download Our App To See The Menu",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.88,
+    "asks_password_p": 0.03,
+    "asks_payment_p": 0.05,
+    "prompt_injection_p": 0.13,
+    "malicious_p": 0.895
+   },
+   "explanation": "This QR code is not safe because it sends you to a fake website that tries to download harmful software onto your phone. Do not click the download button, and close the page immediately.",
+   "scan_ms": 5274,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/robot-check",
+   "label": "scam",
+   "note": "demo: fake robot check gate",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.985,
+   "scam_type": "fake_parking_or_toll",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/robot-check",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/robot-check",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/robot-check"
+   ],
+   "page_title": "Just a moment... Verify you are human",
+   "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 0.97,
+    "asks_password_p": 0.07,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 0.14,
+    "malicious_p": 0.985
+   },
+   "explanation": "This QR code is unsafe because it tries to trick you with a fake robot check. It sends you to a fake website that could steal your personal information.",
+   "scan_ms": 8787,
+   "elapsed_s": 9.0
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/scams/wallet-giveaway",
+   "label": "scam",
+   "note": "demo: crypto airdrop asking for recovery phrase",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.99,
+   "scam_type": "other",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/wallet-giveaway",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/scams/wallet-giveaway",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/wallet-giveaway"
+   ],
+   "page_title": "Glowfin Coin Airdrop - Claim 50 GLWF",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.6,
+    "asks_password_p": 0.74,
+    "asks_payment_p": 0.06,
+    "prompt_injection_p": 0.19,
+    "malicious_p": 0.99
+   },
+   "explanation": "This QR code is not safe because it sends you to another website promising free digital money. It is a fake website trying to trick you, so you should close it immediately.",
+   "scan_ms": 5165,
+   "elapsed_s": 5.3
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/r/a",
+   "label": "scam",
+   "note": "demo: redirect chain to the toll scam",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.875,
+   "scam_type": "fake_parking_or_toll",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/r/a",
+    "https://scansafe-demo-sites.vercel.app/r/b",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll",
+    "https://scansafe-demo-sites.vercel.app/websites/scams/unpaid-toll"
+   ],
+   "page_title": "Kestrel Tollway - Unpaid Toll Notice",
+   "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 0.96,
+    "asks_password_p": 0.05,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 0.17,
+    "malicious_p": 0.875
+   },
+   "explanation": "This QR code is not safe because it sends you to a fake website about a toll fee. Scammers use this trick to steal your personal information, so do not click any buttons on that page.",
+   "scan_ms": 5393,
+   "elapsed_s": 5.5
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html",
+   "label": "scam",
+   "note": "demo: fake parking meter payment",
+   "error": null,
+   "http_status": 200,
+   "verdict": "malicious",
+   "jev_score": 0.965,
+   "scam_type": "fake_parking_or_toll",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html?session=PKG-331108&meter=42",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html",
+    "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html?session=PKG-331108&meter=42"
+   ],
+   "page_title": "Peachtree Parking Co. - Pay Your Meter",
+   "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.06,
+    "asks_payment_p": 0.99,
+    "prompt_injection_p": 1.0,
+    "malicious_p": 0.965
+   },
+   "explanation": "This parking QR code is not safe and is a trick. It sends you to a fake website to steal your money, so do not use it.",
+   "scan_ms": 5042,
+   "elapsed_s": 5.2
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites",
+   "label": "safe",
+   "note": "demo: site index",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.06,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites",
+    "https://scansafe-demo-sites.vercel.app/websites"
+   ],
+   "page_title": "Sample Websites | ScanSafe",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.02,
+    "asks_payment_p": 0.02,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.06
+   },
+   "explanation": "This QR code is safe to use and leads to a real sample website with no hidden tricks. You can click the button on the page without worrying about anyone stealing your information.",
+   "scan_ms": 5314,
+   "elapsed_s": 5.5
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/cafe",
+   "label": "safe",
+   "note": "demo: fictional cafe",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.235,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/cafe",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/cafe",
+    "https://scansafe-demo-sites.vercel.app/websites/cafe"
+   ],
+   "page_title": "Morrow Coffee | Sample Website",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.99,
+    "asks_password_p": 0.1,
+    "asks_payment_p": 0.04,
+    "prompt_injection_p": 0.04,
+    "malicious_p": 0.235
+   },
+   "explanation": "This QR code is safe to use and takes you directly to the Morrow Coffee sample website. There are no fake websites or hidden traps to worry about.",
+   "scan_ms": 5280,
+   "elapsed_s": 6.2
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/trails",
+   "label": "safe",
+   "note": "demo: fictional trails",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.075,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/trails",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/trails",
+    "https://scansafe-demo-sites.vercel.app/websites/trails"
+   ],
+   "page_title": "Trail Notes | Sample Website",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.02,
+    "asks_payment_p": 0.01,
+    "prompt_injection_p": 0.05,
+    "malicious_p": 0.075
+   },
+   "explanation": "This QR code is safe to use and sends you to a real trail notes website. There are no scams here, so you can look at the page without worry.",
+   "scan_ms": 5050,
+   "elapsed_s": 5.2
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/orbit",
+   "label": "safe",
+   "note": "demo: fictional orbit",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.06,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/orbit",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/orbit",
+    "https://scansafe-demo-sites.vercel.app/websites/orbit"
+   ],
+   "page_title": "Orbit Post | Sample Website",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.02,
+    "asks_payment_p": 0.02,
+    "prompt_injection_p": 0.04,
+    "malicious_p": 0.06
+   },
+   "explanation": "This QR code is safe to use and leads to a normal website with no trickery. You can look around the page without worrying about anyone stealing your information.",
+   "scan_ms": 5215,
+   "elapsed_s": 5.4
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/arcade",
+   "label": "safe",
+   "note": "demo: fictional arcade",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.265,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/arcade",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/arcade",
+    "https://scansafe-demo-sites.vercel.app/websites/arcade"
+   ],
+   "page_title": "Pixel Palace | Sample Website",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.05,
+    "asks_payment_p": 0.03,
+    "prompt_injection_p": 0.04,
+    "malicious_p": 0.265
+   },
+   "explanation": "This QR code is safe to use and sends you to a real game website called Pixel Palace. It does not trick you or lead to any fake websites, so you can explore it without worry.",
+   "scan_ms": 5102,
+   "elapsed_s": 6.0
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/cities",
+   "label": "safe",
+   "note": "demo: cities page",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.15,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/cities",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/cities",
+    "https://scansafe-demo-sites.vercel.app/cities"
+   ],
+   "page_title": "World's Densest Cities | ScanSafe",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.02,
+    "asks_payment_p": 0.01,
+    "prompt_injection_p": 0.05,
+    "malicious_p": 0.15
+   },
+   "explanation": "This QR code is safe to use and leads to a real article about the world's densest cities. You can go ahead and read it without worry.",
+   "scan_ms": 5457,
+   "elapsed_s": 5.6
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/websites/safe/library-wifi",
+   "label": "safe",
+   "note": "demo: library wi-fi that asks for nothing",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.13,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/websites/safe/library-wifi",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/websites/safe/library-wifi",
+    "https://scansafe-demo-sites.vercel.app/websites/safe/library-wifi"
+   ],
+   "page_title": "Fernhollow Public Library Wi-Fi",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.88,
+    "asks_password_p": 0.05,
+    "asks_payment_p": 0.03,
+    "prompt_injection_p": 0.13,
+    "malicious_p": 0.13
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the Fernhollow Public Library Wi-Fi page. There is no fake website or trick here, so you can connect without worry.",
+   "scan_ms": 5438,
+   "elapsed_s": 5.6
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/fixtures/safe/index.html",
+   "label": "safe",
+   "note": "demo: real restaurant menu",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.04,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/fixtures/safe/index.html",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/fixtures/safe/index.html"
+   ],
+   "page_title": "Magnolia Diner - Menu",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.02,
+    "asks_payment_p": 0.05,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.04
+   },
+   "explanation": "This QR code is safe because it takes you straight to the real Magnolia Diner menu without any tricks. You can look at the food choices without worry.",
+   "scan_ms": 4816,
+   "elapsed_s": 5.0
+  },
+  {
+   "url": "https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html",
+   "label": "safe",
+   "note": "demo: real parking meter",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.145,
+   "scam_type": "none",
+   "domain": "scansafe-demo-sites.vercel.app",
+   "final_url": "https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html",
+   "redirect_chain": [
+    "https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html"
+   ],
+   "page_title": "Peachtree Parking Co. - Meter 42",
+   "checks": {
+    "impersonates": "fake_parking_or_toll",
+    "impersonates_p": 0.93,
+    "asks_password_p": 0.03,
+    "asks_payment_p": 0.18,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.145
+   },
+   "explanation": "This QR code is safe to use and brings you to the official Peachtree Parking website. You can pay for your meter here without worry.",
+   "scan_ms": 5063,
+   "elapsed_s": 5.2
+  },
+  {
+   "url": "https://github.com/login",
+   "label": "safe",
+   "note": "real: login form",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.01,
+   "scam_type": "none",
+   "domain": "github.com",
+   "final_url": "https://github.com/login",
+   "redirect_chain": [
+    "https://github.com/login",
+    "https://github.com/login"
+   ],
+   "page_title": "Sign in to GitHub \u00b7 GitHub",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.99,
+    "asks_payment_p": 0.01,
+    "prompt_injection_p": 0.04,
+    "malicious_p": 0.01
+   },
+   "explanation": "This QR code is safe to use. It takes you directly to the real GitHub sign-in page, where you can safely log into your account.",
+   "scan_ms": 5603,
+   "elapsed_s": 5.8
+  },
+  {
+   "url": "https://www.paypal.com/signin",
+   "label": "safe",
+   "note": "real: payments login",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.165,
+   "scam_type": "none",
+   "domain": "www.paypal.com",
+   "final_url": "https://www.paypal.com/signin",
+   "redirect_chain": [
+    "https://www.paypal.com/signin"
+   ],
+   "page_title": "paypal.com",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.97,
+    "asks_password_p": 0.62,
+    "asks_payment_p": 0.12,
+    "prompt_injection_p": 0.02,
+    "malicious_p": 0.165
+   },
+   "explanation": "This QR code is safe because it sends you straight to the official PayPal website. You can use it without worry.",
+   "scan_ms": 4926,
+   "elapsed_s": 5.1
+  },
+  {
+   "url": "https://accounts.google.com",
+   "label": "safe",
+   "note": "real: login",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.005,
+   "scam_type": "none",
+   "domain": "accounts.google.com",
+   "final_url": "https://accounts.google.com/v3/signin/identifier?continue=https://accounts.google.com/&followup=https://accounts.google.com/&passive=1209600&flowName=WebLiteSignIn&flowEntry=ServiceLogin&dsh=S103637939:1794688889749951",
+   "redirect_chain": [
+    "https://accounts.google.com/",
+    "https://accounts.google.com/ServiceLogin?passive=1209600&continue=https%3A%2F%2Faccounts.google.com%2F&followup=https%3A%2F%2Faccounts.google.com%2F",
+    "https://accounts.google.com/v3/signin/identifier?continue=https://accounts.google.com/&followup=https://accounts.google.com/&passive=1209600&flowName=WebLiteSignIn&flowEntry=ServiceLogin&dsh=S103637939:1794688889749951"
+   ],
+   "page_title": "Sign in - Google Accounts",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.98,
+    "asks_payment_p": 0.01,
+    "prompt_injection_p": 0.02,
+    "malicious_p": 0.005
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the official Google login page. You can go ahead and sign in safely without worry.",
+   "scan_ms": 5481,
+   "elapsed_s": 5.6
+  },
+  {
+   "url": "https://www.amazon.com",
+   "label": "safe",
+   "note": "real: shopping",
+   "error": null,
+   "http_status": 200,
+   "verdict": "suspicious",
+   "jev_score": 0.5,
+   "scam_type": "other",
+   "domain": "www.amazon.com",
+   "final_url": "https://www.amazon.com/",
+   "redirect_chain": [
+    "https://www.amazon.com/",
+    "https://www.amazon.com/"
+   ],
+   "page_title": "Amazon.com. Spend less. Smile more.",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.29,
+    "asks_payment_p": 0.08,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.01
+   },
+   "explanation": "This QR code is suspicious because it bounces you through two strange stops before finally landing on the real Amazon page. Never trust a code that doesn't take you straight where you want to go, as it could easily lead to a fake website that steals your information.",
+   "scan_ms": 6606,
+   "elapsed_s": 6.8
+  },
+  {
+   "url": "https://www.wikipedia.org",
+   "label": "safe",
+   "note": "real: donation banner",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.04,
+   "scam_type": "none",
+   "domain": "www.wikipedia.org",
+   "final_url": "https://www.wikipedia.org/",
+   "redirect_chain": [
+    "https://www.wikipedia.org/"
+   ],
+   "page_title": "Wikipedia",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.03,
+    "asks_payment_p": 0.96,
+    "prompt_injection_p": 0.04,
+    "malicious_p": 0.04
+   },
+   "explanation": "This QR code is completely safe to use and brings you right to the real Wikipedia website. You do not need to worry about a fake website here, so go ahead and click it!",
+   "scan_ms": 5391,
+   "elapsed_s": 5.5
+  },
+  {
+   "url": "https://www.usps.com",
+   "label": "safe",
+   "note": "real: delivery brand",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.0,
+   "scam_type": "none",
+   "domain": "www.usps.com",
+   "final_url": "https://www.usps.com/",
+   "redirect_chain": [
+    "https://www.usps.com/"
+   ],
+   "page_title": "Welcome | USPS",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.99,
+    "asks_password_p": 0.3,
+    "asks_payment_p": 0.07,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.0
+   },
+   "explanation": "This QR code is safe to use. It takes you directly to the official United States Postal Service website.",
+   "scan_ms": 7248,
+   "elapsed_s": 7.4
+  },
+  {
+   "url": "https://www.irs.gov",
+   "label": "safe",
+   "note": "real: government payments",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.01,
+   "scam_type": "none",
+   "domain": "www.irs.gov",
+   "final_url": "https://www.irs.gov/",
+   "redirect_chain": [
+    "https://www.irs.gov/"
+   ],
+   "page_title": "Internal Revenue Service | An official website of the United States government",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.99,
+    "asks_password_p": 0.63,
+    "asks_payment_p": 0.37,
+    "prompt_injection_p": 0.11,
+    "malicious_p": 0.01
+   },
+   "explanation": "This QR code is safe to use and goes straight to the official US tax website. You can trust it because the web address ends with the official government domain.",
+   "scan_ms": 5897,
+   "elapsed_s": 6.0
+  },
+  {
+   "url": "https://www.cdc.gov",
+   "label": "safe",
+   "note": "real: government",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.005,
+   "scam_type": "none",
+   "domain": "www.cdc.gov",
+   "final_url": "https://www.cdc.gov/index.html",
+   "redirect_chain": [
+    "https://www.cdc.gov/",
+    "https://www.cdc.gov/index.html"
+   ],
+   "page_title": "Centers for Disease Control and Prevention | CDC",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.03,
+    "asks_payment_p": 0.02,
+    "prompt_injection_p": 0.07,
+    "malicious_p": 0.005
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the official government health website. You do not need to worry, because there is no trick and no fake website hiding behind it.",
+   "scan_ms": 5845,
+   "elapsed_s": 6.0
+  },
+  {
+   "url": "https://www.bbc.com",
+   "label": "safe",
+   "note": "real: news with cookie banner",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.0,
+   "scam_type": "none",
+   "domain": "www.bbc.com",
+   "final_url": "https://www.bbc.com/",
+   "redirect_chain": [
+    "https://www.bbc.com/",
+    "https://www.bbc.com/"
+   ],
+   "page_title": "BBC Home | Breaking News, World News, US News, Sports, Business, Innovation, Climate, Culture, Travel, Video & Audio",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.08,
+    "asks_payment_p": 0.03,
+    "prompt_injection_p": 0.02,
+    "malicious_p": 0.0
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the real BBC news website. There are no tricks here, so you can read the news without worry.",
+   "scan_ms": 10425,
+   "elapsed_s": 10.6
+  },
+  {
+   "url": "https://www.lemonde.fr",
+   "label": "safe",
+   "note": "real: news with cookie banner (French)",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.015,
+   "scam_type": "none",
+   "domain": "www.lemonde.fr",
+   "final_url": "https://www.lemonde.fr/en/#",
+   "redirect_chain": [
+    "https://www.lemonde.fr/",
+    "https://www.lemonde.fr/en/",
+    "https://www.lemonde.fr/en/#"
+   ],
+   "page_title": "Le Monde in English \u2013 World news, culture and opinion",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.44,
+    "asks_payment_p": 0.34,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.015
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the real Le Monde newspaper website. You can trust it because the link is legitimate and there are no tricks or fake websites involved.",
+   "scan_ms": 7200,
+   "elapsed_s": 7.4
+  },
+  {
+   "url": "https://www.nytimes.com",
+   "label": "safe",
+   "note": "real: news with paywall/login",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.08,
+   "scam_type": "none",
+   "domain": "www.nytimes.com",
+   "final_url": "https://www.nytimes.com/",
+   "redirect_chain": [
+    "https://www.nytimes.com/"
+   ],
+   "page_title": "nytimes.com",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.14,
+    "asks_payment_p": 0.04,
+    "prompt_injection_p": 0.02,
+    "malicious_p": 0.08
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the real New York Times website. There are no tricks here, so you can read your news without worry.",
+   "scan_ms": 4892,
+   "elapsed_s": 5.0
+  },
+  {
+   "url": "https://www.apple.com",
+   "label": "safe",
+   "note": "real: shopping",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.05,
+   "scam_type": "none",
+   "domain": "www.apple.com",
+   "final_url": "https://www.apple.com/",
+   "redirect_chain": [
+    "https://www.apple.com/"
+   ],
+   "page_title": "Apple",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.06,
+    "asks_payment_p": 0.13,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.05
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the official Apple website. You do not need to worry about any fake websites here.",
+   "scan_ms": 6247,
+   "elapsed_s": 6.4
+  },
+  {
+   "url": "https://www.chase.com",
+   "label": "safe",
+   "note": "real: bank login",
+   "error": null,
+   "http_status": 200,
+   "verdict": "suspicious",
+   "jev_score": 0.5,
+   "scam_type": "other",
+   "domain": "www.chase.com",
+   "final_url": "https://www.chase.com/",
+   "redirect_chain": [
+    "https://www.chase.com/",
+    "https://www.chase.com/"
+   ],
+   "page_title": "Credit Card, Mortgage, Banking, Auto | Chase Online | Chase.com",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 0.99,
+    "asks_password_p": 0.94,
+    "asks_payment_p": 0.15,
+    "prompt_injection_p": 0.08,
+    "malicious_p": 0.01
+   },
+   "explanation": "This QR code is suspicious because it jumps through extra steps instead of taking you straight to Chase. Do not use it, as it could send you to a fake website that steals your information.",
+   "scan_ms": 6876,
+   "elapsed_s": 7.1
+  },
+  {
+   "url": "https://www.emory.edu",
+   "label": "safe",
+   "note": "real: university",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.005,
+   "scam_type": "none",
+   "domain": "www.emory.edu",
+   "final_url": "https://www.emory.edu/",
+   "redirect_chain": [
+    "https://www.emory.edu/"
+   ],
+   "page_title": "Home | Emory University",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.05,
+    "asks_payment_p": 0.03,
+    "prompt_injection_p": 0.03,
+    "malicious_p": 0.005
+   },
+   "explanation": "This QR code is safe to use and takes you straight to the real Emory University website. There are no tricks, and it will not send you to a fake website.",
+   "scan_ms": 7164,
+   "elapsed_s": 7.3
+  },
+  {
+   "url": "https://example.com",
+   "label": "safe",
+   "note": "real: minimal page",
+   "error": null,
+   "http_status": 200,
+   "verdict": "safe",
+   "jev_score": 0.0,
+   "scam_type": "none",
+   "domain": "example.com",
+   "final_url": "https://example.com/",
+   "redirect_chain": [
+    "https://example.com/"
+   ],
+   "page_title": "Example Domain",
+   "checks": {
+    "impersonates": "none",
+    "impersonates_p": 1.0,
+    "asks_password_p": 0.01,
+    "asks_payment_p": 0.01,
+    "prompt_injection_p": 0.02,
+    "malicious_p": 0.0
+   },
+   "explanation": "This QR code is safe to use and goes to the official Example Domain website. There are no tricks or hidden scams to worry about.",
+   "scan_ms": 4776,
+   "elapsed_s": 4.9
+  }
+ ]
+}
