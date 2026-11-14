@@ -108,6 +108,37 @@ export function OnboardingFlow({
   return (
     <div className="onb">
     <div className="page">
+      <aside className="welcome-panel" aria-hidden="true">
+        <div className="welcome-brand">
+          <span className="brand-mark">
+            <Icon name="shield" size={22} />
+          </span>
+          <span>ScanSafe</span>
+        </div>
+        <div className="welcome-copy">
+          <span className="eyebrow">Before your next scan</span>
+          <h1>Check a QR code before you open it.</h1>
+          <p>
+            QR links can disguise where they lead. Set up your ScanSafe profile before
+            your next scan.
+          </p>
+        </div>
+        <div className="welcome-art">
+          <span className="art-orb art-orb-large" />
+          <span className="art-orb art-orb-small" />
+          <div className="location-float">
+            <span className="float-icon"><Icon name="location" size={18} /></span>
+            <span><strong>Right where you are</strong><small>Your safety, your way</small></span>
+            <span className="online-dot" />
+          </div>
+          <div className="privacy-float">
+            <span className="privacy-check"><Icon name="shield" size={16} /></span>
+            <span><strong>Private by design</strong><small>Your details stay yours</small></span>
+          </div>
+        </div>
+        <p className="welcome-footnote"><span /> Here for the moments that matter</p>
+      </aside>
+
       <section className="onboarding-card" aria-label="ScanSafe onboarding">
         <header className="brand-row">
           <div className="brand">
