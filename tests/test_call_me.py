@@ -284,12 +284,30 @@ def test_bad_token_falls_back_to_allowlist_only(fakes):
 
 
 
-def test_one_device_cannot_lock_out_everyone():
+def test_one_device_cannot_lock_out_everyone(monkeypatch):
+    who = {"ip": "6.6.6.6"}
+    monkeypatch.setattr(routes_call, "_client_ip", lambda request: who["ip"])
     for i in range(5):
-        assert client.post("/auth/phone/start", json={"phone": f"+1312555010{i}"},
-                           headers={"X-Forwarded-For": "6.6.6.6"}).status_code == 200
-    assert client.post("/auth/phone/start", json={"phone": "+13125550109"},
-                       headers={"X-Forwarded-For": "6.6.6.6"}).status_code == 429
-    # A different person is unaffected.
-    assert client.post("/auth/phone/start", json={"phone": "+13125550110"},
-                       headers={"X-Forwarded-For": "7.7.7.7"}).status_code == 200
+        assert client.post("/auth/phone/start", json={"phone": f"+1312555010{i}"}).status_code == 200
+    assert client.post("/auth/phone/start", json={"phone": "+13125550109"}).status_code == 429
+    who["ip"] = "7.7.7.7"                     # a different person is unaffected
+    assert client.post("/auth/phone/start", json={"phone": "+13125550110"}).status_code == 200
+
+
+def test_spoofed_forwarded_for_is_ignored_from_outside():
+    from starlette.requests import Request as R
+    scope = {"type": "http", "headers": [(b"x-forwarded-for", b"1.2.3.4")], "client": ("203.0.113.9", 5555)}
+    assert routes_call._client_ip(R(scope)) == "203.0.113.9"
+    scope["client"] = ("127.0.0.1", 5555)    # came through our Caddy
+    assert routes_call._client_ip(R(scope)) == "1.2.3.4"
+
+
+def test_new_code_only_evicts_the_same_phones_oldest():
+    routes_call.start_sign_in("+13125550123", "a")
+    other = routes_call.start_sign_in("+14045550000", "b")
+    for _ in range(4):
+        routes_call.start_sign_in("+13125550123", "a")
+    data = routes_call._load_consent()
+    assert sum(1 for r in data["requests"].values() if r["phone"] == "+13125550123") == 3
+    assert any(r["phone"] == "+14045550000" for r in data["requests"].values())
+    assert other

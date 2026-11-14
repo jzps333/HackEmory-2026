@@ -81,6 +81,8 @@ MAX_PENDING = 2000
 START_LIMIT_PER_MIN = 300          # global ceiling, well above any one client
 START_LIMIT_PER_IP_MIN = 5
 REQUEST_TTL_S = 15 * 60            # a pending sign-in must be texted within 15 minutes
+MAX_PENDING_PER_PHONE = 3
+MAX_PENDING_PER_CLIENT = 10
 
 
 def _prune(data: dict, now: float) -> None:
@@ -90,7 +92,7 @@ def _prune(data: dict, now: float) -> None:
     data.pop("verified", None)       # old format: verification no longer hands out tokens later
 
 
-def start_sign_in(phone: str) -> tuple[str, str]:
+def start_sign_in(phone: str, client: str = "") -> tuple[str, str]:
     """New pending sign-in for `phone`: (code to text, secret request id for the requester).
     Several can be pending per phone, so one person can't cancel another's sign-in."""
     import hashlib, secrets
@@ -100,10 +102,16 @@ def start_sign_in(phone: str) -> tuple[str, str]:
     with _consent_lock:
         data = _load_consent()
         _prune(data, now)
-        while len(data["requests"]) >= MAX_PENDING:          # evict the oldest, never lock people out
-            oldest = min(data["requests"], key=lambda k: data["requests"][k]["at"])
-            del data["requests"][oldest]
-        data["requests"][hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now}
+        reqs = data["requests"]
+        if sum(1 for r in reqs.values() if r.get("client") == client) >= MAX_PENDING_PER_CLIENT:
+            raise HTTPException(status_code=429, detail="too many sign-ins from this device; try again later")
+        mine = sorted((k for k, r in reqs.items() if r["phone"] == phone), key=lambda k: reqs[k]["at"])
+        for k in mine[: max(0, len(mine) - MAX_PENDING_PER_PHONE + 1)]:
+            del reqs[k]                      # only ever drop this phone's own oldest codes
+        if len(reqs) >= MAX_PENDING:
+            raise HTTPException(status_code=503, detail="too many sign-ins in progress; try again soon")
+        reqs[hashlib.sha256(request_id.encode()).hexdigest()] = {"phone": phone, "code": code, "at": now,
+                                                                 "client": client}
         _save_consent(data)
     return code, request_id
 
@@ -197,8 +205,9 @@ def phone_start(req: PhoneRequest, request: Request) -> dict:
     """Sign in with your phone, step 1: get a code to text to the ScanSafe line from this phone.
     (Reverse OTP: the user texts us, so no SMS provider is needed, and it also lets Chert reach them.)"""
     phone = _norm_phone(req.phone)
-    _take_code_slot(phone, _client_ip(request))
-    code, request_id = start_sign_in(phone)
+    _take_code_slot(phone, _client_ip(request))   # same client value used below
+    client = _client_ip(request)
+    code, request_id = start_sign_in(phone, client)
     return {"code": code, "request_id": request_id, "line": "+16504444331",
             "sms_body": f"Hi ScanSafe! My sign-in code is {code}"}
 
@@ -244,10 +253,26 @@ def _take_code_slot(phone: str, client: str = "") -> None:
         _start_times.append(now)
 
 
+TRUSTED_PROXIES = {"127.0.0.1", "::1"}    # Caddy runs on this machine
+
+
 def _client_ip(request: Request) -> str:
-    """Behind Caddy (port 8000 is firewalled), the last X-Forwarded-For entry is the real client."""
-    xff = request.headers.get("x-forwarded-for", "")
-    return (xff.split(",")[-1].strip() if xff else (request.client.host if request.client else "")) or "?"
+    """The caller's IP. X-Forwarded-For is only believed when the request came from our own
+    Caddy on localhost (its last entry is the address Caddy saw). IPv6 is grouped by /64."""
+    import ipaddress
+    peer = request.client.host if request.client else ""
+    ip = peer
+    if peer in TRUSTED_PROXIES:
+        xff = request.headers.get("x-forwarded-for", "")
+        if xff:
+            ip = xff.split(",")[-1].strip()
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.version == 6:
+            return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+        return str(addr)
+    except ValueError:
+        return ip or "?"
 
 
 def allowed_phones() -> set[str]:
