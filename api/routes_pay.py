@@ -24,7 +24,7 @@ class PayRequest(BaseModel):
     scan_id: str
     payment: Optional[Payment] = None   # optional: the server's own copy of the scan wins
     approved: bool = False              # true only after the user tapped confirm
-    hours: Any = None                   # parking meters only; the server prices it
+    hours: Any = None                   # parking meters: required; the server prices it
 
 
 class PayResponse(BaseModel):
@@ -70,13 +70,14 @@ def pay(req: PayRequest):
     hours: Optional[int] = None
     meter = meter_for(payment.label)
     if meter is not None:
-        # Parking by the hour: the server sets the amount. Any amount from the app is ignored.
-        raw = req.hours
-        if raw is None:
-            quote = meter_pay.get_quote(req.scan_id)
-            raw = quote["hours"] if quote else meter.min_hours
+        # Parking by the hour: the server sets the amount from the hours the user confirmed in
+        # THIS request. Any amount from the app is ignored, and the stored quote is never used
+        # (anyone with the scan_id can change it; it only drives the FaceTime live view).
+        if req.hours is None:
+            return _error(400, "hours_required",
+                          f"hours is required: pick {meter.min_hours} to {meter.max_hours} hours.")
         try:
-            hours = meter_pay.parse_hours(raw, meter)
+            hours = meter_pay.parse_hours(req.hours, meter)
         except PayStateError as e:
             return _error(e.status, e.code, e.message)
         payment.amount_sol = meter.amount_sol(hours)

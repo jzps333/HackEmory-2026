@@ -239,19 +239,30 @@ def test_client_amount_and_recipient_are_ignored(client, wallet, monkeypatch):
 def test_client_amount_ignored_even_without_a_server_scan(client, wallet, monkeypatch):
     calls = mock_rpc(monkeypatch)
     p = parse_solana_pay(METER_QR).model_dump() | {"amount_sol": 0.04}
-    r = client.post("/pay", json={"scan_id": "not-on-server", "payment": p, "approved": True})
+    r = client.post("/pay", json={"scan_id": "not-on-server", "payment": p, "hours": 1,
+                                  "approved": True})
     assert r.status_code == 200, r.text
-    assert r.json()["amount_sol"] == 0.01 and r.json()["hours"] == 1     # min_hours
+    assert r.json()["amount_sol"] == 0.01 and r.json()["hours"] == 1
     assert sent_lamports_and_recipient(calls)[0] == 10_000_000
 
 
-def test_hours_default_to_the_latest_quote(client, wallet, monkeypatch):
+def test_meter_pay_requires_hours_and_never_uses_the_quote(client, wallet, monkeypatch):
     calls = mock_rpc(monkeypatch)
     sid = scanned(METER_QR).scan_id
+    # Anyone with the scan_id can set the quote; /pay must not pick its hours up.
     client.post("/pay/quote", json={"scan_id": sid, "hours": 4})
-    r = client.post("/pay", json={"scan_id": sid, "approved": True})
-    assert r.status_code == 200 and r.json()["hours"] == 4
-    assert sent_lamports_and_recipient(calls)[0] == 40_000_000
+    for extra in ({}, {"hours": None}):
+        r = client.post("/pay", json={"scan_id": sid, "approved": True, **extra})
+        assert r.status_code == 400 and r.json()["error"] == "hours_required"
+        assert r.json()["message"].startswith("hours is required")
+    p = parse_solana_pay(METER_QR).model_dump()
+    r = client.post("/pay", json={"scan_id": "not-on-server", "payment": p, "approved": True})
+    assert r.status_code == 400 and r.json()["error"] == "hours_required"
+    assert calls == []
+    assert client.get(f"/pay/status/{sid}").json()["state"] == "none"
+    r = client.post("/pay", json={"scan_id": sid, "hours": 2, "approved": True})   # what the user confirmed
+    assert r.status_code == 200 and r.json()["hours"] == 2
+    assert sent_lamports_and_recipient(calls)[0] == 20_000_000                    # not the quote's 4 h
 
 
 def test_pay_refusals_send_nothing(client, wallet, monkeypatch):
@@ -291,6 +302,9 @@ def test_fixed_amount_codes_keep_their_qr_amount(client, wallet, monkeypatch):
     assert r.status_code == 200, r.text
     assert r.json()["amount_sol"] == 0.005 and r.json()["hours"] is None
     assert sent_lamports_and_recipient(calls)[0] == 5_000_000
+    sid2 = scanned(DINER_QR).scan_id
+    r = client.post("/pay", json={"scan_id": sid2, "approved": True})              # and not required
+    assert r.status_code == 200 and r.json()["amount_sol"] == 0.005
 
 
 # --- GET /pay/status/{id} ----------------------------------------------------------------------

@@ -153,8 +153,8 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 
 ## 6. Payments (devnet) and health
 
-- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters also take `"hours"` (section 8). One payment per `scan_id`.
-- Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `unknown_scan` (404); `not_a_payment`, `bad_hours`, `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `already_paid`, `payment_in_progress` (409); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
+- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`.
+- Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `unknown_scan` (404); `not_a_payment`, `hours_required`, `bad_hours`, `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `already_paid`, `payment_in_progress` (409); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
 - `GET /health` returns `{"ok": true, "mock_mode": false}`.
 
 ## 7. curl
@@ -209,6 +209,7 @@ POST /pay/quote
         "updated_at": 1794672123.456}
 ```
 - `scan_id` must be a scan this server ran (kept 2 h in memory, 7 days on disk). The latest quote per `scan_id` is kept in memory (2 h; an API restart forgets it, so just quote again).
+- A quote is only "what the user is looking at": it gives you the total to show and drives the FaceTime agent's live view. **`/pay` never reads it.** Always send the confirmed `hours` to `/pay`.
 - `hours` must be a whole number from `min_hours` to `max_hours` (JSON number; `3` or `3.0`, not `"3"`).
 - `updated_at` is unix seconds (float).
 
@@ -226,7 +227,7 @@ POST /pay
                     "label": "Dogwood Lot & Meter Co.", "message": "Meter 42 - 3 hours",
                     "reference": "...", "merchant_verified": true, "tx_signature": "5Kx..."}}
 ```
-- Send `hours` (what the user confirmed). If you leave it out, the server uses the latest quote's hours, else 1.
+- `hours` is **required** for meters: the hours the user confirmed. Without it: 400 `hours_required` (`"hours is required: pick 1 to 4 hours."`). The server never falls back to the stored quote. (Fixed-price codes ignore `hours`.)
 - Do **not** send `amount_sol`. If a `payment` object is sent anyway, its amount is ignored for meters and its recipient is ignored whenever the server has the scan.
 - Takes a few seconds (devnet). Use a 30 s client timeout.
 
@@ -254,6 +255,7 @@ POST /call-me   Authorization: Bearer <token>
 
 | Status | `error` | Show |
 |---|---|---|
+| 400 | `hours_required` | Bug in the app: `/pay` for a meter was sent without `hours` |
 | 400 | `bad_hours` | "Pick 1 to 4 hours." (the `message` says the exact range) |
 | 400 | `not_a_meter` | Not an error: fixed-price code, hide the hours picker |
 | 400 | `not_a_payment` | "This code isn't a payment." |

@@ -19,7 +19,8 @@ FAKE_SIG = "5" * 88
 
 
 def body(recipient=MERCHANT, amount=0.02, approved=True, verified=True, label="Dogwood Lot & Meter Co."):
-    return {"scan_id": "abc123", "approved": approved, "payment": {
+    # hours: Dogwood is a parking meter, so /pay needs them (ignored for fixed-amount merchants)
+    return {"scan_id": "abc123", "approved": approved, "hours": 1, "payment": {
         "recipient": recipient, "amount_sol": amount, "label": label, "message": "Meter 42",
         "reference": REFERENCE, "merchant_verified": verified}}
 

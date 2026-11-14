@@ -125,9 +125,10 @@ def client():
 
 
 def pay_body(qr: str, approved: bool = True, scan_id: str = "devnet-test") -> dict:
-    """Exactly what the app sends: the scan's payment object plus approved: true."""
+    """Exactly what the app sends: the scan's payment object plus approved: true (and hours,
+    which the Dogwood parking meter requires and fixed-amount merchants ignore)."""
     p = parse_solana_pay(qr)
-    return {"scan_id": scan_id, "payment": p.model_dump(), "approved": approved}
+    return {"scan_id": scan_id, "payment": p.model_dump(), "approved": approved, "hours": 1}
 
 
 def test_pays_each_real_qr(client, wallet, monkeypatch):

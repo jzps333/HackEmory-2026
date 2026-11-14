@@ -1,9 +1,10 @@
 """Pay-by-the-hour parking: quotes and payment status, kept in memory (enough for a demo).
 
 The app picks hours -> POST /pay/quote stores the server's own price for that scan_id; the
-FaceTime agent polls GET /pay/quote/{scan_id} to update the live meter view; POST /pay charges
-rate x hours computed here, never an amount from the app; GET /pay/status/{scan_id} says
-whether that scan has been paid. One API process holds this state (uvicorn without --workers);
+FaceTime agent polls GET /pay/quote/{scan_id} to update the live meter view (that is ALL a quote
+is for: anyone with the scan_id can change it, so POST /pay never reads it). POST /pay requires
+the hours the user confirmed and charges rate x hours computed here, never an amount from the
+app; GET /pay/status/{scan_id} says whether that scan has been paid. One API process holds this state (uvicorn without --workers);
 a restart forgets quotes and statuses, which only means the app quotes again.
 """
 from __future__ import annotations
