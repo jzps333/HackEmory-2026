@@ -103,7 +103,12 @@ def findings(result: dict) -> list[tuple[str, str]]:
         bad.append("pretends to be a real business")
     if (c.get("prompt_injection_p") or 0) >= 0.5:
         bad.append("hidden tricks")
-    ai = (", ".join(bad).capitalize(), "bad") if bad else ("No warning signs", "ok")
+    # Match the verdict: on a "safe" result the signals didn't add up to a scam (a donation
+    # banner on Wikipedia "asks for payment"), so showing them in red contradicts the verdict.
+    if result.get("verdict") == "safe" or not bad:
+        ai = ("No warning signs", "ok")
+    else:
+        ai = (", ".join(bad).capitalize(), "bad" if result.get("verdict") == "malicious" else "warn")
     return [(first, "ok"), ("Never touched your phone", "ok"), follow, page, ai]
 
 
