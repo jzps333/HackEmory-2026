@@ -87,8 +87,7 @@ curl -s https://api.scansafe.nyc/pay -H 'content-type: application/json' -d '{
               "label": "Dogwood Lot & Meter Co.", "message": "Meter 42"}}'
 ```
 
-Deploying: copy the changed files to `~/HackEmory-2026` on the server and restart the `api` tmux
-session (see HANDOFF.md).
+Deploying: push to `main`, then `git pull` on the server and restart `scansafe-api` (see `deploy/README.md`).
 
 ## Detection eval (`eval_detection.py`, not payments)
 

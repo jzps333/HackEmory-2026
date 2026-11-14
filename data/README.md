@@ -152,7 +152,7 @@ ssh root@144.202.25.65
 cd ~/HackEmory-2026 && nano .env   # TYPESENSE_HOST=https://<cluster-host>.a1.typesense.net   TYPESENSE_API_KEY=<your-typesense-admin-key>
 python3 -m data.setup              # expect: OK   Typesense: created scam_pins   /   OK   Typesense: created scans
 python3 -m data.sync_scans         # expect: OK   synced N Tiger rows -> M docs (... 0 failed ...)
-tmux kill-session -t api; tmux new -d -s api "cd ~/HackEmory-2026 && uvicorn api.main:app --host 0.0.0.0 --port 8000 2>&1 | tee /root/api.log"
+systemctl restart scansafe-api
 curl -s "https://api.scansafe.nyc/pins?lat=33.79&lng=-84.32&radius_km=5"   # {"count":0,"pins":[]} instead of a 503
 curl -s -G "https://api.scansafe.nyc/scans/search" --data-urlencode q=wikipedia   # "found": > 0
 ```
@@ -188,8 +188,7 @@ docker run -d --name typesense --restart unless-stopped -p 127.0.0.1:8108:8108 \
 ```
 If you rotate the key, change it in `.env`, recreate the container, then restart the backend.
 
-The tmux line above is the one the backend runs under (`setup_agent_server.sh` uses the same one without the `tee`).
-If the backend was started differently, restart it that way.
+The backend runs as the systemd unit `scansafe-api` (see `deploy/README.md`).
 
 ## 4. Setup and running locally
 
@@ -354,7 +353,7 @@ curl -s -G "$TS/collections/scans/documents/search" -H "$H" --data-urlencode 'q=
 - `scan_ms` times the whole check (sandbox + Jev + Gemini), not only the sandbox as the schema comment says. It is null
   for payment codes, which also have a null `domain`.
 - Dashboard tiles mix time windows: total, malicious and suspicious are **all-time**; average time, top types and the chart are **24 h**.
-- `record_scan` swallows errors. If the dashboard stops moving, run `tmux attach -t api` (or `grep failed /root/api.log`)
+- `record_scan` swallows errors. If the dashboard stops moving, run `journalctl -u scansafe-api | grep failed`
   and look for `record_scan failed: <Type>`; for scan-log search, `index_scan failed: <Type>`. Fix it, then re-run
   `python3 -m data.sync_scans` to catch up (scans missed while Typesense was down come back without URL/title/explanation).
 - Each call opens a new connection (no pool). Timeouts: Tiger connect 5 s, Typesense 10 s.

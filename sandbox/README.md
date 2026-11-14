@@ -19,6 +19,8 @@ export SANDBOX_TOKEN=$(openssl rand -hex 24)   # put the same value in the backe
 tmux new -s sandbox 'uvicorn server:app --host 0.0.0.0 --port 8080'
 ```
 
+On the live sandbox server this runs as the systemd unit `scansafe-sandbox` instead (see `deploy/README.md`).
+
 Then in the backend's `.env`: `SANDBOX_URL=http://<sandbox-ip>:8080` and the same `SANDBOX_TOKEN`.
 
 In the Vultr firewall, allow port 8080 **only from the agent/backend server's IP**.

@@ -1,0 +1,24 @@
+# ScanSafe sandbox API. Sandbox server 64.177.45.84. Each scan runs in a throwaway
+# container (image scansafe-sandbox) on the Docker network scansafe-net.
+# /etc/scansafe/sandbox.env (chmod 600, root only) holds one line: SANDBOX_TOKEN=...
+# It must match SANDBOX_TOKEN in the agent server's ~/HackEmory-2026/.env.
+[Unit]
+Description=ScanSafe sandbox (uvicorn server:app on :8080)
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/HackEmory-2026/sandbox
+EnvironmentFile=/etc/scansafe/sandbox.env
+Environment=SANDBOX_NETWORK=scansafe-net PYTHONUNBUFFERED=1
+ExecStart=/root/HackEmory-2026/sandbox/.venv/bin/uvicorn server:app --host 0.0.0.0 --port 8080
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+SyslogIdentifier=scansafe-sandbox
+
+[Install]
+WantedBy=multi-user.target
