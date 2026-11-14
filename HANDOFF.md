@@ -7,7 +7,7 @@ This is the single entry point for a new Claude session or teammate. **No secret
 
 ## 0. Start here (new Claude: do this first)
 
-1. Read, in order: this file, `TEAM.md`, `data/README.md` (on branch `data-readme`), `chert/INTEGRATION.md`.
+1. Read, in order: this file, `TEAM.md`, `data/README.md`, `chert/INTEGRATION.md`.
 2. Ask the user which piece they want you on (section 7), and which machine you're on (only the user's Mac has SSH keys for the servers; a new machine needs its own key added).
 3. **Rules (non-negotiable):**
    - Never commit, print, paste or log secrets (API keys, tokens, passwords, connection strings, the sandbox token, phone numbers). They live only in `.env` files on the servers (section 4).
@@ -49,11 +49,15 @@ DNS (GoDaddy, `scansafe.nyc`): `@` A → 216.198.79.1 and 64.29.17.1 (Vercel); `
 
 ---
 
-## 3. Branches (none merged into `main` yet: merging is a pending team decision)
+## 3. Branches
+
+**Merged into `main` (Sat ~2:30 PM EST, with the user's OK):** `live-stream-and-calls`, `onboarding-integration`,
+`data-readme`, `handoff-v2`. New work: commit on a branch, then merge into `main` (tests + `tsc` must pass).
+Not merged: `Sample-website-1` (teammate's demo sites; conflicts below) and `onboarding-ui` (superseded).
 
 | Branch | What's on it |
 |---|---|
-| `main` | Original build (API, sandbox, Chert agent v1, data layer, app v1) + old HANDOFF |
+| `main` | Everything below except the two teammate branches |
 | `live-stream-and-calls` | Backend/agent/sandbox work: live sandbox stream (`/run/stream`, `/scan/stream`), FaceTime live view + findings + verdict video (`chert/status_video.py`), outbound `POST /call-me` (`api/routes_call.py`), agent fixes (Gemini Live api_version, greet on bridge_ready, one line at a time, "stop"), `/report` hardening (`api/recent_scans.py`), Coder script fix, tests |
 | `onboarding-integration` | Web app: onboarding merged in as first run, purple restyle, live sandbox view while checking (`LiveCheck.tsx`), `/about` landing page, "FaceTime me" card, profile in localStorage |
 | `data-readme` | `data/README.md`: Tiger Data + Typesense guide (also for AI assistants) |
@@ -61,7 +65,7 @@ DNS (GoDaddy, `scansafe.nyc`): `@` A → 216.198.79.1 and 64.29.17.1 (Vercel); `
 | `onboarding-ui` | Teammate's onboarding draft. **Superseded** by `onboarding-integration`; don't merge it |
 | `handoff-v2` | This file |
 
-**Merging safely (only with the user's OK):** checked with `git merge-tree`:
+**Merge notes** (1-3 done; checked with `git merge-tree`):
 1. `live-stream-and-calls` → main: clean.
 2. `onboarding-integration` → main: clean (also clean on top of 1).
 3. `data-readme` → main: clean.
@@ -153,8 +157,9 @@ screen shows the live stream (falls back to `/scan`); results with verdict, expl
 - `chert doctor` reports the starter's `OPENAI_API_KEY` placeholder as a problem: harmless (our agent uses Gemini).
 - Pre-existing test failure: `tests/test_sandbox.py::test_public_ips_allowed[::ffff:8.8.8.8]` on the servers' Python.
 - `SCANSAFE_RESULT_BASE` defaults to `https://scansafe.nyc/r/<id>` in iMessage links, but the app has no `/r` route yet.
-- **In progress as of writing (check `git log` on each branch / ask the user):** app report messages that say what
-  really happened + map/dashboard "sample data" notice (`onboarding-integration`); sandbox click-past of cookie banners /
+- **Done since:** app report messages that say what really happened + map/dashboard "sample data" notice; `/report`
+  answers not_malicious/no_location even without Typesense.
+- **In progress as of writing (check `git log` / ask the user):** sandbox click-past of cookie banners /
   "Continue" / age gates with CAPTCHA + login-wall detection used as evidence (`live-stream-and-calls`, tested on a
   `scansafe-sandbox:clickpast` image, not live yet); demo sites from `Sample-website-1` hosted publicly on a separate
   Vercel project with printable QR codes (`~/HackEmory-site/demo-qr/`).
@@ -167,7 +172,7 @@ screen shows the live stream (falls back to `/scan`); results with verdict, expl
 |---|---|---|---|
 | 1 | Typesense: create a free cluster (cloud.typesense.org), put host + admin key in the agent server `.env`, run `python3 -m data.setup`, restart `api` | user creates cluster; Claude runs setup | `GET /pins?lat=33.79&lng=-84.32` returns 200; reporting a malicious demo scan pins it on the map |
 | 2 | Coder: Templates → Docker Containers, start a workspace, invite teammates, screenshot | user | Screenshot of a running workspace saved for Devpost |
-| 3 | Merge branches into `main` (section 3 order) | Claude, with the user's OK | `main` has all work; tests + tsc pass; server checkout pulled from git |
+| 3 | Done: branches merged into `main`. Still to do: make the server checkouts `git pull` main instead of scp'd files | Claude | server `git status` clean on `main` |
 | 4 | Outbound call answer issue (section 6) | user tests, Claude debugs | A `/call-me` call is answered and the live walkthrough plays |
 | 5 | Finish/deploy the in-progress items (section 6): app report messages, click-past (rebuild sandbox image), demo sites + QR sheet | Claude | Deployed; demo QR codes give the intended verdicts |
 | 6 | Devnet wallet: replace the placeholder Peachtree wallet in `api/scan.py` `KNOWN_MERCHANTS`, regenerate QR codes (`scripts/README.md`, `scripts/make_demo_qr.py`) | user makes wallet, Claude edits | Solana Pay demo code verifies and a devnet payment goes through with approval |
