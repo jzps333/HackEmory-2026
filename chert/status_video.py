@@ -18,6 +18,9 @@ Parking meter calls (chert/meter_pay.py) add:
   meter    - "3 hours" banner (total, meter) over the picture of the meter page.
   paid     - green "Paid" banner with a tick: "Paid · 2 hours · 0.02 SOL", over the meter page
              picture when it shows the same hours, else a big tick card.
+Voice-confirmed payment (chert/voice_pay.py): while a payment waits for the caller's "yes, pay",
+an amber card along the bottom of whatever screen is up says so, with the amount, hours and plate
+(set_consent). It goes away on confirm, cancel, expiry, stop or paid.
 Linked Dogwood account: the live picture is the official Dogwood app being operated in the
 sandbox, and the line under the header says the step ("Now: Typing your plate GA 4821K")
 instead of the site (note_step). Paid shows over the app's receipt picture.
@@ -170,6 +173,7 @@ class StatusVideo:
     meter_shot: Optional[Image.Image] = None
     meter_shot_hours: Optional[int] = None
     live_step = ""                        # Dogwood app: what the sandbox is doing ("Tapping Install")
+    consent: Optional[str] = None         # "Say “yes, pay” to confirm · 0.03 SOL · 3 h · GA 4821K"
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -247,6 +251,12 @@ class StatusVideo:
         self.live, self.live_host, self.code = None, "", ""
         self.live_step = ""
         self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
+        self.consent = None
+
+    def set_consent(self, text: Optional[str]) -> None:
+        """Show (or with None, clear) the "say yes, pay" card. ``text`` is built by us from the
+        server's intent (amount, hours, plate), never from a page."""
+        self.consent = _clip(text, 120) if text else None
 
     # --- parking meter calls -------------------------------------------------------------------
 
@@ -269,6 +279,7 @@ class StatusVideo:
 
     def set_paid(self, hours: int, amount: float) -> None:
         """The app's payment went through: green Paid banner."""
+        self.consent = None
         self.meter = {**(self.meter or {}), "hours": int(hours), "amount": float(amount)}
         self.shot = self.meter_shot if self.meter_shot_hours == int(hours) else None
         self.result = None
@@ -445,6 +456,17 @@ class StatusVideo:
             sub = "Opening the meter…"
         d.text((60, cy + 190), _fit(sub, f["label"], self.W - 120), font=f["label"], fill=WHITE)
 
+    def _consent_card(self, img: Image.Image, text: str) -> None:
+        """Amber card along the bottom: what saying "yes, pay" will pay."""
+        d = ImageDraw.Draw(img)
+        f = self._f
+        head, _, rest = text.partition(" \u00b7 ")
+        x0, y0, x1, y1 = 20, self.H - 190, self.W - 20, self.H - 24
+        d.rounded_rectangle((x0, y0, x1, y1), 28, fill=AMBER, outline=(120, 70, 0), width=4)
+        d.text((x0 + 32, y0 + 28), _fit(head, f["label"], x1 - x0 - 64), font=f["label"], fill=(40, 26, 0))
+        if rest:
+            d.text((x0 + 32, y0 + 96), _fit(rest, f["step"], x1 - x0 - 64), font=f["step"], fill=(40, 26, 0))
+
     def _idle(self, img: Image.Image, now: float) -> None:
         d = ImageDraw.Draw(img)
         d.text((60, 420), "ScanSafe", font=_font(110, True), fill=WHITE)
@@ -479,7 +501,7 @@ class StatusVideo:
 
     def _draw(self) -> bytes:
         now = time.monotonic()
-        key = self._frame_key(now)
+        key = (self._frame_key(now), self.consent)
         if key == getattr(self, "_last_key", None):
             return self._last_frame
         frame = self._render(now)
@@ -507,6 +529,9 @@ class StatusVideo:
         else:
             img = Image.new("RGB", (self.W, self.H), COLORS.get(self.state, COLORS["idle"]))
             self._idle(img, now)
+        consent = self.consent                       # read once: the call may clear it meanwhile
+        if consent:
+            self._consent_card(img, consent)
         return np.asarray(img.convert("RGBA")).tobytes()
 
     # --- publishing ----------------------------------------------------------------------------

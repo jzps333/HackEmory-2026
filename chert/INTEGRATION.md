@@ -64,7 +64,7 @@ Add to `chert/scansafe-agent/.env.local` (agent server) or the repo `.env`. Neve
 | `SCANSAFE_DEMO_PHONE` | agent (texts) | optional; demo phone in E.164 (`+1404...`) to text after the call |
 | `CHERT_WEBHOOK_SECRET` | API | the subscription `secret` returned once when you create the webhook |
 | `GEMINI_LIVE_MODEL`, `GEMINI_LIVE_VOICE` | agent | optional; default `gemini-2.5-flash-native-audio-preview-12-2025`, `Kore` |
-| `AGENT_INTERNAL_KEY` | agent + API | shared key for `POST /operators/dogwood/app-session` (header `X-Agent-Key`); without it the agent always uses the meter flow |
+| `AGENT_INTERNAL_KEY` | agent + API | shared key (header `X-Agent-Key`) for `POST /operators/dogwood/app-session` and the voice-payment routes `POST /pay/intent*`; the SAME value on both. Without it the agent uses the plain meter flow and can't pay by voice (the app's Pay button still works) |
 | `SANDBOX_URL`, `SANDBOX_TOKEN` | agent + API | the agent calls the sandbox's `/operate/stream` directly for the Dogwood app (the backend doesn't proxy it yet); same values as the API's |
 
 Optional: `SCANSAFE_RESULT_BASE` (default `https://scansafe.nyc/r`), `CHERT_API_BASE`.
@@ -170,3 +170,41 @@ changes from `/pay/quote` before payment re-run it (straight to the app, no seco
 Dogwood app." and the Paid banner over the app's receipt. The agent still never pays: the person
 taps Pay in ScanSafe. Not linked, no key, app-session error, or the app run failing before Pay
 (e.g. the sandbox isn't redeployed yet) -> today's meter flow. "Stop" stops all of it.
+
+## Voice-confirmed payment (parking meter calls)
+
+The agent can pay the meter by voice, but never on its own (`chert/voice_pay.py`, server side
+`api/voice_pay.py` + `api/routes_voicepay.py`). Needs `AGENT_INTERNAL_KEY` set to the same value on
+the agent and the API (restart both after setting it). Gemini Live input transcription is on
+(`input_audio_transcription` in `make_model`); the agent keeps the caller's latest FINAL transcript
+(`user_input_transcribed`) and when the agent/caller were speaking (`agent_state_changed`,
+`user_state_changed`).
+
+Only meter calls get the tools (`MeterPayAgent`: `prepare_payment(hours?, pay_with?)`,
+`confirm_payment()`, `cancel_payment()`); ordinary calls keep `ScanSafeAgent`.
+
+Spoken flow (Dogwood, 3 hours, test SOL):
+1. Caller: "Can you pay for 3 hours?" -> `prepare_payment(3)` -> `POST /pay/intent {scan_id, hours,
+   plate?}`. The server prices it and returns the line; the model reads it word for word:
+   "Pay 0.03 SOL to Dogwood Lot and Meter for 3 hours, plate GA 4821K. Say 'yes, pay' to confirm,
+   or 'no' to cancel." (card: "Pay $7.50 to Dogwood Lot and Meter for 3 hours, plate GX 4242, with a
+   one-time virtual card. Say 'yes, pay' to confirm."). Our video shows an amber card:
+   "Say “yes, pay” to confirm · 0.03 SOL · 3 h · GA 4821K".
+2. Caller: "Yes, pay." -> `confirm_payment()`. Locally it needs: an open intent (45 s), a finished
+   agent speaking stretch long enough for the readback after the intent was made, the caller not
+   talking over it, and their latest final transcript after it, within 20 s, matching the consent
+   rule (`yes`/`yeah`/`yep`/`confirm` AND `pay` as words; no `no`/`don't`/`not`/`stop`/`cancel`/
+   `wait`; no question; at most 8 words). Otherwise nothing is sent and the model is told: "Ask
+   the caller to clearly say 'yes, pay' to confirm". Then `POST /pay/intent/{id}/confirm
+   {utterance}`; the server checks the words again (3 tries, single use) and pays.
+3. Agent: "Okay." Then the usual status poll: "Paid. 3 hours on meter 42. Your receipt is in the
+   app." (linked Dogwood: "... for plate GA 4821K. Your receipt is in the Dogwood app.") + the Paid
+   banner, exactly as when they tap Pay in the app.
+
+"No" / "stop" / "cancel" / "wait" after the readback, the stop tool, the app changing the hours,
+or the meter getting paid in the app all cancel the open intent and take the card off the video.
+Method: `pay_with` "card"/"sol" if the caller asks; otherwise the server uses the scan owner's saved
+preference when a card payment can go ahead for them (Lithic configured, Dogwood linked, plate),
+else test SOL. A card payment is made for the scan's owner as the server recorded it at /call-me,
+never an identity the agent sends.
+

@@ -288,6 +288,18 @@ curl -s -X POST $B/call-me -H "Authorization: Bearer $TOKEN" -H 'Content-Type: a
 curl -s -X POST $B/pay -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true}"
 ```
 
+### Voice-confirmed payment on the FaceTime call (nothing new to build)
+
+On a parking meter call the person can also say "pay for 3 hours" to the agent. It reads back the
+exact payment the server priced ("Pay 0.03 SOL to Dogwood Lot and Meter for 3 hours, plate GA
+4821K. Say 'yes, pay' to confirm, or 'no' to cancel.") and pays only after they answer "yes, pay".
+**The app needs no changes:** the Pay button (`POST /pay`) works exactly as before, and either
+way `GET /pay/status/{scan_id}` turns `"paid"` (one payment per scan: if they paid by voice, a
+later tap gets 409 `already_paid`, and the other way round). Show the receipt from
+`/pay/status` as today. The voice routes are agent-only (header `X-Agent-Key`, see
+chert/INTEGRATION.md): `POST /pay/intent {scan_id, hours, method?, plate?}`,
+`POST /pay/intent/{intent_id}/confirm {utterance}`, `POST /pay/intent/{intent_id}/cancel`.
+
 ## 9. Saved accounts, linked Dogwood, one-time virtual cards
 
 **Test money only.** Payments are Solana **devnet** test SOL or a **one-time virtual card from Lithic's SANDBOX** (no real card network, no real money). **Dogwood Lot & Meter Co. is a fictional operator**: ScanSafe hosts its demo OAuth server and API under `/operators/dogwood`, and its pages live on `https://scansafe-demo-sites.vercel.app/dogwood/...`. Label those screens "Demo" / "Sandbox".
