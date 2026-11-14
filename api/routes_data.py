@@ -80,13 +80,13 @@ def report(req: ReportRequest) -> dict:
     if result is None:
         return {"stored": False, "code": "unknown_scan",
                 "reason": "We couldn't find that check. Please scan the code again."}
-    _need_typesense()
     if result.verdict != "malicious":
         return {"stored": False, "code": "not_malicious",
                 "reason": "Only scans we confirmed as scams are pinned on the map."}
     if not result.location:
         return {"stored": False, "code": "no_location",
                 "reason": "No location was shared, so there is nothing to pin."}
+    _need_typesense()   # only needed when there is something to pin
     try:
         doc = typesense_store.add_pin(result)
     except httpx.HTTPError as e:
