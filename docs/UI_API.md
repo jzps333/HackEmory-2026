@@ -122,8 +122,8 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 ```json
 {"scans_total": 54, "scans_24h": 17, "scams_blocked": 9, "warned": 4, "safe": 41,
  "est_money_saved_usd": 3420,
- "est_method": {"loss_per_scam_usd": 380,
-   "explanation": "38% of 2024 fraud reports involved a loss and the median loss for scams that began with a text was $1,000, so each blocked scam avoids about $380 on average (estimate).",
+ "est_method": {"loss_per_scam_usd": 110,
+   "explanation": "In 2024, 11% of fraud reports about scams that began with a text involved a loss, and the median loss was $1,000, so each blocked scam avoids about $110 on average (estimate).",
    "sources": ["https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024",
                "https://www.ftc.gov/news-events/news/press-releases/2025/04/new-ftc-data-show-top-text-message-scams-2024-overall-losses-text-scams-hit-470-million",
                "https://www.ftc.gov/system/files/ftc_gov/pdf/csn-annual-data-book-2024.pdf"]},
@@ -135,7 +135,7 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
  "generated_at": "2026-11-14T20:43:39.363453+00:00"}
 ```
 - Counts are **all-time** except `scans_24h`. `scams_blocked` counts malicious checks, `warned` counts suspicious ones. Each check counts, so the same scam checked twice counts twice.
-- `est_money_saved_usd` = `scams_blocked` x `est_method.loss_per_scam_usd`. **Always label it as an estimate** and show `explanation` and `sources` behind an info icon. The server can change the per-scam figure (env `IMPACT_LOSS_PER_SCAM_USD`), and the explanation text then changes with it, so render both from the response and never hard-code $380.
+- `est_money_saved_usd` = `scams_blocked` x `est_method.loss_per_scam_usd`. **Always label it as an estimate** and show `explanation` and `sources` behind an info icon. The server can change the per-scam figure (env `IMPACT_LOSS_PER_SCAM_USD`), and the explanation text then changes with it, so render both from the response and never hard-code the figure (currently $110).
 - `payments_refused`: scam payment codes ScanSafe refused, one per scan. `sol_total` is **devnet test SOL** and is never converted to dollars. Amounts over 1000 SOL count toward `count` but not `sol_total`.
 - `repeat_scams`: up to 10 domains checked more than once whose checks were mostly flagged, most-checked first. `scam_type` is the most common flagged type (`"other"` if none).
 - Cached for 15 s on the server, and `generated_at` says when the numbers were computed. Totals come from the hourly aggregate, so they can lag a deletion by up to 5 min.
