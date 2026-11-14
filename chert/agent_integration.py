@@ -601,7 +601,9 @@ async def prepublish_audio(session: AgentSession, timeout: float = 5.0) -> bool:
     return getattr(out, "_publication", None) is not None
 
 
-server = AgentServer()
+# 2-vCPU box: video encode + QR decode push CPU past the 0.7 default during a call, which marks
+# the worker unavailable and can leave the next call without an agent.
+server = AgentServer(load_threshold=0.95)
 
 
 @server.rtc_session(agent_name=AGENT_NAME)
