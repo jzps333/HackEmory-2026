@@ -288,6 +288,19 @@ def test_signed_in_call_needs_no_phone_in_body(fakes):
     assert client.post("/call-me", json={"url": "https://example.com"}).status_code == 400
 
 
+def test_session_cookie_works_like_the_bearer_token(fakes):
+    token = routes_call._issue_token("+13125550123")              # not on the allowlist
+    r = client.post("/call-me", json={"url": "https://example.com"},
+                    headers={"Cookie": f"ss_session={token}", "Origin": "https://app.scansafe.nyc"})
+    assert r.status_code == 200, r.text
+    assert json.loads(fakes["req"].content)["destination"] == "+13125550123"
+    # From a foreign origin the cookie doesn't count (and the body's phone isn't allowlisted).
+    routes_call._last_call_at = 0.0
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
+                    headers={"Cookie": f"ss_session={token}", "Origin": "https://evil.example"})
+    assert r.status_code == 403
+
+
 def test_bad_token_falls_back_to_allowlist_only(fakes):
     r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
                     headers={"Authorization": "Bearer not-a-real-token"})

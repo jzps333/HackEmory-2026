@@ -12,6 +12,9 @@ psycopg[binary]
 solders
 qrcode[pil]
 
+# Saved accounts (api/account_crypto.py): Fernet encryption of linked-account tokens at rest
+cryptography
+
 # Tests
 pytest
 

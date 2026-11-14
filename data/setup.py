@@ -1,7 +1,8 @@
 """One-time setup: `python -m data.setup` creates the Typesense collections and Tiger Data schema.
 
 Typesense: `scam_pins` (the map) and `scans` (search over the scan log; fill it with
-`python3 -m data.sync_scans`).
+`python3 -m data.sync_scans`). Tiger: the scan log, plus `accounts` and `linked_accounts`
+(saved accounts; also created on first use, so this is optional for them).
 
 Prints OK / FAIL / SKIP per service. Never prints keys or connection strings.
 """
@@ -9,7 +10,7 @@ from __future__ import annotations
 
 import sys
 
-from data import scan_search, tiger_store, typesense_store
+from data import accounts_store, scan_search, tiger_store, typesense_store
 
 
 def _run(name: str, configured: bool, fn) -> bool:
@@ -33,7 +34,9 @@ def main() -> int:
                     lambda: "created scans" if scan_search.ensure_collection() else "scans exists")
     ok_tg = _run("Tiger Data", tiger_store.is_configured(),
                  lambda: (tiger_store.ensure_schema(), "scans + scans_hourly ready")[1])
-    return 0 if ok_ts and ok_scans and ok_tg else 1
+    ok_acc = _run("Tiger Data", tiger_store.is_configured(),
+                  lambda: (accounts_store.ensure_schema(), "accounts + linked_accounts ready")[1])
+    return 0 if ok_ts and ok_scans and ok_tg and ok_acc else 1
 
 
 if __name__ == "__main__":

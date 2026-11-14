@@ -1,12 +1,13 @@
 # ScanSafe API contract for the web UI
 
 For whoever builds the UI (and their AI assistant). Every shape below is taken from the route code:
-`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py` (+ `api/meter_pay.py`), `api/routes_result.py`.
+`api/main.py`, `api/routes_data.py`, `api/routes_call.py`, `api/routes_pay.py` (+ `api/meter_pay.py`), `api/routes_result.py`,
+`api/routes_accounts.py`, `api/dogwood.py`, `api/paypal_vault.py`, `api/session.py`.
 If this file and the code disagree, the code wins. Please tell the backend owner.
 
-- **Base URL:** `https://api.scansafe.nyc`. CORS is open (`*`, any method or header), so call it straight from the browser.
+- **Base URL:** `https://api.scansafe.nyc`. CORS is an **allowlist with credentials**: `https://scansafe.nyc`, `https://app.scansafe.nyc`, `https://scansafe-demo-sites.vercel.app`, `http://localhost:3000`, `:3300`, `:3400` (plus the old alias `https://app-blond-xi-88.vercel.app`; more via server env `CORS_EXTRA_ORIGINS`). Other origins get no CORS headers.
 - JSON in, JSON out (`Content-Type: application/json`). Times are unix seconds (`scanned_at`) or ISO-8601 UTC strings (`hour`, `first_seen`, `generated_at`).
-- **Auth:** only `/call-me` and `/auth/me` read a token, sent as `Authorization: Bearer <token>`. Every other endpoint is public.
+- **Auth:** the phone sign-in token, sent as `Authorization: Bearer <token>` **or** the `ss_session` cookie (set by `/auth/phone/verify`; use `fetch(..., {credentials: "include"})`). Read by `/call-me`, `/auth/me`, `/auth/logout`, `/me*`, `/link/*/start`, `/pay` with PayPal, and (optionally) `/pay/quote`. Everything else is public. Section 9.
 - Treat page-derived text (`page_title`, `explanation`, `url`) as plain text. Never render it as HTML. The only exception is `/scans/search` `highlight`, which is escaped and contains only `<mark>` tags.
 
 ## Error shapes (they differ by router)
@@ -18,7 +19,9 @@ If this file and the code disagree, the code wins. Please tell the backend owner
 | same, bad input we check ourselves | 422 | `{"detail": {"error": "bad_location" \| "bad_domain", "message": "..."}}` |
 | Phone sign-in, `/call-me` | 400 / 403 / 429 / 502 / 503 / 504 | `{"detail": "<human-readable string>"}` |
 | `/result/{scan_id}` | 404 | `{"detail": "We couldn't find this check. It may have expired."}` |
-| `/pay`, `/pay/quote`, `GET /pay/quote/{id}` | 400 / 403 / 404 / 409 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` (codes in section 6 and 8) |
+| `/pay`, `/pay/quote`, `GET /pay/quote/{id}` | 400 / 401 / 402 / 403 / 404 / 409 / 502 / 503 | `{"ok": false, "error": "<code>", "message": "..."}` (codes in section 6, 8 and 9) |
+| `/me*`, `/link/*/start`, `/operators/dogwood/app-*`, `/operators/dogwood/api/sessions` (bad input) | 400 / 401 / 403 / 404 / 409 / 502 / 503 | same `{"ok": false, "error", "message"}` shape (section 9) |
+| `/operators/dogwood/oauth/*`, `/operators/dogwood/api/*` (auth) | 400 / 401 / 403 | OAuth shape `{"error": "<code>", "error_description": "..."}` |
 | Any route, body or params that fail validation | 422 | FastAPI default: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` |
 
 ## 1. Phone sign-in (reverse OTP)
@@ -44,7 +47,8 @@ The user texts us a code from their phone, so no SMS provider is involved. The t
 - Each request id yields a token **once**. Replaying a verified request returns `{"verified": false}`.
 - The text must come from a number ending in the same 4 digits as `phone` and contain the code (case-insensitive).
 - Start rate limits (429, `detail` is a string): 5 starts a minute per device/IP (`"too many sign-ins from this device; try again in a minute"`), one start per phone every 10 s (`"please wait a few seconds"`), at most 10 pending codes per device, plus a global backstop.
-- **Token:** valid for 30 days. Store it in `localStorage`. On app load call `/auth/me`. If it returns `{"signed_in": false}`, drop the stored token and show "Sign in". Sign-out happens on the client: forget the token. There is no server revoke endpoint, so the token stays valid until it expires.
+- **Token:** valid for 30 days. The verify response also sets it as the cookie `ss_session` (HttpOnly, Secure, SameSite=Lax, `Domain=.scansafe.nyc`, 30 days), so pages on `*.scansafe.nyc` are signed in with `credentials: "include"` and no JS-visible token. Keeping the token in `localStorage` and sending it as Bearer still works (and is the only option from `localhost`, where the `.scansafe.nyc` cookie isn't sent). On app load call `/auth/me`. If it returns `{"signed_in": false}`, drop the stored token and show "Sign in".
+- **Sign out:** `POST /auth/logout` (with the cookie and/or the Bearer token) revokes the token on the server and clears the cookie. Always 200 `{"ok": true, "signed_in": false, "revoked": true|false}`. Then forget any stored token.
 - `/auth/me` always answers 200. A missing, malformed, unknown or expired token gives `{"signed_in": false}`. It never returns the full number. The response has `Cache-Control: no-store`.
 
 ## 2. Scanning
@@ -153,7 +157,7 @@ All of these return 503 `tiger_not_configured` when Tiger Data isn't set up, and
 
 ## 6. Payments (devnet) and health
 
-- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`.
+- `POST /pay` `{"scan_id", "approved": true}` returns `{"ok": true, "scan_id", "signature", "explorer_url", "payment": {..., "tx_signature"}, "amount_sol", "hours"}`. Call it only after the user taps confirm, and only when `verdict == "safe"` and `payment.merchant_verified`. The server pays from **its own copy of the scan** (`scan_id`). Sending `"payment": <ScanResult.payment>` still works (it's only used if the server no longer has that scan), but the server never trusts its `amount_sol` for parking meters or its `merchant_verified` for anyone. Parking meters **require** `"hours"` (section 8). One payment per `scan_id`. Optional `"payment_method": "solana_devnet"` (default) or `"paypal"` (signed in with a linked PayPal sandbox account, section 9).
 - Errors use the `{"ok": false, "error", "message"}` shape. Codes: `not_approved`, `merchant_not_verified` (403); `unknown_scan` (404); `not_a_payment`, `hours_required`, `bad_hours`, `bad_amount`, `over_cap` (0.05 SOL cap), `bad_address` (400); `already_paid`, `payment_in_progress` (409); `not_devnet` (403); `rpc_unreachable`, `rpc_error` (502); `no_wallet`, `bad_wallet`, `payer_unfunded` (503).
 - `GET /health` returns `{"ok": true, "mock_mode": false}`.
 
@@ -282,4 +286,219 @@ curl -s $B/pay/status/$SID
 curl -s -X POST $B/call-me -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "{\"url\":\"$QR\",\"scan_id\":\"$SID\"}"
 # pays 0.03 devnet test SOL for real (devnet only)
 curl -s -X POST $B/pay -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true}"
+```
+
+## 9. Saved accounts, linked Dogwood and PayPal
+
+**Test money only.** Payments are Solana **devnet** test SOL or **PayPal sandbox** (fake PayPal accounts from developer.paypal.com). **Dogwood Lot & Meter Co. is a fictional operator**: ScanSafe hosts its demo OAuth server and API under `/operators/dogwood` and its pages live on `https://scansafe-demo-sites.vercel.app/dogwood/...`. Label every Dogwood/PayPal screen "Demo" / "Sandbox".
+
+Everything here needs the phone sign-in (section 1): the `ss_session` cookie (`fetch(url, {credentials: "include"})`) or `Authorization: Bearer <token>`. A cookie only counts for POST/PUT/DELETE when the request comes from an allowlisted origin. Errors are `{"ok": false, "error": "<code>", "message": "<plain words>"}`; the table at the end says what to show.
+
+### Flows
+
+```
+Accounts page (app.scansafe.nyc/accounts)
+  GET /me                                  -> profile + linked accounts + which providers are available
+  PUT /me {"plate": "gx 4242"}             -> saved as "GX 4242"
+  PUT /me {"preferred_payment": "paypal"}  -> only once PayPal is linked
+
+Connect Dogwood (demo OAuth, authorization code)
+  1. GET /link/dogwood/start               -> {"authorize_url": "https://scansafe-demo-sites.vercel.app/dogwood/authorize?..."}
+  2. window.location.href = authorize_url  (same tab; the consent page is the other team's)
+  3. consent page -> POST /operators/dogwood/oauth/authorize -> browser goes to api.scansafe.nyc/link/dogwood/callback
+  4. the callback trades the code for a Dogwood token, stores it encrypted, and 302s to
+     APP_BASE_URL/accounts?linked=dogwood      (or ?link_error=<code>&provider=dogwood)
+
+Connect PayPal (sandbox Vault)
+  1. GET /link/paypal/start                -> {"approve_url": "https://www.sandbox.paypal.com/..."}
+  2. window.location.href = approve_url    (log in with a PayPal SANDBOX buyer account)
+  3. PayPal -> api.scansafe.nyc/link/paypal/callback -> 302 APP_BASE_URL/accounts?linked=paypal  (or ?link_error=...)
+
+Disconnect: DELETE /me/linked/dogwood | /me/linked/paypal
+
+Pay sheet (scan -> result -> pay)
+  POST /pay/quote {"scan_id","hours"}      -> amount_sol AND amount_usd (the PayPal price)
+  POST /pay {"scan_id","hours","approved":true,"payment_method":"solana_devnet"|"paypal"}
+
+FaceTime agent's live Dogwood app (agent + demo-sites, not the ScanSafe app)
+  agent:   POST /operators/dogwood/app-session {"scan_id"}  (X-Agent-Key) -> {"app_url", "plate", "linked"}
+  browser: GET  /operators/dogwood/app-state?s=<token>       -> meter, plate, hours, amount, status, receipt
+  browser: POST /operators/dogwood/app-state?s=<token> {"hours": 3}
+```
+
+`APP_BASE_URL` is a server setting (`https://app.scansafe.nyc`). If it isn't set, link callbacks go to `https://scansafe.nyc/?linked=...` instead.
+
+### App routes to build (teammate)
+
+**`app.scansafe.nyc/accounts`**
+- Signed out (`GET /me` gives `{"signed_in": false}`): "Sign in with your phone" (section 1).
+- Profile: masked phone (`phone_masked`), **plate** input (2 to 10 letters, numbers, spaces or dashes; show it uppercased; save with `PUT /me {"plate"}`; empty clears it), **preferred payment** choice: "Solana devnet (test SOL)" or "PayPal sandbox" (`PUT /me {"preferred_payment"}`; disable PayPal unless it's in `linked`).
+- **Linked accounts**: one row per provider. Linked: `display` + "linked <date>" (`linked_at`) + **Disconnect** (`DELETE /me/linked/{provider}`, then reload `/me`). Not linked: **Connect Dogwood** (`GET /link/dogwood/start`, then go to `authorize_url`) / **Connect PayPal** (`GET /link/paypal/start`, then go to `approve_url`). Hide Connect PayPal when `providers.paypal` is false.
+- On load, read `?linked=<provider>` ("Dogwood Parking connected." / "PayPal sandbox connected.") or `?link_error=<code>&provider=<p>` (table below), show a toast once, then remove the query with `history.replaceState`, and reload `/me`.
+
+**Scan -> pay sheet**: after the result screen (section 8 for meters, section 6 for fixed-price codes), the Pay button opens a sheet with a **method choice** preselected from `preferred_payment`:
+- "Solana devnet": total = quote `amount_sol` (meters) or `payment.amount_sol` (fixed price), "test SOL".
+- "PayPal sandbox": only if `linked` has `paypal` (else show "Connect PayPal" linking to `/accounts`). Total = quote `amount_usd` (meters), or `payment.amount_sol x paypal_rates.demo_usd_per_sol` for fixed-price codes, labelled "demo rate".
+- Confirm step as in section 8, then `POST /pay` with `"payment_method"`. Receipt: Solana: `explorer_url`; PayPal: `paypal_order_id` + "Paid $7.50 with PayPal (sandbox)".
+- Always send `payment_method` explicitly; when it's missing the server uses `solana_devnet`, whatever the preference.
+
+### GET /me
+```
+-> 200 {"signed_in": false}                       (not signed in; never an error)
+-> 200 {"signed_in": true, "phone_masked": "•••9861", "plate": "GX 4242", "preferred_payment": "solana_devnet",
+        "linked": [{"provider": "dogwood", "display": "Dogwood Parking", "linked_at": "2026-11-14T22:41:05.123+00:00"},
+                   {"provider": "paypal",  "display": "j•••@example.com", "linked_at": "..."}],
+        "providers": {"dogwood": true, "paypal": true},
+        "paypal_rates": {"dogwood_usd_per_hour": 2.5, "demo_usd_per_sol": 100.0}}
+```
+- `plate` is null until set. `preferred_payment` is `"solana_devnet"` until set. `linked` lists only active links (oldest first). `providers.paypal` is false when PayPal isn't configured on the server.
+- Errors: 503 `accounts_not_configured`, 502 `accounts_store_error`.
+
+### PUT /me
+Body `{"plate"?: string|null, "preferred_payment"?: "solana_devnet"|"paypal"|null}`. Fields you leave out are unchanged; `null` (or `""` for plate) clears. Returns the same JSON as `GET /me`.
+- 400 `bad_plate` (`"Plates are 2 to 10 letters, numbers, spaces or dashes."`), 400 `bad_preferred_payment`, 403 `paypal_not_linked` (preferring PayPal before linking it), 401 `not_signed_in`. A non-string plate gets FastAPI's 422.
+
+### GET /me/linked, DELETE /me/linked/{provider}
+- `GET /me/linked` -> `{"linked": [...]}` (same items as `/me`). 401 `not_signed_in`.
+- `DELETE /me/linked/dogwood` or `/paypal` -> `{"ok": true, "provider": "dogwood", "revoked": true}` (`false`: it wasn't linked; still 200). The token is revoked at the provider too (Dogwood token / PayPal vault token), the stored ciphertext is wiped, and a `preferred_payment` of `paypal` falls back to `solana_devnet`. 404 `unknown_provider`, 401 `not_signed_in`.
+
+### GET /link/dogwood/start
+```
+-> 200 {"authorize_url": "https://scansafe-demo-sites.vercel.app/dogwood/authorize?client_id=scansafe
+        &redirect_uri=https%3A%2F%2Fapi.scansafe.nyc%2Flink%2Fdogwood%2Fcallback&scope=pay_parking
+        &state=<signed, 10 min>&display=%E2%80%A2%E2%80%A2%E2%80%A29861"}
+```
+- `state` is signed by the server, tied to the signed-in account, valid 10 minutes and usable once. `display` is the masked phone for the consent page to show.
+- 401 `not_signed_in`, 503 `accounts_not_configured` (no store or no `ACCOUNT_KEY`).
+
+### Dogwood consent page -> POST /operators/dogwood/oauth/authorize (other team's page)
+```
+POST /operators/dogwood/oauth/authorize
+{"client_id": "scansafe", "redirect_uri": "https://api.scansafe.nyc/link/dogwood/callback",
+ "scope": "pay_parking", "state": "<state from the URL>", "decision": "allow"}
+-> 200 {"redirect": "https://api.scansafe.nyc/link/dogwood/callback?code=dwc_...&state=..."}
+decision "deny" -> 200 {"redirect": "...callback?error=access_denied&state=..."}
+scope other than pay_parking -> 200 {"redirect": "...callback?error=invalid_scope&state=..."}
+```
+- The page then sets `window.location.href = redirect`.
+- 400 (OAuth shape, no redirect): `invalid_client` (client_id isn't `scansafe`), `invalid_redirect_uri` (anything but the exact registered URI: no prefixes, no extra path, query or slash), `invalid_state` (tampered, for another flow, or older than 10 min; `error_description` says "This link expired. Go back to ScanSafe and tap Connect again."), `invalid_request` (decision isn't allow/deny).
+- The code is single use and expires after 5 minutes. Dogwood has no login of its own: the demo account comes from the ScanSafe sign-in that started the link (`/api/me` name "Demo driver •••9861").
+
+### GET /link/dogwood/callback?code&state (browser, from the consent page)
+Exchanges the code in-process with the operator token endpoint (`POST /operators/dogwood/oauth/token`, form `grant_type=authorization_code&code&redirect_uri&client_id&client_secret`; also open over HTTP, answers `{"access_token", "token_type": "Bearer", "expires_in", "scope", "account_id"}`), stores the Dogwood access token **encrypted** as provider `dogwood` (meta `{"account_name": "Dogwood Parking", "scope": "pay_parking"}`), revokes any previous Dogwood link, and answers **302** to `APP_BASE_URL/accounts?linked=dogwood`. On any problem: 302 to `...?link_error=<code>&provider=dogwood` (codes below). Never JSON.
+
+### Dogwood operator API (Bearer = the Dogwood access token; ScanSafe keeps it encrypted)
+| Call | Response |
+|---|---|
+| `GET /operators/dogwood/api/me` | `{"account_id": "dw_...", "name": "Demo driver •••9861"}` |
+| `POST /operators/dogwood/api/sessions` `{"meter_id": "42", "plate": "GX 4242", "hours": 3}` | `{"session_id": "dws_...", "meter_id": "42", "plate": "GX 4242", "hours": 3, "amount_sol": 0.03, "status": "pending_payment"}` |
+| `GET /operators/dogwood/api/sessions/{session_id}` | same object (only the account that created it; else 404 `unknown_session`) |
+
+401 `{"error": "invalid_token"}` (+ `WWW-Authenticate: Bearer`) for a missing, revoked or expired token; 403 `insufficient_scope`; 404 `unknown_meter` (only meter `42`); 400 `bad_plate`, `bad_hours` (1 to 4).
+
+### Agent live view: POST /operators/dogwood/app-session, GET/POST /operators/dogwood/app-state
+```
+POST /operators/dogwood/app-session      X-Agent-Key: <AGENT_INTERNAL_KEY>      (agent server only)
+{"scan_id": "3f9a1c2b7d4e"}
+-> 200 {"app_url": "https://scansafe-demo-sites.vercel.app/dogwood/app?s=<one-time token>",
+        "plate": "GX 4242", "linked": true, "expires_in": 900}
+
+GET /operators/dogwood/app-state?s=<token>          (the Dogwood web app polls this from the browser)
+-> 200 {"meter_id": "42", "operator": "Dogwood Lot & Meter Co.", "plate": "GX 4242",
+        "hours": 3, "rate_per_hour_sol": 0.01, "amount_sol": 0.03, "min_hours": 1, "max_hours": 4,
+        "status": "waiting_for_approval"}
+   paid -> also "payment_method": "solana_devnet" | "paypal",
+           "receipt": {"signature": "5Kx...", "explorer_url": "https://explorer.solana.com/tx/...?cluster=devnet",
+                       "paid_at": 1794696115, "method": "solana_devnet"}
+           (PayPal: signature/explorer_url null, plus "paypal_order_id", "amount_usd"; top-level "amount_usd")
+
+POST /operators/dogwood/app-state?s=<token>   {"hours": 2}   -> the new app-state
+```
+- `status`: `choose` (no hours picked yet), `waiting_for_approval` (hours picked in the ScanSafe app or the Dogwood app; waiting for the user's confirm in ScanSafe), `paid`. It mirrors `/pay/quote` and `/pay/status` for that scan. `hours`/`amount_sol` are null while `choose`. `paid_at` is unix seconds.
+- `plate`/`linked`: from the saved account of the person this scan belongs to: the person `/call-me` rang for this meter code (or the first signed-in `/pay/quote` / `/pay` for it). Null/false otherwise.
+- The token in `app_url` is signed, works only for that scan, lasts **15 minutes**, and a newer `app-session` for the same scan **replaces** it (the old link gets 401 `app_link_invalid`). Expired: 401 `app_link_expired`.
+- `POST app-state` changes the scan's quote (what the agent says and shows). It **never pays**; only the ScanSafe app's confirm button pays, with its own hours. 409 `already_paid` once paid; 400 `bad_hours`.
+- app-session errors: 401 `bad_agent_key`, 503 `agent_key_not_configured`, 404 `unknown_scan`, 400 `not_a_meter` / `not_dogwood` / `not_a_payment`, 403 `merchant_not_verified`.
+
+### GET /link/paypal/start, GET /link/paypal/callback (PayPal SANDBOX Vault)
+```
+GET /link/paypal/start   -> 200 {"approve_url": "https://www.sandbox.paypal.com/agreements/approve?approval_session_id=..."}
+```
+- The server creates a Vault **setup token** (`POST /v3/vault/setup-tokens`, payment_source paypal, `usage_type: MERCHANT`, `return_url` = `https://api.scansafe.nyc/link/paypal/callback?state=...`, `cancel_url` = same + `&cancelled=1`).
+- After Approve, PayPal sends the browser to the callback with `approval_token_id`; the server creates the **payment token** (`POST /v3/vault/payment-tokens`), stores the vault id **encrypted** as provider `paypal` (meta `{"display": "j•••@example.com", "env": "sandbox"}`) and 302s to `APP_BASE_URL/accounts?linked=paypal`. Cancel, a wrong/old state or a token that doesn't match: 302 `...?link_error=<code>&provider=paypal`.
+- 503 `{"ok": false, "error": "paypal_not_configured", ...}` when the server has no `PAYPAL_CLIENT_ID`/`PAYPAL_CLIENT_SECRET` or `PAYPAL_ENV` isn't `sandbox`. 401 `not_signed_in`, 502 `paypal_unreachable` / `paypal_auth_failed` / `paypal_error`.
+
+### POST /pay with PayPal
+```
+POST /pay   (cookie or Bearer)
+{"scan_id": "3f9a1c2b7d4e", "hours": 3, "approved": true, "payment_method": "paypal"}
+-> 200 {"ok": true, "scan_id": "3f9a1c2b7d4e", "method": "paypal", "paypal_order_id": "5O190127TN364715T",
+        "paypal_capture_id": "3C679366HH908993F", "amount_usd": 7.5, "currency": "USD", "hours": 3,
+        "merchant": "Dogwood Lot & Meter Co.", "payment": {...}, "paid_at": 1794696115}
+GET /pay/status/3f9a1c2b7d4e
+-> 200 {"scan_id": "...", "state": "paid", "method": "paypal", "paypal_order_id": "...", "paypal_capture_id": "...",
+        "amount_usd": 7.5, "currency": "USD", "hours": 3, "merchant": "...", "paid_at": 1794696115}
+```
+- Same rules as Solana: `approved: true`, explicit `hours` for meters (the stored quote is never used), one payment per `scan_id` whichever method (a second one gets 409 `already_paid`).
+- Amount: meters = `hours x DOGWOOD_RATE_USD` (default $2.50/h, so 3 h = $7.50; the quote's `amount_usd`). Fixed-price codes = `amount_sol x DEMO_USD_PER_SOL` (default 100), a **made-up demo rate**: the response and status carry `usd_note` saying so. Demo cap $25 (400 `over_cap`).
+- The server creates an order (`/v2/checkout/orders`, `intent: CAPTURE`, `payment_source.paypal.vault_id`) and captures it. Solana's `/pay` response and status are unchanged except that the status now also has `"method": "solana_devnet"` and `"paid_at"`.
+- PayPal errors: 401 `not_signed_in`, 403 `paypal_not_linked`, 503 `paypal_not_configured`, 402 `paypal_declined` (status becomes `failed`; the user may retry), 409 `paypal_needs_approval` / `paypal_relink_needed`, 502 `paypal_unreachable` / `paypal_error`, 400 `bad_payment_method`.
+
+### Errors and what to show (plain words)
+
+| Where | `error` / `link_error` | Show |
+|---|---|---|
+| any | `not_signed_in` (401) | "Sign in with your phone first." -> sign-in |
+| `/me*`, link start | `accounts_not_configured` (503) | "Saved accounts aren't available right now." |
+| `/me*` | `accounts_store_error` (502) | "We couldn't reach your saved account. Try again in a minute." |
+| `PUT /me` | `bad_plate` (400) | "Plates are 2 to 10 letters, numbers, spaces or dashes." |
+| `PUT /me`, `/pay` | `paypal_not_linked` (403) | "Connect PayPal first." (link to /accounts) |
+| PayPal | `paypal_not_configured` (503) | "PayPal isn't available right now." (hide the PayPal option) |
+| `/pay` PayPal | `paypal_declined` (402) | "PayPal declined the payment. Nothing was charged." |
+| `/pay` PayPal | `paypal_relink_needed` / `paypal_needs_approval` (409) | "Please reconnect PayPal in your account." |
+| `/pay` PayPal | `paypal_unreachable`, `paypal_error`, `paypal_auth_failed` (502) | "Couldn't reach PayPal. Nothing was charged. Try again in a minute." |
+| callback | `access_denied` | "You didn't allow ScanSafe to use your Dogwood account." |
+| callback | `cancelled` | "PayPal setup was cancelled." |
+| callback | `link_expired` | "That took too long. Tap Connect again." |
+| callback | `invalid_state` | "That link didn't work. Tap Connect again." |
+| callback | `signed_in_as_someone_else` | "You're signed in with a different phone in this browser. Sign out and try again." |
+| callback | `dogwood_refused`, `dogwood_error`, `paypal_refused`, `server_error` | "We couldn't connect that account. Try again." |
+
+### Server setup (agent server `~/HackEmory-2026/.env`, never commit values, never paste them in chat)
+
+```bash
+ssh root@144.202.25.65
+cd ~/HackEmory-2026
+python3 -c 'import cryptography'      # must print nothing (it's installed: 50.0.2); else pip install cryptography
+# Generate on the server and append without echoing (each line prints nothing):
+echo "ACCOUNT_KEY=$(python3 -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')" >> .env
+echo "ACCOUNT_PEPPER=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> .env
+echo "AGENT_INTERNAL_KEY=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')" >> .env
+echo "APP_BASE_URL=https://app.scansafe.nyc" >> .env
+# PayPal SANDBOX app (developer.paypal.com > Apps & Credentials > Sandbox): paste with nano, not on the command line
+nano .env      # PAYPAL_CLIENT_ID=...  PAYPAL_CLIENT_SECRET=...  PAYPAL_ENV=sandbox   (optional DOGWOOD_RATE_USD, DEMO_USD_PER_SOL)
+chmod 600 .env
+python3 -m data.setup       # optional: "OK   Tiger Data: accounts + linked_accounts ready" (tables are also created on first use)
+systemctl restart scansafe-api scansafe-agent    # .env is read at start; the agent needs AGENT_INTERNAL_KEY too
+```
+- `ACCOUNT_PEPPER`: if it's missing the API generates one into `~/.scansafe-account-pepper` (chmod 600) on first use. **Never change or lose it** once accounts exist: every saved account is keyed by `sha256(phone + pepper)`, and the OAuth-state / app-link signing keys and the Dogwood demo client secret derive from it.
+- `ACCOUNT_KEY`: losing or rotating it makes stored links unreadable (users must reconnect; `/pay` answers `paypal_relink_needed`).
+- Dogwood operator tokens and sessions live in `~/.scansafe-dogwood-operator.json` (chmod 600, token hashes only); override with `DOGWOOD_OPERATOR_FILE`.
+- Optional: `API_BASE_URL` (default `https://api.scansafe.nyc`, builds the redirect/return URLs), `DOGWOOD_SITE_URL` (default `https://scansafe-demo-sites.vercel.app`), `SESSION_COOKIE_DOMAIN` (default `.scansafe.nyc`; empty = host-only), `CORS_EXTRA_ORIGINS`, `PAYPAL_MAX_USD` (default 25), `ACCOUNTS_STORE=memory` (local dev only, forgets on restart).
+
+### curl
+```bash
+B=https://api.scansafe.nyc; H="Authorization: Bearer $TOKEN"
+curl -s $B/me -H "$H"
+curl -s -X PUT $B/me -H "$H" -H 'Content-Type: application/json' -d '{"plate":"gx 4242"}'
+curl -s $B/link/dogwood/start -H "$H"            # open authorize_url in a browser
+curl -s $B/link/paypal/start -H "$H"             # open approve_url in a browser (sandbox buyer login)
+curl -s $B/me/linked -H "$H"
+curl -s -X DELETE $B/me/linked/dogwood -H "$H"
+curl -s -X POST $B/auth/logout -H "$H"
+# charges the linked PayPal SANDBOX account $7.50 test money
+curl -s -X POST $B/pay -H "$H" -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\",\"hours\":3,\"approved\":true,\"payment_method\":\"paypal\"}"
+# agent server only
+curl -s -X POST localhost:8000/operators/dogwood/app-session -H "X-Agent-Key: $AGENT_INTERNAL_KEY" -H 'Content-Type: application/json' -d "{\"scan_id\":\"$SID\"}"
+curl -s "$B/operators/dogwood/app-state?s=<token from app_url>"
 ```

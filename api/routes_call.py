@@ -26,10 +26,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from api import config  # noqa: F401  (loads .env and the LiveKit fallback file)
+from api import session
 
 log = logging.getLogger("scansafe.call")
 router = APIRouter()
@@ -222,22 +223,21 @@ def phone_start(req: PhoneRequest, request: Request) -> dict:
 
 
 @router.post("/auth/phone/verify")
-def phone_verify(req: PhoneRequest) -> dict:
+def phone_verify(req: PhoneRequest, response: Response) -> dict:
     """Step 2 (the app polls this every few seconds): once the code text has arrived from this
-    phone, returns a sign-in token. The token is what /call-me trusts, never a phone in the body."""
+    phone, returns a sign-in token. The token is what /call-me trusts, never a phone in the body.
+    It is also set as the `ss_session` cookie (HttpOnly, .scansafe.nyc, 30 days)."""
     phone = _norm_phone(req.phone)
     if not req.request_id:
         raise HTTPException(status_code=400, detail="request_id from /auth/phone/start is required")
     token = complete_sign_in(phone, req.request_id)
     if not token:
         return {"verified": False}
+    session.set_session_cookie(response, token)
     return {"verified": True, "phone": phone, "token": token}
 
 
-def bearer_token(authorization: str) -> str:
-    """The token from an `Authorization: Bearer <token>` header ("" if there isn't one)."""
-    scheme, _, value = (authorization or "").strip().partition(" ")
-    return value.strip() if scheme.lower() == "bearer" else ""
+bearer_token = session.bearer_token   # kept for older imports
 
 
 def mask_phone(phone: str) -> str:
@@ -246,13 +246,42 @@ def mask_phone(phone: str) -> str:
 
 
 @router.get("/auth/me")
-def auth_me(response: Response, authorization: str = Header(default="")) -> dict:
-    """Is this sign-in token still good? Never returns the full phone number."""
+def auth_me(request: Request, response: Response) -> dict:
+    """Is this sign-in (Bearer token or ss_session cookie) still good? Never returns the full
+    phone number."""
     response.headers["Cache-Control"] = "no-store"
-    phone = phone_for_token(bearer_token(authorization))
+    phone = session.current_phone(request)
     if not phone:
         return {"signed_in": False}
     return {"signed_in": True, "phone_masked": mask_phone(phone)}
+
+
+def revoke_token(token: str) -> bool:
+    """Forget a sign-in token server-side. True if it existed."""
+    import hashlib
+    if not token:
+        return False
+    key = hashlib.sha256(token.encode()).hexdigest()
+    with _consent_lock:
+        data = _load_consent()
+        if data.get("tokens", {}).pop(key, None) is None:
+            return False
+        _save_consent(data)
+    return True
+
+
+@router.post("/auth/logout")
+def auth_logout(request: Request, response: Response) -> dict:
+    """Sign out: revokes the token(s) this request carries (Bearer and/or cookie) and clears the
+    cookie. Always 200, also when nobody was signed in."""
+    response.headers["Cache-Control"] = "no-store"
+    revoked = False
+    for token, source in session.request_tokens(request):
+        if source == "cookie" and not session._cookie_ok(request):
+            continue   # a cross-site form can't sign someone out
+        revoked = revoke_token(token) or revoked
+    session.clear_session_cookie(response)
+    return {"ok": True, "signed_in": False, "revoked": revoked}
 
 
 _code_slots: dict[str, float] = {}
@@ -480,14 +509,14 @@ async def _cleanup(lkapi, room: str) -> None:
 
 
 @router.post("/call-me")
-async def call_me(req: CallRequest, authorization: str = Header(default="")) -> dict:
+async def call_me(req: CallRequest, request: Request) -> dict:
     """Ring the person on FaceTime; our agent opens `url` in the sandbox and shows it live.
     A verified parking meter code (solana:...) instead gets the pay-by-the-hour walkthrough:
     the agent shows the meter page live and follows the app's hours and payment for scan_id.
     Who gets called comes from the phone sign-in token (Authorization: Bearer <token>), not from
-    the request body. Without a token only the server's own allowlist (the demo phone) works."""
-    token = bearer_token(authorization)
-    signed_in = await asyncio.to_thread(phone_for_token, token) if token else None
+    the request body (or the ss_session cookie). Without one only the server's own allowlist
+    (the demo phone) works."""
+    signed_in = await asyncio.to_thread(session.current_phone, request)
     if signed_in:
         req = req.model_copy(update={"phone": signed_in})
     url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
@@ -495,8 +524,19 @@ async def call_me(req: CallRequest, authorization: str = Header(default="")) -> 
     _take_rate_slot()
     if extra is None:
         return await place_call(url, phone)
+    _remember_scan_owner(extra["scan_id"], phone)
     out = await place_call(url, phone, extra=extra)
     return {**out, "scan_id": extra["scan_id"]}
+
+
+def _remember_scan_owner(scan_id: str, phone: str) -> None:
+    """The person being called owns this meter scan: the Dogwood app view shows their plate.
+    Never raises (a missing pepper file must not stop a call)."""
+    try:
+        from api import account_crypto, meter_pay
+        meter_pay.set_owner(scan_id, account_crypto.phone_hash(phone))
+    except Exception as e:  # noqa: BLE001
+        log.warning("couldn't remember the scan owner: %s", type(e).__name__)
 
 
 @router.get("/call-me/{call_id}")
