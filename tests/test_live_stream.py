@@ -51,7 +51,7 @@ from chert.status_video import StatusVideo  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 SAFE = json.loads((ROOT / "shared" / "mock_safe.json").read_text())
 MAL = json.loads((ROOT / "shared" / "mock_malicious.json").read_text())
-URL = "https://bit.ly/peachtree-park-42"
+URL = "https://bit.ly/dogwood-meter-42"
 LIVE_COLOR = (10, 120, 200)
 
 

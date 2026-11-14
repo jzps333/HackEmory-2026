@@ -299,7 +299,7 @@
     "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html",
     "https://scansafe-demo-sites.vercel.app/fixtures/fake/index.html?session=PKG-331108&meter=42"
    ],
-   "page_title": "Peachtree Parking Co. - Pay Your Meter",
+   "page_title": "Dogwood Lot & Meter Co. - Pay Your Meter",
    "checks": {
     "impersonates": "fake_parking_or_toll",
     "impersonates_p": 1.0,
@@ -549,7 +549,7 @@
    "redirect_chain": [
     "https://scansafe-demo-sites.vercel.app/fixtures/meter/index.html"
    ],
-   "page_title": "Peachtree Parking Co. - Meter 42",
+   "page_title": "Dogwood Lot & Meter Co. - Meter 42",
    "checks": {
     "impersonates": "fake_parking_or_toll",
     "impersonates_p": 0.93,
@@ -558,7 +558,7 @@
     "prompt_injection_p": 0.03,
     "malicious_p": 0.145
    },
-   "explanation": "This QR code is safe to use and brings you to the official Peachtree Parking website. You can pay for your meter here without worry.",
+   "explanation": "This QR code is safe to use and brings you to the official Dogwood Lot & Meter website. You can pay for your meter here without worry.",
    "scan_ms": 5063,
    "elapsed_s": 5.2
   },

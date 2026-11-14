@@ -1,7 +1,7 @@
 """End-to-end devnet check against the live API, doing exactly what the app does.
 
 Scans every demo QR in fixtures/qr/ with POST /scan, checks /pay refuses the impostor and an
-unapproved payment, then pays the real Peachtree meter (0.01 test SOL) with approved: true and
+unapproved payment, then pays the real Dogwood meter (0.01 test SOL) with approved: true and
 confirms the transaction and the merchant's balance on devnet. Devnet only. Run from the repo root:
   python3 scripts/devnet_e2e.py [--api https://api.scansafe.nyc] [--no-pay]
 """
@@ -77,7 +77,7 @@ def main() -> None:
           f"/pay without approval refused: {r.status_code} {r.json().get('error')}")
 
     if not args.no_pay:
-        merchant = KNOWN_MERCHANTS["Peachtree Parking Co."]
+        merchant = KNOWN_MERCHANTS["Dogwood Lot & Meter Co."]
         before = balance(merchant)
         r = pay("real_meter.png")
         check(r.status_code == 200, f"/pay approved: {r.status_code} {r.text[:200]}")

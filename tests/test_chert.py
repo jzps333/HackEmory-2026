@@ -15,7 +15,7 @@ from chert.scansafe_tools import (CodeDebouncer, fallback_result, has_jargon, sc
 
 MAL = json.load(open("shared/mock_malicious.json"))
 SAFE = json.load(open("shared/mock_safe.json"))
-URL = "https://peachtree-parking-pay.xyz/meter/42"
+URL = "https://dogwood-meter-pay.xyz/meter/42"
 
 
 # --- qr_reader ---------------------------------------------------------------------------------
@@ -70,14 +70,14 @@ def test_speech_malicious():
     assert "card number" in s
     assert s.endswith("I'll text you the details.")
     assert not has_jargon(s)
-    assert "peachtree" not in s.lower()          # no page-derived text read aloud
+    assert "dogwood" not in s.lower()            # no page-derived text read aloud
 
 
 def test_speech_safe():
     s = speech_for(SAFE)
     assert s.startswith("This one looks safe.")
     assert not has_jargon(s)
-    assert "Peachtree" not in s                  # label came from the QR -> untrusted
+    assert "Dogwood" not in s                    # label came from the QR -> untrusted
 
 
 def test_speech_never_echoes_page_text():

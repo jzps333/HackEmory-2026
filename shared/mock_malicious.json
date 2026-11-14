@@ -1,18 +1,18 @@
 {
   "scan_id": "mock-mal-001",
-  "url": "https://bit.ly/peachtree-park-42",
-  "final_url": "https://peachtree-parking-pay.xyz/meter/42",
+  "url": "https://bit.ly/dogwood-meter-42",
+  "final_url": "https://dogwood-meter-pay.xyz/meter/42",
   "redirect_chain": [
-    "https://bit.ly/peachtree-park-42",
+    "https://bit.ly/dogwood-meter-42",
     "https://trk.redirect-hub.top/r?id=8812",
-    "https://peachtree-parking-pay.xyz/meter/42"
+    "https://dogwood-meter-pay.xyz/meter/42"
   ],
-  "domain": "peachtree-parking-pay.xyz",
-  "page_title": "Peachtree Parking Co. - Pay Your Meter",
+  "domain": "dogwood-meter-pay.xyz",
+  "page_title": "Dogwood Lot & Meter Co. - Pay Your Meter",
   "verdict": "malicious",
   "jev_score": 0.94,
   "scam_type": "fake_parking_or_toll",
-  "explanation": "Don't pay this. It's a fake parking page. It uses the Peachtree Parking name, but the website is not theirs, and it secretly sent you through two other websites before asking for your card number.",
+  "explanation": "Don't pay this. It's a fake parking page. It uses the Dogwood Lot & Meter name, but the website is not theirs, and it secretly sent you through two other websites before asking for your card number.",
   "checks": {
     "impersonates": "fake_parking_or_toll",
     "impersonates_p": 0.91,

@@ -30,7 +30,7 @@ def malicious(**kw) -> ScanResult:
 
 def scam_payment(amount=0.01, verified=False) -> ScanResult:
     pay = Payment(recipient="Scam111111111111111111111111111111111111111", amount_sol=amount,
-                  label="Peachtree Parking Co.", merchant_verified=verified)
+                  label="Dogwood Lot & Meter Co.", merchant_verified=verified)
     return malicious(scan_id="pay123abc456", url="solana:x", domain=None, scam_type="fake_payment_app",
                      verdict="safe" if verified else "malicious", payment=pay, scan_ms=None)
 
@@ -134,7 +134,7 @@ def test_impact_counts_queries_and_shape(monkeypatch):
         "FROM scans_hourly": [{"verdict": "safe", "total": 40}, {"verdict": "malicious", "total": 7},
                               {"verdict": "suspicious", "total": 3}, {"verdict": None, "total": 1}],
         "INTERVAL '24 hours'": [{"total": 12}],
-        "GROUP BY domain": [{"domain": "peachtree-parking-pay.xyz", "times_checked": 5, "times_flagged": 5,
+        "GROUP BY domain": [{"domain": "dogwood-meter-pay.xyz", "times_checked": 5, "times_flagged": 5,
                              "first_seen": T1, "last_seen": T2, "scam_type": "fake_parking_or_toll"},
                             {"domain": "odd.example", "times_checked": 2, "times_flagged": 2,
                              "first_seen": T1, "last_seen": T1, "scam_type": None}],
@@ -146,7 +146,7 @@ def test_impact_counts_queries_and_shape(monkeypatch):
     assert out["by_verdict"] == {"safe": 40, "suspicious": 3, "malicious": 7}
     assert out["scans_total"] == 50 and out["scans_24h"] == 12
     assert out["payments_refused"] == {"count": 2, "sol_total": 0.03}
-    assert out["repeat_scams"][0] == {"domain": "peachtree-parking-pay.xyz", "times_checked": 5,
+    assert out["repeat_scams"][0] == {"domain": "dogwood-meter-pay.xyz", "times_checked": 5,
                                       "times_flagged": 5, "first_seen": "2026-11-14T15:00:00+00:00",
                                       "last_seen": "2026-11-14T19:30:00+00:00",
                                       "scam_type": "fake_parking_or_toll"}
@@ -171,12 +171,12 @@ def test_domain_stats_is_parameterized(monkeypatch):
     conn = FakeConn({"WHERE domain = %s": [{"times_checked": 4, "safe": 1, "suspicious": 1, "malicious": 2,
                                             "first_seen": T1, "last_seen": T2}]})
     monkeypatch.setattr(tiger_store, "_connect", lambda: conn)
-    out = tiger_store.domain_stats("peachtree-parking-pay.xyz")
-    assert out == {"domain": "peachtree-parking-pay.xyz", "times_checked": 4, "times_flagged": 3,
+    out = tiger_store.domain_stats("dogwood-meter-pay.xyz")
+    assert out == {"domain": "dogwood-meter-pay.xyz", "times_checked": 4, "times_flagged": 3,
                    "first_seen": "2026-11-14T15:00:00+00:00", "last_seen": "2026-11-14T19:30:00+00:00",
                    "verdicts": {"safe": 1, "suspicious": 1, "malicious": 2}}
     sql, params = conn.executed[0]
-    assert params == ("peachtree-parking-pay.xyz",) and "peachtree" not in sql
+    assert params == ("dogwood-meter-pay.xyz",) and "dogwood" not in sql
 
 
 def test_domain_stats_never_seen(monkeypatch):
@@ -244,7 +244,7 @@ def test_record_scan_also_counts_the_refusal(tiger_env, monkeypatch):
 # ---------- routes ----------
 
 COUNTS = {"by_verdict": {"safe": 40, "suspicious": 3, "malicious": 7}, "scans_total": 50, "scans_24h": 12,
-          "repeat_scams": [{"domain": "peachtree-parking-pay.xyz", "times_checked": 5, "times_flagged": 5,
+          "repeat_scams": [{"domain": "dogwood-meter-pay.xyz", "times_checked": 5, "times_flagged": 5,
                             "first_seen": "2026-11-14T15:00:00+00:00", "last_seen": "2026-11-14T19:30:00+00:00",
                             "scam_type": "fake_parking_or_toll"}],
           "payments_refused": {"count": 2, "sol_total": 0.03}}
@@ -302,11 +302,11 @@ def test_stats_domain_route(client, tiger_env, monkeypatch):
         return {"domain": domain, "times_checked": 4, "times_flagged": 3, "first_seen": "2026-11-14T15:00:00+00:00",
                 "last_seen": "2026-11-14T19:30:00+00:00", "verdicts": {"safe": 1, "suspicious": 1, "malicious": 2}}
     monkeypatch.setattr(tiger_store, "domain_stats", fake)
-    r = client.get("/stats/domain/Peachtree-Parking-Pay.XYZ")     # case-insensitive
-    assert r.status_code == 200 and r.json()["domain"] == "peachtree-parking-pay.xyz"
+    r = client.get("/stats/domain/Dogwood-Meter-Pay.XYZ")         # case-insensitive
+    assert r.status_code == 200 and r.json()["domain"] == "dogwood-meter-pay.xyz"
     assert r.json()["times_checked"] == 4
-    client.get("/stats/domain/peachtree-parking-pay.xyz")
-    assert calls == ["peachtree-parking-pay.xyz"]                  # second call served from the cache
+    client.get("/stats/domain/dogwood-meter-pay.xyz")
+    assert calls == ["dogwood-meter-pay.xyz"]                      # second call served from the cache
 
 
 @pytest.mark.parametrize("bad", ["exa_mple.com", "-start.com", "end-.com", "a" * 254, "evil.com%27%3B--",

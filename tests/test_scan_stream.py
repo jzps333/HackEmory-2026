@@ -159,7 +159,7 @@ def test_mock_mode_single_result_line(env, monkeypatch):
 
 def test_solana_pay_skips_sandbox(env, monkeypatch):
     mock_sandbox(monkeypatch, env, lambda req: pytest.fail("sandbox must not be called"))
-    qr = "solana:So11111111111111111111111111111111111111112?amount=5&label=Peachtree%20Parking%20Co."
+    qr = "solana:So11111111111111111111111111111111111111112?amount=5&label=Dogwood%20Lot%20%26%20Meter%20Co."
     lines = post_stream({"url": qr})
     assert len(lines) == 1 and lines[0]["data"]["scam_type"] == "fake_payment_app"
 

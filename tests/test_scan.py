@@ -54,14 +54,14 @@ def test_download_is_malicious():
 
 def test_solana_pay_verified():
     qr = ("solana:6jQGteA52iYssC8A8ss3tsnfGtPCAGPaDH5Z1o8X66TL?amount=0.02"
-          "&label=Peachtree%20Parking%20Co.&message=Meter%2042")
+          "&label=Dogwood%20Lot%20%26%20Meter%20Co.&message=Meter%2042")
     pay = parse_solana_pay(qr)
     assert pay and pay.amount_sol == 0.02 and pay.merchant_verified
     assert payment_result(qr, pay).verdict == "safe"
 
 
 def test_solana_pay_wrong_wallet_blocked():
-    qr = "solana:So11111111111111111111111111111111111111112?amount=5&label=Peachtree%20Parking%20Co."
+    qr = "solana:So11111111111111111111111111111111111111112?amount=5&label=Dogwood%20Lot%20%26%20Meter%20Co."
     pay = parse_solana_pay(qr)
     assert pay and not pay.merchant_verified
     assert payment_result(qr, pay).verdict == "malicious"

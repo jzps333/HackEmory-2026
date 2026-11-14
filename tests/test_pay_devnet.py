@@ -27,7 +27,7 @@ REAL_CLIENT = httpx.Client
 # --- merchant table ----------------------------------------------------------------------------
 
 def test_merchants_are_distinct_valid_public_addresses():
-    assert set(KNOWN_MERCHANTS) == {"Peachtree Parking Co.", "Magnolia Diner"}
+    assert set(KNOWN_MERCHANTS) == {"Dogwood Lot & Meter Co.", "Magnolia Diner"}
     addrs = list(KNOWN_MERCHANTS.values())
     assert len(set(addrs)) == len(addrs)
     for a in addrs:
@@ -50,7 +50,7 @@ def decode(name: str) -> str:
     return text
 
 
-@pytest.mark.parametrize("name,label", [("real_meter.png", "Peachtree Parking Co."),
+@pytest.mark.parametrize("name,label", [("real_meter.png", "Dogwood Lot & Meter Co."),
                                         ("magnolia_table.png", "Magnolia Diner")])
 def test_real_qr_codes_are_verified_and_safe(name, label):
     qr = decode(name)
@@ -61,7 +61,7 @@ def test_real_qr_codes_are_verified_and_safe(name, label):
     assert payment_result(qr, p).verdict == "safe"
 
 
-def test_fake_sticker_impersonates_peachtree_and_is_blocked():
+def test_fake_sticker_impersonates_dogwood_and_is_blocked():
     real, fake = parse_solana_pay(decode("real_meter.png")), parse_solana_pay(decode("fake_sticker.png"))
     assert (fake.label, fake.amount_sol, fake.message) == (real.label, real.amount_sol, real.message)
     assert fake.recipient not in KNOWN_MERCHANTS.values()
@@ -173,8 +173,8 @@ def test_refuses_non_devnet_urls_without_any_rpc(client, wallet, monkeypatch, ur
 
 def test_cap_is_tiny(client, wallet, monkeypatch):
     calls = mock_rpc(monkeypatch, solana_pay.DEVNET_GENESIS_HASH)
-    m = KNOWN_MERCHANTS["Peachtree Parking Co."]
-    r = client.post("/pay", json=pay_body(f"solana:{m}?amount=0.06&label=Peachtree%20Parking%20Co."))
+    m = KNOWN_MERCHANTS["Dogwood Lot & Meter Co."]
+    r = client.post("/pay", json=pay_body(f"solana:{m}?amount=0.06&label=Dogwood%20Lot%20%26%20Meter%20Co."))
     assert r.status_code == 400 and r.json()["error"] == "over_cap"
     assert calls == []
 

@@ -1,11 +1,11 @@
 """Generate demo Solana Pay QR codes (devnet) into fixtures/qr/.
 
-  real_meter.png     -> pays Peachtree Parking Co.'s wallet from api/merchants.py (SAFE)
+  real_meter.png     -> pays Dogwood Lot & Meter Co.'s wallet from api/merchants.py (SAFE)
   magnolia_table.png -> pays Magnolia Diner's wallet from api/merchants.py (SAFE)
   fake_sticker.png   -> same label and amount as real_meter, but a scammer's wallet (MALICIOUS:
                         the impersonation demo)
 
-Peachtree Parking Co. and Magnolia Diner are made-up demo brands. Each run uses a fresh Solana
+Dogwood Lot & Meter Co. and Magnolia Diner are made-up demo brands. Each run uses a fresh Solana
 Pay `reference` per code. Run from the repo root:
   python3 scripts/make_demo_qr.py [--scammer <devnet address>]
 """
@@ -27,7 +27,7 @@ from api.merchants import KNOWN_MERCHANTS  # noqa: E402
 OUT = ROOT / "fixtures" / "qr"
 # file -> (label, amount in SOL, message). Keep amounts tiny: this is devnet test SOL.
 CODES = {
-    "real_meter.png": ("Peachtree Parking Co.", "0.01", "Meter 42"),
+    "real_meter.png": ("Dogwood Lot & Meter Co.", "0.01", "Meter 42"),
     "magnolia_table.png": ("Magnolia Diner", "0.005", "Table 7"),
 }
 SCAM = ("fake_sticker.png", "real_meter.png")   # impostor copies this code's label and amount

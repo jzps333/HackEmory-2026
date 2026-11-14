@@ -1,7 +1,7 @@
 """Framework-agnostic helpers for the FaceTime agent: call the backend, turn a result into speech.
 
     from chert.scansafe_tools import scan_url, speech_for
-    result = scan_url("https://bit.ly/peachtree-park-42")
+    result = scan_url("https://bit.ly/dogwood-meter-42")
     text = speech_for(result)    # short, slow, plain words, verdict first
 
 Nothing here imports LiveKit, so it is easy to test and reuse (web app, iMessage, etc.).

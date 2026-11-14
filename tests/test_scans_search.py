@@ -79,12 +79,12 @@ def test_row_document_has_only_tiger_fields():
 
 
 def test_result_document_strips_query_and_never_has_location():
-    r = result(url="https://user:pw@Peachtree-Parking-Pay.xyz/pay/spot?plate=ABC123&email=a@b.c#x",
-               final_url="https://peachtree-parking-pay.xyz:8443/checkout?session=secret",
+    r = result(url="https://user:pw@Dogwood-Meter-Pay.xyz/pay/spot?plate=ABC123&email=a@b.c#x",
+               final_url="https://dogwood-meter-pay.xyz:8443/checkout?session=secret",
                page_title="Pay for parking", location=[33.7925, -84.324])
     doc = scan_search.result_document(r)
-    assert doc["url"] == "https://peachtree-parking-pay.xyz/pay/spot"
-    assert doc["final_url"] == "https://peachtree-parking-pay.xyz:8443/checkout"
+    assert doc["url"] == "https://dogwood-meter-pay.xyz/pay/spot"
+    assert doc["final_url"] == "https://dogwood-meter-pay.xyz:8443/checkout"
     assert doc["page_title"] == "Pay for parking"
     assert "location" not in doc
     assert set(doc) <= {"id", "domain", "verdict", "scam_type", "jev_score", "scan_ms", "scanned_at",
