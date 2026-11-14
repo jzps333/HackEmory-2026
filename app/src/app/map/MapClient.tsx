@@ -109,7 +109,7 @@ export default function MapClient() {
 
       <h2>Reported nearby (list)</h2>
       <p className="hint">The same pins as the map, as a list for screen readers.</p>
-      <ul>
+      <ul className="pin-list">
         {pins.map((p, i) => (
           <li key={p.id ?? `${p.url}-${i}`} style={{ marginBottom: "0.5rem" }}>
             <strong>{scamLabel(p.scam_type)}</strong>, {percent(p.jev_score)} likely a scam, {timeAgo(p.reported_at)}. {p.explanation}

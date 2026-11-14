@@ -16,7 +16,7 @@ function esc(s: string): string {
 const pinIcon = L.divIcon({
   className: "scam-pin",
   html:
-    '<svg width="34" height="46" viewBox="0 0 34 46" aria-hidden="true"><path d="M17 1C8.2 1 1 8 1 16.8 1 29 17 45 17 45s16-16 16-28.2C33 8 25.8 1 17 1z" fill="#b3261e" stroke="#fff" stroke-width="2"/><text x="17" y="23" text-anchor="middle" font-size="18" font-weight="900" fill="#fff" font-family="Arial">!</text></svg>',
+    '<svg width="34" height="46" viewBox="0 0 34 46" aria-hidden="true"><path d="M17 1C8.2 1 1 8 1 16.8 1 29 17 45 17 45s16-16 16-28.2C33 8 25.8 1 17 1z" fill="#c0262d" stroke="#fff" stroke-width="2"/><text x="17" y="23" text-anchor="middle" font-size="18" font-weight="900" fill="#fff" font-family="Arial">!</text></svg>',
   iconSize: [34, 46],
   iconAnchor: [17, 45],
   popupAnchor: [0, -40],

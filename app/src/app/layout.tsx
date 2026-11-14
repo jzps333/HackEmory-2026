@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b3d2e",
+  themeColor: "#514082",
   width: "device-width",
   initialScale: 1,
 };
@@ -25,9 +25,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <a className="skip-link" href="#main">Skip to main content</a>
         <header className="site-header">
-          <div className="brand" aria-label="ScanSafe">
-            <img src="/icons/icon-192.png" alt="" width={36} height={36} />
-            <span>ScanSafe</span>
+          <div className="site-brand" aria-label="ScanSafe">
+            <span className="site-brand-mark" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" focusable="false">
+                <path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </span>
+            <span className="site-brand-name">ScanSafe</span>
           </div>
           <Nav />
         </header>

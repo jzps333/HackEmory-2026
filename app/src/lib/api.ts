@@ -36,6 +36,120 @@ export async function scanUrl(url: string, location: [number, number] | null): P
   return request<ScanResult>("/scan", { method: "POST", body: JSON.stringify(body) }, 90000);
 }
 
+export interface LiveScanHandlers {
+  /** A new screen from the sandbox browser, as a ready-to-use `data:image/jpeg;base64,...` URL. */
+  onFrame?: (dataUrl: string) => void;
+  /** The sandbox browser moved to a new address. */
+  onNav?: (url: string) => void;
+  /** The live stream failed before a result, so we are falling back to the plain /scan request. */
+  onFallback?: () => void;
+}
+
+/**
+ * Same scan as scanUrl, but streams the sandbox browser while it works (POST /scan/stream, NDJSON).
+ * Any failure before the result line (non-200, network, timeout, no result) falls back to scanUrl.
+ * Aborting `signal` stops everything and rejects without falling back.
+ */
+export async function scanUrlLive(
+  url: string,
+  location: [number, number] | null,
+  handlers: LiveScanHandlers = {},
+  signal?: AbortSignal,
+): Promise<ScanResult> {
+  if (DEMO_MODE) return scanUrl(url, location);
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const body: { url: string; lat?: number; lng?: number } = { url };
+  if (location) {
+    body.lat = location[0];
+    body.lng = location[1];
+  }
+
+  const ctrl = new AbortController();
+  const stop = () => ctrl.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  // Give up on the stream if it goes quiet for 30 s or runs past 100 s in total.
+  let idle: ReturnType<typeof setTimeout> | undefined;
+  const bumpIdle = () => {
+    clearTimeout(idle);
+    idle = setTimeout(stop, 30000);
+  };
+  const overall = setTimeout(stop, 100000);
+  const safe = (fn: () => void) => {
+    try {
+      fn();
+    } catch {
+      /* a UI callback failing must not kill the scan */
+    }
+  };
+
+  try {
+    bumpIdle();
+    const res = await fetch(`${API}/scan/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`Server answered ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let result: ScanResult | null = null;
+
+    const handleLine = (line: string): ScanResult | null => {
+      const s = line.trim();
+      if (!s) return null;
+      let msg: { type?: string; jpeg?: string; url?: string; data?: ScanResult };
+      try {
+        msg = JSON.parse(s);
+      } catch {
+        return null; // one garbled line (e.g. a frame) is skipped; a missing result still falls back below
+      }
+      if (msg.type === "frame" && typeof msg.jpeg === "string" && msg.jpeg) {
+        const jpeg = msg.jpeg;
+        safe(() => handlers.onFrame?.(`data:image/jpeg;base64,${jpeg}`));
+      } else if (msg.type === "nav" && typeof msg.url === "string") {
+        const nav = msg.url;
+        safe(() => handlers.onNav?.(nav));
+      } else if (msg.type === "result" && msg.data && typeof msg.data === "object" && typeof msg.data.verdict === "string") {
+        return msg.data;
+      }
+      return null;
+    };
+
+    while (!result) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bumpIdle();
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while (!result && (nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        result = handleLine(line);
+      }
+    }
+    if (!result) {
+      buf += decoder.decode();
+      result = handleLine(buf); // a last line without a trailing newline
+    } else {
+      reader.cancel().catch(() => {});
+    }
+    if (!result) throw new Error("Stream ended without a result");
+    return result;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    safe(() => handlers.onFallback?.());
+    return scanUrl(url, location);
+  } finally {
+    clearTimeout(idle);
+    clearTimeout(overall);
+    signal?.removeEventListener("abort", stop);
+  }
+}
+
 export interface CallMeResponse {
   call_id?: string;
   status?: string;

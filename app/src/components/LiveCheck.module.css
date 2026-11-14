@@ -1,0 +1,185 @@
+/* Checking screen with the live sandbox view. Tokens match the app's new look. */
+.card {
+  --ink: #29234f;
+  --muted: #625e7d;
+  --purple: #514082;
+  --blue: #5da4d7;
+  --line: #d8dced;
+  --grad: linear-gradient(105deg, #5ca3d6 0%, #514082 100%);
+  --live: #c4221f; /* white on this is 5.7:1 */
+
+  background: #ffffff;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(41, 35, 79, 0.1), 0 2px 6px rgba(41, 35, 79, 0.06);
+  padding: 1.25rem 1rem 1.5rem;
+  margin: 0.5rem 0 1rem;
+  font: inherit;
+}
+
+.head { text-align: center; }
+
+.title {
+  color: var(--ink);
+  font-size: 1.6rem;
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
+}
+
+.sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--live);
+  color: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+}
+
+.dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #ffffff;
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.now {
+  text-align: center;
+  color: var(--muted);
+  font-size: 1.15rem;
+  margin: 0 0 1rem;
+}
+
+.host {
+  color: var(--purple);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+/* Phone-shaped frame around the sandbox screen. */
+.phone {
+  position: relative;
+  aspect-ratio: 390 / 844;
+  height: min(60vh, 640px);
+  max-width: 100%;
+  margin: 0 auto;
+  border: 8px solid var(--ink);
+  border-radius: 32px;
+  background: #f4f3fa;
+  overflow: hidden;
+  box-shadow: 0 12px 28px rgba(41, 35, 79, 0.18);
+}
+
+.screen {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #ffffff;
+}
+
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  height: 100%;
+  padding: 1rem;
+  text-align: center;
+  color: var(--ink);
+  background: linear-gradient(180deg, #f6f5fb 0%, #ebeef8 100%);
+}
+
+.placeholder p {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.spinner {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 6px solid var(--line);
+  border-top-color: var(--purple);
+  border-right-color: var(--blue);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 4-step progress line. */
+.progress { margin-top: 1.25rem; text-align: center; }
+
+.bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0 auto 0.75rem;
+  padding: 0;
+  max-width: 420px;
+}
+
+.bar li {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.bar li.done { background: var(--grad); }
+
+.bar li.current {
+  background: var(--grad);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.status {
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  border-radius: 8px;
+}
+
+.status:focus { outline: none; }
+.status:focus-visible { outline: 3px solid var(--purple); outline-offset: 4px; }
+
+.hint {
+  color: var(--muted);
+  font-size: 1rem;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot, .spinner, .bar li.current { animation: none; }
+  .bar li.current { opacity: 0.7; }
+}

@@ -6,10 +6,11 @@ import ResultView from "@/components/ResultView";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { clearProfile, loadProfile, saveProfile, type Profile } from "@/lib/profile";
 import type { OnboardingData } from "@/lib/onboarding";
-import { DEMO_MODE, scanUrl } from "@/lib/api";
+import LiveCheck, { createLiveFeed, type LiveFeed } from "@/components/LiveCheck";
+import { DEMO_MODE, scanUrlLive } from "@/lib/api";
 import type { ScanResult } from "@/lib/types";
 
-type Phase = { kind: "idle" } | { kind: "checking"; url: string } | { kind: "result"; result: ScanResult } | { kind: "error"; url: string; msg: string };
+type Phase = { kind: "idle" } | { kind: "checking"; url: string; feed: LiveFeed } | { kind: "result"; result: ScanResult } | { kind: "error"; url: string; msg: string };
 
 function getLocation(): Promise<[number, number] | null> {
   return new Promise((resolve) => {
@@ -30,12 +31,15 @@ export default function ScanPage() {
   // undefined = still reading this phone's saved profile; null = first visit, show onboarding.
   const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
   const statusRef = useRef<HTMLDivElement>(null);
+  // The scan in flight, so a new scan (or leaving the page) stops the old live stream.
+  const scanAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const saved = loadProfile();
     setProfile(saved);
     // Location stays off unless they chose to share it during onboarding.
     if (saved?.location) setShareLocation(true);
+    return () => scanAbort.current?.abort();
   }, []);
 
   function toggleLocation(on: boolean) {
@@ -58,15 +62,22 @@ export default function ScanPage() {
   async function check(raw: string) {
     const url = raw.trim();
     if (!url) return;
-    setPhase({ kind: "checking", url });
+    scanAbort.current?.abort();
+    const ctrl = new AbortController();
+    scanAbort.current = ctrl;
+    const feed = createLiveFeed(url);
+    setPhase({ kind: "checking", url, feed });
     window.scrollTo({ top: 0 });
     requestAnimationFrame(() => statusRef.current?.focus());
     const saved = profile?.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null;
     const loc = shareLocation ? (await getLocation()) ?? saved : null;
+    if (ctrl.signal.aborted) return;
     try {
-      const result = await scanUrl(url, loc);
+      const result = await scanUrlLive(url, loc, feed.handlers, ctrl.signal);
+      if (ctrl.signal.aborted) return;
       setPhase({ kind: "result", result });
     } catch {
+      if (ctrl.signal.aborted) return;
       setPhase({ kind: "error", url, msg: "We couldn't check this link right now. Please don't open it yet. Try again in a moment." });
     }
   }
@@ -77,13 +88,7 @@ export default function ScanPage() {
   }
 
   if (phase.kind === "checking") {
-    return (
-      <div className="progress" role="status" aria-live="polite" tabIndex={-1} ref={statusRef}>
-        <div className="spinner" aria-hidden="true" />
-        <p>Opening it safely on our server…</p>
-        <p className="hint" style={{ fontSize: "1rem", fontWeight: 400 }}>Nothing opens on your phone. This usually takes a few seconds.</p>
-      </div>
-    );
+    return <LiveCheck feed={phase.feed} statusRef={statusRef} />;
   }
 
   if (profile === undefined) return null;
