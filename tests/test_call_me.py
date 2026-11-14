@@ -13,6 +13,12 @@ lk = pytest.importorskip("livekit.api")   # the backend uses livekit-api (instal
 from api import main as api_main  # noqa: E402
 from api import routes_call  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _no_chert_texts(monkeypatch):
+    """By default no phone has texted the line (and never hit Chert from tests)."""
+    monkeypatch.setattr(routes_call, "recently_texted_last4", lambda: set())
+
 PHONE = "+14045550123"
 _real_sleep = asyncio.sleep
 ENV = {"SCANSAFE_DEMO_PHONE": PHONE, "CALL_ALLOWED_PHONES": "+14045550999",
@@ -222,3 +228,28 @@ def test_gives_up_when_call_ends(monkeypatch, done):
 def test_no_call_id_gives_up(monkeypatch):
     room = types.SimpleNamespace(metadata="")
     assert asyncio.run(ai.wait_for_outbound_answer(room, timeout=0.3)) is False
+
+
+
+def test_phone_that_texted_the_line_is_allowed(monkeypatch):
+    monkeypatch.setattr(routes_call, "recently_texted_last4", lambda: {"0123"})
+    monkeypatch.setattr(routes_call, "allowed_phones", lambda: set())
+    url, phone = routes_call.validate(routes_call.CallRequest(url="https://example.com", phone="+14045550123"))
+    assert phone == "+14045550123"
+    with pytest.raises(routes_call.HTTPException) as e:
+        routes_call.validate(routes_call.CallRequest(url="https://example.com", phone="+14045559999"))
+    assert e.value.status_code == 403 and "text ScanSafe first" in e.value.detail
+
+
+def test_recently_texted_reads_inbound_messages_from_last_day(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    items = [{"direction": "inbound", "masked_recipient": "•••9861", "created_at": (now - timedelta(hours=1)).isoformat()},
+             {"direction": "outbound", "masked_recipient": "•••1111", "created_at": now.isoformat()},
+             {"direction": "inbound", "masked_recipient": "•••2222", "created_at": (now - timedelta(days=2)).isoformat()}]
+    monkeypatch.undo()   # use the real function
+    routes_call._texted_cache.update(at=0.0, last4=set())
+    monkeypatch.setattr(routes_call.httpx, "get",
+                        lambda *a, **k: httpx.Response(200, json={"data": {"items": items}},
+                                                       request=httpx.Request("GET", "https://x")))
+    assert routes_call.recently_texted_last4() == {"9861"}

@@ -22,7 +22,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -52,6 +52,48 @@ class CallRequest(BaseModel):
     phone: str
     lat: Optional[float] = None
     lng: Optional[float] = None
+
+
+CHERT_MESSAGES_API = os.getenv("CHERT_API_BASE", "https://app.trychert.com/api/v1").rstrip("/")
+TEXTED_WINDOW = timedelta(hours=24)       # Chert's trial can only reach phones that texted the line
+_texted_cache: dict = {"at": 0.0, "last4": set()}
+_texted_lock = threading.Lock()
+
+
+def recently_texted_last4() -> set[str]:
+    """Last 4 digits of phones that texted the ScanSafe line in the last 24 h.
+
+    Texting the line is the user's consent to be called, and it's also what Chert's trial needs
+    before it can reach that phone. Chert only shows senders masked (e.g. "•••9861"), so we match
+    on the last 4 digits; the 30 s call rate limit keeps the weaker match from being abused.
+    Cached 30 s. Never raises (an error just means no extra numbers are allowed)."""
+    with _texted_lock:
+        if time.monotonic() - _texted_cache["at"] < 30:
+            return set(_texted_cache["last4"])
+    last4: set[str] = set()
+    try:
+        r = httpx.get(f"{CHERT_MESSAGES_API}/shared-messages", params={"limit": 100},
+                      headers=_chert_headers(), timeout=8)
+        r.raise_for_status()
+        items = (r.json().get("data") or {}).get("items") or []
+        cutoff = datetime.now(timezone.utc) - TEXTED_WINDOW
+        for m in items:
+            if m.get("direction") != "inbound":
+                continue
+            try:
+                when = datetime.fromisoformat(str(m.get("created_at")))
+            except ValueError:
+                continue
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            digits = re.sub(r"\D", "", str(m.get("masked_recipient") or ""))
+            if when >= cutoff and len(digits) >= 4:
+                last4.add(digits[-4:])
+    except Exception as e:  # noqa: BLE001
+        log.warning("couldn't read recent texts from Chert: %s", type(e).__name__)
+    with _texted_lock:
+        _texted_cache.update(at=time.monotonic(), last4=last4)
+    return last4
 
 
 def allowed_phones() -> set[str]:
@@ -89,8 +131,9 @@ def validate(req: CallRequest) -> tuple[str, str]:
         raise HTTPException(status_code=400, detail="only web links (http/https) can be walked through on a call")
     if not PHONE_RE.match(phone):
         raise HTTPException(status_code=400, detail="phone must be in international format, e.g. +14045550123")
-    if phone not in allowed_phones():
-        raise HTTPException(status_code=403, detail="this number isn't set up for ScanSafe calls")
+    if phone not in allowed_phones() and phone[-4:] not in recently_texted_last4():
+        raise HTTPException(status_code=403, detail="text ScanSafe first: send any message to +1 650-444-4331 "
+                                                    "from this phone, then try again")
     missing = [k for k in ("LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET", "CHERT_API_KEY",
                            "CHERT_PROJECT_ID", "CHERT_LINE_ID") if not os.getenv(k)]
     if missing:
