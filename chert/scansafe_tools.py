@@ -259,8 +259,11 @@ def operate_stream(url: str, plate: str, hours: int, on_frame: Callable[[bytes],
                    on_step: Optional[Callable[[str, str], Any]] = None,
                    should_stop: Optional[Callable[[], bool]] = None,
                    *, client: Optional[httpx.Client] = None,
-                   timeout: float = OPERATE_TIMEOUT_S) -> Optional[dict]:
+                   timeout: float = OPERATE_TIMEOUT_S, payload: Optional[dict] = None,
+                   statuses: tuple = ("paid", "waiting", "failed")) -> Optional[dict]:
     """POST {SANDBOX_URL}/operate/stream {url, plate, hours} and watch the Dogwood app being used.
+    (``payload``/``statuses``: another adapter's request body and result statuses, see
+    parkmobile_stream.)
 
     Blocking (run it with asyncio.to_thread). Same NDJSON as the scan stream:
       {"type": "frame", "jpeg": ...}          -> on_frame(jpeg_bytes)
@@ -287,7 +290,8 @@ def operate_stream(url: str, plate: str, hours: int, on_frame: Callable[[bytes],
     own = client is None
     c = client or httpx.Client()
     try:
-        with c.stream("POST", endpoint, json={"url": url, "plate": plate, "hours": int(hours)},
+        body = payload if payload is not None else {"url": url, "plate": plate, "hours": int(hours)}
+        with c.stream("POST", endpoint, json=body,
                       headers={"Authorization": f"Bearer {token}"},
                       timeout=httpx.Timeout(timeout, connect=STREAM_CONNECT_S)) as resp:
             if resp.status_code != 200:
@@ -336,12 +340,35 @@ def operate_stream(url: str, plate: str, hours: int, on_frame: Callable[[bytes],
             c.close()
     if stopped():
         return None
-    if isinstance(result, dict) and result.get("status") in ("paid", "waiting", "failed"):
+    if isinstance(result, dict) and result.get("status") in statuses:
         return result
     if result is not None:
         why = "unexpected result shape"
-    log.info("dogwood operate stream: %s", why)
+    log.info("operate stream (%s): %s", (payload or {}).get("adapter") or "dogwood", why)
     return operate_failed(why)
+
+
+# --- ParkMobile (adapter "parkmobile"): the REAL official web app, stops before payment --------
+
+PARKMOBILE_TIMEOUT_S = 140.0   # sandbox caps the run at 120 s
+PARKMOBILE_STATUSES = ("ready_to_pay", "needs_sign_in", "robot_check", "failed")
+
+
+def parkmobile_stream(url: str, zone: Optional[str], plate: str, minutes: int,
+                      on_frame: Callable[[bytes], Any],
+                      on_nav: Optional[Callable[[str], Any]] = None,
+                      on_step: Optional[Callable[[str, str], Any]] = None,
+                      should_stop: Optional[Callable[[], bool]] = None,
+                      *, client: Optional[httpx.Client] = None,
+                      timeout: float = PARKMOBILE_TIMEOUT_S) -> Optional[dict]:
+    """POST {SANDBOX_URL}/operate/stream {"adapter": "parkmobile", url, zone, plate, minutes}: the
+    sandbox fills in the real ParkMobile web app and stops at the first sign-in / contact-details /
+    payment / price screen. Returns its result ({"status": "ready_to_pay" | "needs_sign_in" |
+    "robot_check" | "failed", "price_text"?, "zone_name"?, "stopped_at", ...}), None if
+    ``should_stop()`` turned True, operate_failed(why) on any failure. Never raises, never pays."""
+    body = {"adapter": "parkmobile", "url": url, "zone": zone, "plate": plate, "minutes": int(minutes)}
+    return operate_stream(url, plate, 0, on_frame, on_nav, on_step, should_stop, client=client,
+                          timeout=timeout, payload=body, statuses=PARKMOBILE_STATUSES)
 
 
 # --- Speech ------------------------------------------------------------------------------------

@@ -2,6 +2,9 @@
 
 Usage (inside the container): python run_scan.py <url> [--stream]
                               python run_scan.py --operate <url> <plate> <hours>
+                              python run_scan.py --operate-parkmobile <url> <zone|-> <plate> <minutes>
+--operate-parkmobile drives the REAL ParkMobile web app (app.parkmobile.io) and stops at the first
+sign-in / contact-details / payment / price screen; it never pays (see operate.py).
 --operate is operator mode (operate.py), a separate, fenced path that is NOT a scan: it drives
 the made-up official Dogwood Parking app on our demo site (Install, Open, type the plate, tap
 the hours, tap Pay, watch for the receipt), streaming frames like --stream. Scans never type.
@@ -41,6 +44,11 @@ from operate import (PHASE_JS, STEPS_FROM_APP, clean_plate, hours_selector, oper
                      operate_status, operate_url_allowed, page_phase, plan_steps, step_text,
                      valid_hours)
 from operate import SEL as OP_SEL
+from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_SEL, PM_STOPPED_AT, check_parkmobile_request,
+                     clean_zone, parkmobile_request_allowed, parkmobile_url_allowed, pm_area_from_url,
+                     pm_click_refused, pm_duration_patterns, pm_minutes, pm_price_text,
+                     pm_result_selector, pm_screen, pm_status, pm_step_text, pm_type_refused,
+                     pm_type_value_ok, pm_zone_info)
 
 MAX_TEXT = 4000            # page_text characters
 MAX_HIDDEN = 1500          # hidden_text characters
@@ -731,13 +739,13 @@ CONTEXT_OPTS = dict(accept_downloads=False, java_script_enabled=True, service_wo
                     is_mobile=True, has_touch=True)
 
 
-def _launch(p, on_route):
+def _launch(p, on_route, **extra_opts):
     """Browser + context with every request (popups and iframes too) going through on_route."""
     browser = p.chromium.launch(
         chromium_sandbox=os.environ.get("CHROMIUM_SANDBOX") == "1",
         executable_path=os.environ.get("CHROMIUM_PATH") or None,   # local testing only
         args=BROWSER_ARGS)
-    context = browser.new_context(**CONTEXT_OPTS)
+    context = browser.new_context(**{**CONTEXT_OPTS, **extra_opts})
     context.route("**/*", on_route)   # context-wide: also covers popups and iframes
     try:
         # A routed WebSocket never reaches the server unless the handler calls
@@ -1166,10 +1174,294 @@ def operate(url: str, plate: str, hours: int | None) -> dict:
     return out
 
 
-USAGE = "usage: run_scan.py <url> [--stream] | run_scan.py --operate <url> <plate> <hours>"
+# ---------- ParkMobile adapter (run_scan.py --operate-parkmobile): the REAL site, see operate.py ----
+#
+# open -> type the zone -> pick it -> "Park here" -> then, screen by screen, duration / plate /
+# Continue until a stop screen: sign-in or contact details (needs_sign_in), payment or price review
+# (ready_to_pay), robot check (robot_check). Every click goes through pm_click (never pay-like
+# labels) and every keystroke through pm_type (only the zone or plate, never card/email/phone
+# fields). It never pays and never accepts terms.
+
+PM_MAX_REQUESTS = 500
+PM_STEP_MS = 15000
+PM_ROUNDS = 6                # screens looked at after "Park here"
+PM_SETTLE_MS = 2500
+PM_MAX_FRAMES = 500
+# A phone browser, not "HeadlessChrome": same Chromium, ordinary mobile Chrome user agent.
+PM_USER_AGENT = ("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) "
+                 "Chrome/140.0.0.0 Mobile Safari/537.36")
+PM_LABEL_JS = r"""
+el => [el.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('title') || '',
+       el.getAttribute('value') || '', el.getAttribute('data-testid') || ''].join(' ').slice(0, 300)
+"""
+PM_ATTRS_JS = r"""
+el => ({type: (el.getAttribute('type') || '').toLowerCase(), name: el.getAttribute('name') || '',
+        id: el.id || '', autocomplete: (el.getAttribute('autocomplete') || '').toLowerCase(),
+        aria: el.getAttribute('aria-label') || '', placeholder: el.getAttribute('placeholder') || '',
+        testid: el.getAttribute('data-testid') || '',
+        label: ((el.labels && el.labels[0] && el.labels[0].innerText) || '').slice(0, 60)})
+"""
+
+
+class GuardRefused(OperateError):
+    """pm_click / pm_type refused an action: the run stops there."""
+
+
+def pm_click(locator, refused: list, timeout: int = PM_STEP_MS) -> str:
+    """Click ``locator`` unless its label looks like pay / purchase / checkout / confirm / start
+    parking / buy / submit / agree / sign in. Refusals are recorded and stop the run."""
+    label = locator.evaluate(PM_LABEL_JS, timeout=timeout)
+    if pm_click_refused(label):
+        refused.append({"action": "click", "label": clip_label(label)})
+        raise GuardRefused(f"refused to click {clip_label(label)!r}")
+    locator.click(timeout=timeout)
+    return label
+
+
+def pm_type(locator, value: str, zone: str | None, plate: str | None, refused: list,
+            timeout: int = PM_STEP_MS) -> None:
+    """Type ``value`` (only ever the checked zone or plate) unless the field looks like a card,
+    password, email, phone or other personal field."""
+    attrs = locator.evaluate(PM_ATTRS_JS, timeout=timeout)
+    if not pm_type_value_ok(value, zone, plate) or pm_type_refused(attrs):
+        refused.append({"action": "type", "field": clip_label(" ".join(
+            str(attrs.get(k) or "") for k in ("type", "name", "id", "aria")) if isinstance(attrs, dict) else "")})
+        raise GuardRefused("refused to type into that field")
+    locator.click(timeout=timeout)
+    locator.fill("", timeout=timeout)
+    locator.press_sequentially(value, delay=TYPE_DELAY_MS, timeout=timeout)
+
+
+def _pm_pick_duration(page, minutes: int, refused: list) -> bool:
+    """Click the first visible button/option whose text says ``minutes`` (guarded). False if none."""
+    for pat in pm_duration_patterns(minutes):
+        loc = page.locator("button:visible, [role=option]:visible, [role=radio]:visible, "
+                           "label:visible").filter(has_text=pat)
+        if loc.count():
+            pm_click(loc.first, refused)
+            return True
+    return False
+
+
+def _pm_continue(page, refused: list) -> bool:
+    loc = page.get_by_role("button", name=re.compile(r"^\s*(continue|next)\s*$", re.I)).filter(visible=True)
+    if not loc.count():
+        return False
+    pm_click(loc.first, refused)
+    return True
+
+
+def _pm_plate_box(page):
+    """The visible plate / licence box, if it passes pm_type_refused; else None."""
+    for box in page.locator("input:visible").all()[:20]:
+        attrs = box.evaluate(PM_ATTRS_JS)
+        blob = " ".join(str(v) for v in attrs.values()) if isinstance(attrs, dict) else ""
+        if re.search(r"plate|licen[cs]e|vehicle", blob, re.I) and not pm_type_refused(attrs):
+            return box
+    return None
+
+
+PM_STOP_SCREENS = ("robot_check", "sign_in", "payment", "review", "unsupported", "space_number")
+
+
+def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | None) -> dict:
+    t0 = time.monotonic()
+    out = {"mode": "operate", "adapter": "parkmobile", "url": url, "final_url": None,
+           "zone": None, "plate": None, "minutes": None, "status": "failed", "paid": False,
+           "stopped_at": None, "price_text": None, "zone_name": None, "operator": None,
+           "steps": [], "refused": [], "error": None, "blocked_requests": [], "screenshots": [],
+           "timings": {}}
+    ok, why = check_parkmobile_request(url, zone, plate, minutes=minutes)
+    if not ok:
+        out["error"] = f"blocked: {why}"
+        out["timings"]["total_ms"] = _now_ms(t0)
+        return out
+    z, clean, mins = clean_zone(zone), clean_plate(plate), pm_minutes(minutes=minutes)
+    out["zone"], out["plate"], out["minutes"] = z, clean, mins
+    start = url if pm_area_from_url(url) else PM_ENTRY_URL     # the v2 search page otherwise
+    guard = CachingGuard()
+    ok, why = guard.check(start)
+    if not ok:
+        out["error"] = f"blocked: {why}"
+        out["timings"]["total_ms"] = _now_ms(t0)
+        return out
+    counters = {"requests": 0}
+    done: list[str] = out["steps"]
+    refused: list = out["refused"]
+    screen = "unknown"
+
+    def block(route, req_url: str, why: str, stay: bool) -> None:
+        if len(out["blocked_requests"]) < MAX_BLOCKED:
+            out["blocked_requests"].append({"url": req_url.split("?", 1)[0][:120], "reason": why,
+                                            "type": route.request.resource_type})
+        if stay:
+            route.fulfill(status=204, body="")
+        else:
+            route.abort("blockedbyclient")
+
+    def on_route(route) -> None:
+        req = route.request
+        counters["requests"] += 1
+        if counters["requests"] > PM_MAX_REQUESTS:
+            return block(route, req.url, "request budget exceeded", stay=False)
+        if req.url.startswith(("data:", "blob:")):
+            return route.continue_()
+        try:
+            top_nav = req.is_navigation_request() and req.frame.parent_frame is None
+        except Exception:
+            top_nav = False
+        allowed, why = parkmobile_request_allowed(req.url, top_nav)
+        if allowed:
+            allowed, why = guard.check(req.url)
+        if not allowed:
+            return block(route, req.url, why, stay=top_nav)
+        route.continue_()
+
+    def say_step(name: str) -> None:
+        _emit({"type": "step", "text": pm_step_text(name, z or out["zone"] or "", clean, mins),
+               "step": name})
+
+    def mark(name: str) -> None:
+        done.append(name)
+        out["timings"][f"{name}_ms"] = _now_ms(t0)
+
+    def look(page) -> tuple[str, dict]:
+        try:
+            facts = page.evaluate(PM_FACTS_JS)
+        except Exception:
+            return "unknown", {}
+        robot = detect_bot_check(page_state(page))["detected"]
+        return pm_screen(facts, robot), facts
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser, context = _launch(p, on_route, user_agent=PM_USER_AGENT, locale="en-US")
+        page = context.new_page()
+        out["timings"]["browser_ready_ms"] = _now_ms(t0)
+        start_screencast(context, page, t0, {"gap": STREAM_MIN_GAP_S, "max": PM_MAX_FRAMES})
+        last_nav = {"url": ""}
+
+        def on_nav(frame) -> None:
+            if frame == page.main_frame and frame.url not in ("about:blank", last_nav["url"]):
+                last_nav["url"] = frame.url
+                _emit({"type": "nav", "url": frame.url[:300]})
+        page.on("framenavigated", on_nav)
+        page.on("download", lambda d: d.cancel())
+        page.on("popup", lambda pg: pg.close())
+
+        try:
+            say_step("open")
+            page.goto(start, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
+            mark("open")
+            page.wait_for_selector(f'{PM_SEL["search"]}, {PM_SEL["continue"]}', state="attached",
+                                   timeout=PM_STEP_MS)
+            screen, facts = look(page)
+            if screen == "search":
+                if z is None:
+                    raise OperateError("no zone number to search for")
+                page.wait_for_timeout(600)
+                say_step("zone")
+                pm_type(page.locator(PM_SEL["search"]).first, z, z, clean, refused)
+                mark("zone")
+                result = page.locator(pm_result_selector(z)).first
+                result.wait_for(state="attached", timeout=PM_STEP_MS)
+                page.wait_for_timeout(500)
+                say_step("pick")
+                pm_click(result, refused)
+                mark("pick")
+                page.wait_for_selector(PM_SEL["continue"], state="attached", timeout=PM_STEP_MS)
+                page.wait_for_timeout(800)
+                screen, facts = look(page)
+            if screen == "zone_details":
+                info = pm_zone_info(facts.get("lines"), z)
+                if z is not None and info["zone"] != z:
+                    raise OperateError("ParkMobile showed a different zone")
+                out.update({k: info[k] for k in ("zone", "zone_name", "operator")})
+                page.wait_for_timeout(1200)                       # caller sees the zone details
+                say_step("park_here")
+                pm_click(page.locator(PM_SEL["continue"]).first, refused)
+                mark("park_here")
+            for _ in range(PM_ROUNDS):
+                page.wait_for_timeout(PM_SETTLE_MS)
+                screen, facts = look(page)
+                if screen in PM_STOP_SCREENS:
+                    break
+                if screen == "duration" and "duration" not in done:
+                    if not _pm_pick_duration(page, mins, refused):
+                        raise OperateError("couldn't find that duration")
+                    say_step("duration")
+                    mark("duration")
+                elif screen == "plate" and "plate" not in done:
+                    box = _pm_plate_box(page)
+                    if box is None:
+                        raise OperateError("couldn't find the plate box")
+                    say_step("plate")
+                    pm_type(box, clean, z, clean, refused)
+                    mark("plate")
+                else:
+                    continue                                       # still loading: look again
+                page.wait_for_timeout(500)
+                _pm_continue(page, refused)
+            if screen in ("payment", "review"):
+                out["price_text"] = pm_price_text(facts.get("text"))
+                say_step("stop_pay")
+            elif screen == "sign_in":
+                say_step("stop_sign_in")
+            elif screen == "robot_check":
+                say_step("stop_robot")
+            out["stopped_at"] = PM_STOPPED_AT.get(screen, f"an unexpected ParkMobile screen ({screen})")
+            if screen not in PM_STOPPED_AT:
+                out["error"] = "couldn't reach the price or sign-in screen"
+            page.wait_for_timeout(1200)                           # last screen reaches the stream
+        except GuardRefused as e:
+            out["error"], out["stopped_at"] = str(e), "a button or field the guard refused"
+            screen = "failed"
+        except OperateError as e:
+            out["error"] = str(e)
+            screen = "failed"
+        except Exception as e:
+            out["error"] = str(e).splitlines()[0][:300] if str(e) else type(e).__name__
+            screen, _ = look(page)
+            if screen not in ("robot_check",):
+                screen = "failed"
+        out["final_url"] = page.url
+        try:
+            shot = page.screenshot(full_page=False, type="jpeg", quality=SHOT_QUALITY, timeout=5000)
+            out["screenshots"].append("data:image/jpeg;base64," + base64.b64encode(shot).decode())
+        except Exception:
+            pass
+        browser.close()
+    out["status"] = pm_status(screen)
+    if out["status"] == "robot_check":
+        out["stopped_at"] = PM_STOPPED_AT["robot_check"]
+    out["stopped_at"] = out["stopped_at"] or "an error before the price or sign-in screen"
+    if out["status"] == "failed":
+        out["error"] = out["error"] or out["stopped_at"]
+    out["timings"]["total_ms"] = _now_ms(t0)
+    return out
+
+
+USAGE = ("usage: run_scan.py <url> [--stream] | run_scan.py --operate <url> <plate> <hours>"
+         " | run_scan.py --operate-parkmobile <url> <zone|-> <plate> <minutes>")
 
 
 def main(args: list[str]) -> int:
+    if args[:1] == ["--operate-parkmobile"]:
+        if len(args) != 5:
+            _emit_line(json.dumps({"error": USAGE}))
+            return 1
+        try:
+            minutes = int(args[4])
+        except ValueError:
+            minutes = None
+        try:
+            result = operate_parkmobile(args[1], None if args[2] == "-" else args[2], args[3], minutes)
+        except Exception:
+            _emit_line("null")
+            raise
+        _emit_line(json.dumps(result))
+        return 0
     if args[:1] == ["--operate"]:
         if len(args) != 4:
             _emit_line(json.dumps({"error": USAGE}))

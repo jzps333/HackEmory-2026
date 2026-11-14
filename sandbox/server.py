@@ -6,6 +6,8 @@ This server holds no API keys except SANDBOX_TOKEN, which only lets the backend 
 POST /operate/stream {"url", "plate", "hours"} is operator mode (see operate.py), a separate path
 from scanning: it ONLY accepts https://scansafe-demo-sites.vercel.app/dogwood/... (else 400) and
 streams the container's browser while it drives the made-up official Dogwood Parking app.
+With {"adapter": "parkmobile", "url", "zone", "plate", "hours"|"minutes"} it instead fills in the
+REAL ParkMobile web app (https://app.parkmobile.io only) and stops before payment.
 
 Run on the sandbox VM:
     pip install fastapi uvicorn
@@ -26,7 +28,8 @@ from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from netguard import url_allowed  # noqa: E402  (pure module, no Playwright)
-from operate import check_operate_request, clean_plate  # noqa: E402  (pure module too)
+from operate import (check_operate_request, check_parkmobile_request, clean_plate,  # noqa: E402
+                     clean_zone, pm_minutes)
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
@@ -42,6 +45,7 @@ MAX_OUTPUT = 3_000_000   # bytes of container stdout we accept
 MAX_STREAM_OUTPUT = 40_000_000   # /run/stream: frames included
 OPERATE_TIMEOUT_S = 180          # /operate/stream: steps + up to 120 s waiting for approval
 MAX_OPERATE_OUTPUT = 80_000_000
+PARKMOBILE_TIMEOUT_S = 120       # /operate/stream adapter "parkmobile": no approval wait
 
 app = FastAPI(title="ScanSafe sandbox")
 
@@ -54,6 +58,9 @@ class OperateRequest(BaseModel):
     url: str
     plate: Any = None      # checked by operate.check_operate_request (400, not 422)
     hours: Any = None
+    adapter: Any = None    # None = Dogwood (unchanged); "parkmobile" = the real ParkMobile web app
+    zone: Any = None       # parkmobile only: 3-7 digits
+    minutes: Any = None    # parkmobile only: instead of hours
 
 
 @app.get("/health")
@@ -103,6 +110,10 @@ def operate_stream(req: OperateRequest, authorization: str = Header(default=""))
     ScanSafe), then watches up to 120 s for the receipt; last line {"type":"result","data":{...}}
     with {"mode":"operate","status":"paid"|"waiting"|"failed","paid",...}."""
     _check_token(authorization)
+    if req.adapter == "parkmobile":
+        return _operate_parkmobile(req)
+    if req.adapter is not None:
+        raise HTTPException(status_code=400, detail="unknown adapter")
     ok, reason = check_operate_request(req.url, req.plate, req.hours)
     if not ok:
         raise HTTPException(status_code=400, detail=reason)
@@ -112,6 +123,24 @@ def operate_stream(req: OperateRequest, authorization: str = Header(default=""))
     name = f"scansafe-op-{uuid.uuid4().hex[:12]}"
     cmd = _container_cmd(name, "--operate", req.url, clean_plate(req.plate), str(int(req.hours)))
     return _stream_container(name, cmd, OPERATE_TIMEOUT_S, MAX_OPERATE_OUTPUT, "operate")
+
+
+def _operate_parkmobile(req: OperateRequest) -> StreamingResponse:
+    """adapter "parkmobile" (operate.py): the REAL https://app.parkmobile.io web app. Types the
+    zone and plate, picks the duration, and stops at the first sign-in / contact-details /
+    payment / price-review / robot-check screen. Never pays. Last line {"type":"result","data":
+    {"mode":"operate","adapter":"parkmobile","status":"ready_to_pay"|"needs_sign_in"|
+    "robot_check"|"failed","price_text"?,"zone_name"?,"stopped_at",...}}."""
+    ok, reason = check_parkmobile_request(req.url, req.zone, req.plate, req.hours, req.minutes)
+    if not ok:
+        raise HTTPException(status_code=400, detail=reason)
+    ok, reason = url_allowed(req.url)          # the usual network guard on top
+    if not ok:
+        raise HTTPException(status_code=400, detail=f"url not allowed: {reason}")
+    name = f"scansafe-pm-{uuid.uuid4().hex[:12]}"
+    cmd = _container_cmd(name, "--operate-parkmobile", req.url, clean_zone(req.zone) or "-",
+                         clean_plate(req.plate), str(pm_minutes(req.hours, req.minutes)))
+    return _stream_container(name, cmd, PARKMOBILE_TIMEOUT_S, MAX_OPERATE_OUTPUT, "parkmobile")
 
 
 def _stream_container(name: str, cmd: list[str], timeout_s: float, max_output: int,

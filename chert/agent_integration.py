@@ -41,10 +41,11 @@ from livekit import rtc
 from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunContext, cli,
                             function_tool, room_io)
 
-from chert import imessage, meter_pay, voice_pay
+from chert import imessage, meter_pay, parkmobile, voice_pay
 from chert.qr_reader import read_qr
 from chert.scansafe_tools import (CodeDebouncer, dogwood_app_session, operate_stream,
-                                  sandbox_configured, scan_url_stream, speech_for)
+                                  parkmobile_stream, sandbox_configured, scan_url_stream,
+                                  speech_for)
 
 log = logging.getLogger("scansafe.agent")
 
@@ -387,11 +388,30 @@ class ScanSafeCall:
             )
         return await self._live_view(url, hours, amount, run)
 
-    async def _live_view(self, url: str, hours: int, amount: float, run) -> Optional[dict]:
+    async def parkmobile_live(self, job: dict) -> Optional[dict]:
+        """The REAL ParkMobile web app (adapter "parkmobile"): the sandbox types the zone and
+        plate, picks the duration and stops at the first sign-in / payment / price screen; its
+        screen plays live on our video with the current step. Never pays. None if stopped."""
+        def run(showing, stop) -> Optional[dict]:
+            return parkmobile_stream(
+                job["url"], job.get("zone"), job["plate"], job["minutes"],
+                on_frame=lambda jpeg: showing() and self.video.set_live_frame(jpeg),
+                on_nav=lambda u: showing() and self.video.note_nav(u),
+                on_step=lambda text, _id: showing() and self.video.note_step(text),
+                should_stop=stop,
+            )
+        return await self._live_view(job["url"], 0, 0.0, run, meter=False)
+
+    async def _live_view(self, url: str, hours: int, amount: float, run,
+                         meter: bool = True) -> Optional[dict]:
         """One live view on our video: run(showing, should_stop) streams in a worker thread.
-        Frames only land while this view is still the one on screen."""
+        Frames only land while this view is still the one on screen. ``meter=False``: a plain
+        live view (no hours/SOL banner), left on its last frame when done."""
         gen, cancel = self.generation, threading.Event()
-        self.video.begin_meter_view(url, hours, amount)
+        if meter:
+            self.video.begin_meter_view(url, hours, amount)
+        else:
+            self.video.begin_check(url)
 
         def showing() -> bool:
             return (gen == self.generation and not cancel.is_set()
@@ -412,7 +432,7 @@ class ScanSafeCall:
             raise
         if result is None or cancel.is_set() or gen != self.generation:
             return None
-        if self.video.state == "checking" and self.video.code == url:
+        if meter and self.video.state == "checking" and self.video.code == url:
             self.video.set_meter_view(result, hours, amount)
         return result
 
@@ -839,6 +859,24 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
     await flow.run()
 
 
+async def run_parkmobile_call(call: ScanSafeCall, job: dict) -> Optional[dict]:
+    """ParkMobile call (chert/parkmobile.py), once FaceTime is up: say what's about to happen,
+    show the sandbox filling in the official ParkMobile site live, then read back what it shows
+    and that it stopped before payment. The agent never pays and never offers to on real sites."""
+    call.debouncer.should_handle(job["scan_url"])     # the camera loop won't repeat it
+    greet = asyncio.create_task(call.say(parkmobile.greeting(job)))
+    await asyncio.sleep(0)                            # let it take the speech lock
+    live = asyncio.create_task(call.parkmobile_live(job))
+    await greet
+    call.greeted.set()
+    result = await live
+    if result is None:                                # the caller said stop
+        return None
+    log.info("parkmobile: status=%s stopped_at=%s", result.get("status"), result.get("stopped_at"))
+    await call.say(parkmobile.speech(result, job))
+    return result
+
+
 def attach_voice_pay(call: ScanSafeCall, meter: dict) -> Optional["voice_pay.VoicePay"]:
     """Voice-confirmed payment for this meter call, if the agent has AGENT_INTERNAL_KEY (the API
     refuses intents without it). The consent line goes on our video while a payment waits."""
@@ -867,11 +905,23 @@ def wire_transcripts(session: AgentSession, heard: "voice_pay.Heard") -> None:
     session.on("user_state_changed", _user_state)
 
 
-def agent_for(call: ScanSafeCall, meter: Optional[dict]) -> "ScanSafeAgent":
-    """Meter calls get the payment tools only when voice payments are configured."""
+def agent_for(call: ScanSafeCall, meter: Optional[dict],
+              pm_job: Optional[dict] = None) -> "ScanSafeAgent":
+    """Meter calls get the payment tools only when voice payments are configured. ParkMobile
+    calls (real site) never get payment tools."""
     if meter and voice_pay.VoicePay.enabled():
         return MeterPayAgent(call, voice_pay.INSTRUCTIONS)
+    if pm_job and not meter:
+        return ScanSafeAgent(call, parkmobile.INSTRUCTIONS)
     return ScanSafeAgent(call, meter_pay.INSTRUCTIONS if meter else "")
+
+
+def parkmobile_call_job(out: Optional[dict], meter: Optional[dict]) -> Optional[dict]:
+    """The ParkMobile job for an outbound call whose link is an app.parkmobile.io zone link (and
+    the sandbox is configured); None for every other call."""
+    if meter or not out or not sandbox_configured():
+        return None
+    return parkmobile.parkmobile_job(out)
 
 
 # 2-vCPU box: video encode + QR decode push CPU past the 0.7 default during a call, which marks
@@ -886,6 +936,7 @@ async def entrypoint(ctx: JobContext) -> None:
     meter = meter_pay.meter_job(out)          # a parking meter payment call (from /call-me)
     # Linked Dogwood account? Ask now, so the answer is in before the person picks up.
     dogwood = asyncio.create_task(fetch_dogwood_session(meter)) if meter else None
+    pm_job = parkmobile_call_job(out, meter)  # real ParkMobile site: fill in, stop before paying
     session = AgentSession(llm=make_model())
     call = ScanSafeCall(session, ctx.room)
     wire_transcripts(session, call.heard)     # before start, so the first words are kept too
@@ -905,7 +956,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
     await session.start(
         room=ctx.room,
-        agent=agent_for(call, meter),
+        agent=agent_for(call, meter, pm_job),
         # Also lets Gemini see the caller (it implements push_video). TODO(verify): RoomIO only
         # forwards camera/screenshare-source tracks; if Chert's bridge track has another source,
         # Gemini won't see video, but our QRWatcher still reads every video track.
@@ -930,6 +981,9 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         if meter:
             await run_meter_call(call, meter, ctx.room, dogwood)
+            return
+        if pm_job:
+            await run_parkmobile_call(call, pm_job)
             return
         check = asyncio.create_task(call.check_now(out["scan_url"]))   # live view starts now
         await call.converse(OUTBOUND_HELLO)  # takes the speech lock first, so it's said first
