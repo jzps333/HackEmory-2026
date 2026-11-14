@@ -16,9 +16,9 @@ from typing import Any, Callable
 
 log = logging.getLogger("scansafe.impact")
 
-DEFAULT_LOSS_PER_SCAM_USD = 380
-EXPLANATION = ("38% of 2024 fraud reports involved a loss and the median loss for scams that began with "
-               "a text was $1,000, so each blocked scam avoids about $380 on average (estimate).")
+DEFAULT_LOSS_PER_SCAM_USD = 110
+EXPLANATION = ("In 2024, 11% of fraud reports about scams that began with a text involved a loss, and the "
+               "median loss was $1,000, so each blocked scam avoids about $110 on average (estimate).").")
 SOURCES = [
     "https://www.ftc.gov/news-events/news/press-releases/2025/03/new-ftc-data-show-big-jump-reported-losses-fraud-125-billion-2024",
     "https://www.ftc.gov/news-events/news/press-releases/2025/04/new-ftc-data-show-top-text-message-scams-2024-overall-losses-text-scams-hit-470-million",
@@ -34,7 +34,7 @@ def _whole(x: float) -> int | float:
 
 
 def loss_per_scam_usd() -> int | float:
-    """IMPACT_LOSS_PER_SCAM_USD if it is a finite number >= 0, else the default (380)."""
+    """IMPACT_LOSS_PER_SCAM_USD if it is a finite number >= 0, else the default (110)."""
     raw = os.getenv("IMPACT_LOSS_PER_SCAM_USD", "").strip()
     if not raw:
         return DEFAULT_LOSS_PER_SCAM_USD
@@ -51,9 +51,9 @@ def loss_per_scam_usd() -> int | float:
 def est_method(loss: int | float) -> dict:
     if loss == DEFAULT_LOSS_PER_SCAM_USD:
         explanation = EXPLANATION
-    else:   # the operator overrode the figure, so the $380 sentence would be wrong
+    else:   # the operator overrode the figure, so the $110 sentence would be wrong
         explanation = (f"Each blocked scam is counted as avoiding about ${loss:,} on average (estimate set by "
-                       "the operator). For reference, 38% of 2024 fraud reports involved a loss and the median "
+                       "the operator). For reference, 11% of 2024 text-scam reports involved a loss and the median "
                        "loss for scams that began with a text was $1,000.")
     return {"loss_per_scam_usd": loss, "explanation": explanation, "sources": list(SOURCES)}
 
