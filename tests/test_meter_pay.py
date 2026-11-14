@@ -761,6 +761,20 @@ def test_paid_state_renders_green_banner():
     assert v.state == "idle" and v.meter is None
 
 
+def test_paid_while_app_still_live_keeps_its_latest_frame():
+    """Paid before the Dogwood run finished: the Paid screen shows the app's latest live frame
+    (its receipt on the way), not the blank tick card."""
+    v = make_video()
+    v.begin_meter_view(METER_URL + "?hours=2", 2, 0.02)
+    assert v.set_live_frame(jpeg())
+    frame = v.live[0]
+    v.set_paid(2, 0.02)
+    assert v.state == "paid" and v.shot is frame and v.live is None
+    out = v._render(time.monotonic())
+    assert pixel(out, 5, 5) == status_video.COLORS["paid"]
+    assert pixel(out, v.W // 2, 640 - 100) != status_video.COLORS["paid"]   # a picture, not the tick card
+
+
 def test_ordinary_checks_do_not_show_meter_info():
     v = make_video()
     v.begin_meter_view(METER_URL, 1, 0.01)

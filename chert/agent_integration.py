@@ -70,8 +70,10 @@ How you talk:
 - Keep each turn to two or three sentences.
 
 What you do:
-- Greet the caller and ask them to hold the QR code up to the camera, steady, about 20
-  centimeters away. That's about 8 inches, or a hand's length. Good light helps.
+- Talk naturally, like a helpful person on the phone. Greet the caller and ask how you can help.
+  Answer their questions about QR codes, scams, links, payments and how ScanSafe works.
+- When they want a code checked, invite them to hold it up to the camera. Only give tips (closer,
+  steadier, about a hand's length away, better light, less glare) if a code can't be read.
 - The app reads the code for you and tells you the result. When you get a result, say it
   exactly as given. Don't add guesses about the website.
 - If the caller says they are holding a code up and nothing has happened, call the
@@ -94,18 +96,26 @@ Safety rules (always):
   on the page picture.
 """
 
-GREETING = ("Hi, this is ScanSafe. I can check a QR code for you before you pay. "
-            "Please hold the code up to your camera, nice and steady, about a hand's length away.")
 CHECKING = "I can see a code. Give me a moment while I check it."
-GREETING_SEEING = "Hi, this is ScanSafe. I can already see a code. Give me a moment while I check it."
 SPEECH_TIMEOUT_S = 20.0
-OUTBOUND_GREETING = ("Hi, this is ScanSafe. You just scanned a code in our app. I'm opening it on "
-                     "our computer now, so you can watch it here.")
+# Greetings are said in the model's own words (ScanSafeCall.converse), not read from a script.
+INBOUND_HELLO = ("Greet the caller warmly as ScanSafe in one or two short sentences and ask how you "
+                 "can help today. Mention, in passing, that they can show you a QR code or ask you about "
+                 "a link or a message. Don't give camera distance tips yet.")
+INBOUND_HELLO_SEEING = ("Greet the caller warmly in one short sentence as ScanSafe, and say you can "
+                        "already see a code on their camera and you're checking it now.")
+OUTBOUND_HELLO = ("You just called this person because they scanned a QR code in the ScanSafe app. "
+                  "Greet them warmly in your own words, in one or two short sentences: say it's ScanSafe, "
+                  "that you're opening the link they scanned in a locked-down browser on our side, and "
+                  "that they can watch it on this video. Don't ask them to show you a code.")
 CHERT_FACETIME_API = os.getenv("CHERT_FACETIME_API", "https://facetime.trychert.com/api/v1").rstrip("/")
 CALL_DONE = {"ended", "failed", "rejected"}
 OUTBOUND_ANSWER_TIMEOUT_S = 150.0
 DOGWOOD_SESSION_WAIT_S = 4.0   # once FaceTime is up, how long the app-session answer may still take
-DOGWOOD_PAID_GRACE_S = 4.0     # paid: let the Dogwood app's receipt reach the video first
+# Paid: keep the Dogwood app live until its own receipt is on the video (the run ends by itself
+# about 4-5 s after payment: the app polls every 1.5 s, then the sandbox holds the receipt 1.5 s).
+# 4 s was too short and swapped the live app for the plain Paid card. Ends early when the run does.
+DOGWOOD_PAID_GRACE_S = 10.0
 
 
 # --- Video helpers -----------------------------------------------------------------------------
@@ -265,12 +275,21 @@ class ScanSafeCall:
         self.heard = voice_pay.Heard()
         self.ignore_codes = set()
 
+    async def converse(self, instructions: str) -> None:
+        """Let the model speak in its own words (greetings, small talk). Fixed facts (verdicts,
+        payment read-backs) go through say()."""
+        await self._play(lambda: self.session.generate_reply(instructions=instructions))
+
     async def say(self, text: str) -> None:
-        """Say one fixed line and wait until it has played. One at a time: two overlapping
-        generate_reply calls on Gemini Live both stall, and the Mac hangs up on a silent call."""
+        """Say one fixed line and wait until it has played."""
+        await self._play(lambda: speak(self.session, text))
+
+    async def _play(self, start) -> None:
+        """One line at a time: two overlapping generate_reply calls on Gemini Live both stall, and
+        the Mac hangs up on a silent call."""
         async with self._speech_lock:
             try:
-                handle = speak(self.session, text)
+                handle = start()
                 if handle is not None:
                     await asyncio.wait_for(handle.wait_for_playout(), SPEECH_TIMEOUT_S)
             except asyncio.TimeoutError:
@@ -485,8 +504,8 @@ class ScanSafeAgent(Agent):
             return "The camera isn't connected yet. Ask the caller to wait a moment."
         code = await self.call.watcher.decode_latest()
         if not code:
-            return ("No QR code is readable right now. Kindly ask the caller to hold it steady, "
-                    "about 20 centimeters (8 inches) from the camera, in good light, without glare.")
+            return ("No QR code is readable right now. In your own words, briefly ask the caller "
+                    "to hold it steady a little closer to the camera, in good light, without glare.")
         self.call.debouncer.should_handle(code)    # so the video loop doesn't repeat it
         gen = self.call.generation
         self.call.video.begin_check(code)
@@ -913,13 +932,13 @@ async def entrypoint(ctx: JobContext) -> None:
             await run_meter_call(call, meter, ctx.room, dogwood)
             return
         check = asyncio.create_task(call.check_now(out["scan_url"]))   # live view starts now
-        await call.say(OUTBOUND_GREETING)    # takes the speech lock first, so it's said first
+        await call.converse(OUTBOUND_HELLO)  # takes the speech lock first, so it's said first
         call.greeted.set()
         await check
         return
 
     await wait_for_bridge_ready(ctx.room)
-    await call.say(GREETING_SEEING if call.code_before_greeting else GREETING)
+    await call.converse(INBOUND_HELLO_SEEING if call.code_before_greeting else INBOUND_HELLO)
     call.greeted.set()
 
 

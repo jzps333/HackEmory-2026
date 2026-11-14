@@ -281,7 +281,12 @@ class StatusVideo:
         """The app's payment went through: green Paid banner."""
         self.consent = None
         self.meter = {**(self.meter or {}), "hours": int(hours), "amount": float(amount)}
-        self.shot = self.meter_shot if self.meter_shot_hours == int(hours) else None
+        if self.meter_shot is not None and self.meter_shot_hours == int(hours):
+            self.shot = self.meter_shot              # the run's own last picture (the receipt)
+        elif self.live is not None:
+            self.shot = self.live[0]                 # run still going: its latest live frame, not a blank card
+        else:
+            self.shot = None
         self.result = None
         self.state = "paid"
         self.live = None
