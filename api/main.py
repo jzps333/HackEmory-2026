@@ -14,11 +14,12 @@ from fastapi.responses import StreamingResponse
 import httpx
 from pydantic import BaseModel
 
-from api import config, recent_scans
+from api import config, recent_scans, result_store
 from api.routes_data import flagged_before, record_scan
 from api.routes_data import router as data_router
 from api.routes_call import router as call_router
 from api.routes_pay import router as pay_router
+from api.routes_result import router as result_router
 from api.scan import (SandboxStreamError, failed_result, parse_solana_pay, sandbox_result, scan,
                       stream_sandbox, with_location)
 from chert.imessage import router as chert_router
@@ -31,6 +32,7 @@ app.include_router(data_router)   # /report, /pins, /search, /stats/*
 app.include_router(pay_router)    # /pay (devnet only)
 app.include_router(chert_router)  # /chert/webhook (Chert call + message events, signed)
 app.include_router(call_router)   # /call-me (Chert FaceTimes the person, agent walks the link live)
+app.include_router(result_router) # /result/{scan_id} (the page linked from follow-up texts)
 
 
 class ScanRequest(BaseModel):
@@ -51,6 +53,7 @@ def _location(req: ScanRequest) -> list[float] | None:
 def _finish(result: ScanResult, background_tasks: BackgroundTasks) -> ScanResult:
     result.flagged_before = flagged_before(result)   # "reported N times near you"; never raises
     recent_scans.remember(result)                    # so /report can trust only our own results
+    background_tasks.add_task(result_store.save, result)   # for scansafe.nyc/r/<id> (follow-up text link)
     background_tasks.add_task(record_scan, result)   # log to Tiger Data off the request path
     return result
 
