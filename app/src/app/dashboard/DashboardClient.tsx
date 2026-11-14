@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getStats, type SampleReason } from "@/lib/api";
 import { scamLabel } from "@/lib/labels";
+import ScanSearch from "@/components/ScanSearch";
 import type { HourlyBucket, StatsSummary } from "@/lib/types";
 
 function hourLabel(h: string | number): string {
@@ -106,6 +107,8 @@ export default function DashboardClient() {
           </ul>
         </section>
       )}
+
+      <ScanSearch />
     </>
   );
 }

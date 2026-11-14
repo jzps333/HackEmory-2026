@@ -7,44 +7,69 @@ const READER_ID = "qr-reader";
 
 interface Props {
   onResult: (text: string) => void;
+  /** Called from the "Paste a link instead" button shown when the camera can't be used. */
+  onPasteInstead?: () => void;
+}
+
+function cameraErrorMessage(e: unknown): string {
+  const msg = String((e as Error)?.message || e);
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    return "The camera only works on a secure (https) page. Paste the link below instead.";
+  }
+  if (/permission|notallowed|denied/i.test(msg)) {
+    return "We couldn't use your camera. Please allow camera access in your browser settings, or paste the link below instead.";
+  }
+  return "We couldn't start your camera. You can paste the link below instead.";
+}
+
+async function shutdown(inst: Html5Qrcode) {
+  try {
+    if (inst.isScanning) await inst.stop();
+    inst.clear();
+  } catch {
+    /* already stopped */
+  }
 }
 
 /** Camera QR scanner. html5-qrcode is imported only when the user taps the button (client only). */
-export default function Scanner({ onResult }: Props) {
+export default function Scanner({ onResult, onPasteInstead }: Props) {
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const qr = useRef<Html5Qrcode | null>(null);
   const done = useRef(false);
+  // Bumped by stop(): a start() still waiting on the camera sees it changed and turns the camera back off.
+  const session = useRef(0);
+  const sectionRef = useRef<HTMLElement>(null);
 
   async function stop() {
+    session.current++;
+    done.current = true;
     const inst = qr.current;
     qr.current = null;
     setActive(false);
-    if (inst) {
-      try {
-        if (inst.isScanning) await inst.stop();
-        inst.clear();
-      } catch {
-        /* already stopped */
-      }
-    }
+    if (inst) await shutdown(inst);
   }
 
   async function start() {
+    const mine = ++session.current;
     setError(null);
     setStarting(true);
     done.current = false;
     try {
-      const { Html5Qrcode } = await import("html5-qrcode");
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
+      if (mine !== session.current) return;
       setActive(true);
       // Wait a frame so the reader div is visible before the camera attaches.
       await new Promise((r) => requestAnimationFrame(() => r(null)));
-      const inst = new Html5Qrcode(READER_ID, { verbose: false });
+      if (mine !== session.current) return;
+      // Only look for QR codes: decoding is much faster on phones than trying every barcode type.
+      const inst = new Html5Qrcode(READER_ID, { verbose: false, formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE] });
       qr.current = inst;
+      // Back camera. html5-qrcode makes the <video> muted + playsinline, which iPhone needs to show it inline.
       await inst.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.75); return { width: s, height: s }; } },
+        { fps: 10, qrbox: (w, h) => { const s = Math.max(50, Math.floor(Math.min(w, h) * 0.75)); return { width: s, height: s }; } },
         (text) => {
           if (done.current) return;
           done.current = true;
@@ -54,25 +79,38 @@ export default function Scanner({ onResult }: Props) {
         },
         () => { /* no code in this frame yet */ },
       );
-    } catch (e) {
-      await stop();
-      const msg = String((e as Error)?.message || e);
-      if (/permission|notallowed/i.test(msg)) {
-        setError("We couldn't use your camera. Please allow camera access in your browser settings, or paste the link below instead.");
-      } else if (!window.isSecureContext) {
-        setError("The camera only works on a secure (https) page. Paste the link below instead.");
-      } else {
-        setError("We couldn't start your camera. You can paste the link below instead.");
+      if (mine !== session.current) {
+        // Stopped, or the page was left, while the camera was starting: don't leave it running.
+        await shutdown(inst);
+        return;
       }
+      // Bring the whole camera view and the Stop button on screen (the page may be scrolled).
+      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      sectionRef.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+    } catch (e) {
+      if (mine !== session.current) return;
+      await stop();
+      setError(cameraErrorMessage(e));
     } finally {
       setStarting(false);
     }
   }
 
-  useEffect(() => () => { void stop(); }, []);
+  useEffect(() => {
+    // iPhone freezes the camera when Safari goes to the background: stop cleanly, they can tap Scan again.
+    const onHide = () => {
+      if (document.visibilityState === "hidden" && qr.current) void stop();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      void stop();
+    };
+    // stop() only touches refs and state setters, so the first render's copy is fine.
+  }, []);
 
   return (
-    <section aria-labelledby="scan-heading">
+    <section aria-labelledby="scan-heading" ref={sectionRef}>
       <h2 id="scan-heading" className="sr-only">Scan with your camera</h2>
       {!active && (
         <button type="button" className="btn btn-primary btn-huge" onClick={start} disabled={starting}>
@@ -90,7 +128,16 @@ export default function Scanner({ onResult }: Props) {
           <button type="button" className="btn" onClick={stop}>Stop camera</button>
         </>
       )}
-      {error && <p className="notice bad" role="alert">{error}</p>}
+      {error && (
+        <div className="notice bad" role="alert">
+          <p style={{ margin: 0 }}>{error}</p>
+          {onPasteInstead && (
+            <button type="button" className="btn" style={{ marginTop: "0.75rem" }} onClick={onPasteInstead}>
+              Paste a link instead
+            </button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

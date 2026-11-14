@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Icon } from "@/components/onboarding/Icon";
 import "./onboarding.css";
 import {
@@ -35,6 +35,16 @@ export function OnboardingFlow({
   const [completed, setCompleted] = useState(false);
   const [completionError, setCompletionError] = useState("");
   const [finishing, setFinishing] = useState(false);
+  const firstStep = useRef(true);
+
+  // Each step starts at the top: on a phone the Continue button is at the bottom of a long page.
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false;
+      return;
+    }
+    window.scrollTo({ top: 0 });
+  }, [step]);
 
   function updateProfile(field: "fullName" | "email" | "phone", value: string) {
     setData((current) => ({ ...current, [field]: value }));

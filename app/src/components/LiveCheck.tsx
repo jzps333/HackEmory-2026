@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, type Ref } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import type { LiveScanHandlers } from "@/lib/api";
 import s from "./LiveCheck.module.css";
 
@@ -93,9 +93,37 @@ function stepFor(snap: LiveSnapshot, ms: number): number {
   return step;
 }
 
+/**
+ * Measures everything on the card except the phone frame (title, steps, padding, margins) into --chrome,
+ * so CSS can size the frame to whatever height is left on the screen and the step text never falls
+ * below the fold on a phone.
+ */
+function useFitPhone() {
+  const cardRef = useRef<HTMLElement>(null);
+  const phoneRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const phone = phoneRef.current;
+    if (!card || !phone) return;
+    const measure = () => {
+      const cs = getComputedStyle(card);
+      const chrome = card.offsetHeight - phone.offsetHeight + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom);
+      card.style.setProperty("--chrome", `${Math.ceil(chrome)}px`);
+    };
+    measure();
+    // Re-measure when text rewraps (rotation, font load). The frame's own resize gives the same number back.
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(card);
+    return () => ro.disconnect();
+  }, []);
+  return { cardRef, phoneRef };
+}
+
 export default function LiveCheck({ feed, statusRef }: { feed: LiveFeed; statusRef?: Ref<HTMLDivElement> }) {
   const snap = useSyncExternalStore(feed.subscribe, feed.getSnapshot, feed.getSnapshot);
   const [ms, setMs] = useState(0);
+  const { cardRef, phoneRef } = useFitPhone();
 
   useEffect(() => {
     setMs(0);
@@ -107,7 +135,7 @@ export default function LiveCheck({ feed, statusRef }: { feed: LiveFeed; statusR
   const live = !snap.fallback;
 
   return (
-    <section className={s.card} aria-labelledby="live-h">
+    <section className={s.card} aria-labelledby="live-h" ref={cardRef}>
       <header className={s.head}>
         <h1 id="live-h" className={s.title}>Opening it safely on our computer</h1>
         <p className={s.sub}>
@@ -125,7 +153,7 @@ export default function LiveCheck({ feed, statusRef }: { feed: LiveFeed; statusR
         Now on: <strong className={s.host}>{snap.host}</strong>
       </p>
 
-      <div className={s.phone}>
+      <div className={s.phone} ref={phoneRef}>
         {snap.frame ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img className={s.screen} src={snap.frame} alt="Live view of the page on our computer" />

@@ -6,10 +6,16 @@ export const metadata: Metadata = {
   title: "ScanSafe",
   description: "Check a QR code for scams before you open it. We open it safely on our server first.",
   applicationName: "ScanSafe",
+  // "default" = a solid light status bar above our white header (dark clock text stays readable) when
+  // opened from the Home Screen. black-translucent would put white text over the white header.
   appleWebApp: { capable: true, title: "ScanSafe", statusBarStyle: "default" },
+  // Next only emits mobile-web-app-capable; older iOS still looks for the apple- name to open full screen.
+  other: { "apple-mobile-web-app-capable": "yes" },
+  // Stop iOS from turning phone numbers, dates and amounts into blue links.
+  formatDetection: { telephone: false, date: false, address: false, email: false },
   icons: {
-    icon: [{ url: "/favicon.png", sizes: "32x32", type: "image/png" }, { url: "/icons/icon-192.png", sizes: "192x192" }],
-    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+    icon: [{ url: "/favicon.png", sizes: "32x32", type: "image/png" }, { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
 
@@ -17,6 +23,8 @@ export const viewport: Viewport = {
   themeColor: "#514082",
   width: "device-width",
   initialScale: 1,
+  // Lets the page use the full screen on notched iPhones; header/main pad themselves with env(safe-area-inset-*).
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

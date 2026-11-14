@@ -64,7 +64,8 @@ function ClusterLayer({ pins, focus }: { pins: Pin[]; focus: Pin | null }) {
           alt: `${scamLabel(p.scam_type)} reported here`,
           keyboard: true,
         });
-        m.bindPopup(popupHtml(p));
+        // 260px keeps the popup inside the map on a 375px-wide phone.
+        m.bindPopup(popupHtml(p), { maxWidth: 260, autoPanPadding: [12, 12] });
         group.addLayer(m);
         markers.current.set(pinKey(p), m);
       }
