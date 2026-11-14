@@ -89,14 +89,14 @@ class FakeConn:
 
 # ---------- the estimate ----------
 
-def test_default_estimate_is_380_with_ftc_sources():
+def test_default_estimate_is_110_with_ftc_sources():
     loss = impact.loss_per_scam_usd()
-    assert loss == 380 and isinstance(loss, int)
+    assert loss == 110 and isinstance(loss, int)
     m = impact.est_method(loss)
-    assert m["loss_per_scam_usd"] == 380
-    assert m["explanation"] == ("38% of 2024 fraud reports involved a loss and the median loss for scams that "
-                                "began with a text was $1,000, so each blocked scam avoids about $380 on "
-                                "average (estimate).")
+    assert m["loss_per_scam_usd"] == 110
+    assert m["explanation"] == ("In 2024, 11% of fraud reports about scams that began with a text involved a "
+                                "loss, and the median loss was $1,000, so each blocked scam avoids about $110 "
+                                "on average (estimate).")
     assert m["sources"][:2] == [FTC_2024, FTC_TEXT]
     assert all(s.startswith("https://www.ftc.gov/") for s in m["sources"])
 
@@ -108,17 +108,17 @@ def test_money_saved_math():
     assert impact.money_saved_usd(-4, 380) == 0       # never negative
 
 
-@pytest.mark.parametrize("raw,expected", [("110", 110), (" 412.50 ", 412.5), ("0", 0),
-                                          ("abc", 380), ("-5", 380), ("nan", 380), ("inf", 380), ("", 380)])
+@pytest.mark.parametrize("raw,expected", [("380", 380), (" 412.50 ", 412.5), ("0", 0),
+                                          ("abc", 110), ("-5", 110), ("nan", 110), ("inf", 110), ("", 110)])
 def test_loss_override_env(monkeypatch, raw, expected):
     monkeypatch.setenv("IMPACT_LOSS_PER_SCAM_USD", raw)
     assert impact.loss_per_scam_usd() == expected
 
 
 def test_override_rewrites_the_explanation(monkeypatch):
-    m = impact.est_method(110)
-    assert m["loss_per_scam_usd"] == 110
-    assert "$110" in m["explanation"] and "$380" not in m["explanation"]
+    m = impact.est_method(380)
+    assert m["loss_per_scam_usd"] == 380
+    assert "$380" in m["explanation"] and "$110" not in m["explanation"]
 
 
 @pytest.mark.parametrize("amount,stored", [(0.01, 0.01), (5, 5.0), (0, None), (-1, None), (math.nan, None),
