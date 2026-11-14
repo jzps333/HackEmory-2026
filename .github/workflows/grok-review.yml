@@ -1,0 +1,100 @@
+# Sends every push to Grok Bot for review (the diff, plus test results if any).
+#
+# Grok Bot hookup: in the Grok Bot app, make a routine with a Webhook trigger,
+# then in GitHub: repo Settings > Secrets and variables > Actions, add
+#   GROK_BOT_WEBHOOK_URL  (https://api2.cursor.sh/automations/webhook/<routine-id>)
+#   GROK_BOT_WEBHOOK_KEY  (starts with crsr_)
+# Without those secrets, the workflow still runs; the Grok Bot step is skipped.
+name: grok-review
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so we can diff against the previous push
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install (only if requirements.txt exists)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Run tests (only if there are any)
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          if ls tests/ test_*.py */test_*.py >/dev/null 2>&1; then
+            python -m pytest -q 2>&1 | tee pytest.log
+          else
+            echo "No tests found yet." | tee pytest.log
+          fi
+
+      - name: Collect the changes in this push
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE" 2>/dev/null; then
+            git log --oneline "$BEFORE..HEAD" > commits.txt
+            git diff "$BEFORE" HEAD > changes.diff
+          else
+            git log --oneline -1 > commits.txt
+            git show HEAD --format= > changes.diff
+          fi
+
+      - name: Tell Grok Bot
+        if: always()
+        env:
+          URL: ${{ secrets.GROK_BOT_WEBHOOK_URL }}
+          KEY: ${{ secrets.GROK_BOT_WEBHOOK_KEY }}
+          OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          if [ -z "$URL" ]; then echo "No Grok Bot webhook set, skipping."; exit 0; fi
+          python - <<'PY'
+          import json, os, re, urllib.request
+          # Be forgiving about what was pasted into the secrets: pull out just the
+          # https link, and just the crsr_ key (drop "Authorization: Bearer ").
+          url_match = re.search(r"https://\S+", os.environ["URL"])
+          key_match = re.search(r"crsr_[A-Za-z0-9_\-]+", os.environ["KEY"])
+          if not url_match:
+              raise SystemExit("GROK_BOT_WEBHOOK_URL must contain the https://api2.cursor.sh/... link")
+          url = url_match.group(0).strip("'\"")
+          key = key_match.group(0) if key_match else os.environ["KEY"].replace("Bearer", "").strip()
+
+          def read(path, limit):
+              try:
+                  text = open(path).read()
+              except FileNotFoundError:
+                  return ""
+              return text if len(text) <= limit else text[:limit] + "\n...[truncated]"
+
+          body = {
+              "task": "Review this push: point out bugs, security issues, and anything that would break the demo.",
+              "repo": os.environ["GITHUB_REPOSITORY"],
+              "commit": os.environ["GITHUB_SHA"][:7],
+              "branch": os.environ["GITHUB_REF_NAME"],
+              "author": os.environ["GITHUB_ACTOR"],
+              "commits": read("commits.txt", 2000),
+              "diff": read("changes.diff", 20000),
+              "test_result": os.environ["OUTCOME"],   # "success" or "failure"
+              "pytest_tail": read("pytest.log", 6000)[-6000:],
+              "run_url": f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}',
+          }
+          req = urllib.request.Request(url, data=json.dumps(body).encode(),
+                                       headers={"Authorization": f"Bearer {key}",
+                                                "Content-Type": "application/json"})
+          print(urllib.request.urlopen(req, timeout=20).read().decode())
+          PY
+
+      - name: Fail the check if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
