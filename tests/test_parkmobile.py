@@ -731,10 +731,15 @@ def test_session_only_for_the_owner(monkeypatch):
     monkeypatch.delenv("PARKMOBILE_OWNER_PHONE", raising=False)
     assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123"})["use_session"] is False
     monkeypatch.setenv("PARKMOBILE_OWNER_PHONE", "(404) 555-0123")
-    assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123"})["use_session"] is True
-    assert pm.parkmobile_job({"scan_url": url, "phone": "+1 404 555 0123"})["use_session"] is True
+    ok = {"scan_url": url, "phone_verified": True}
+    assert pm.parkmobile_job({**ok, "phone": "+14045550123"})["use_session"] is True
+    assert pm.parkmobile_job({**ok, "phone": "+1 404 555 0123"})["use_session"] is True
+    # the owner's number without a sign-in (e.g. the allow-listed demo phone): guest run
+    assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123"})["use_session"] is False
+    for flag in (False, "true", 1, None):
+        assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123", "phone_verified": flag})["use_session"] is False
     for other in ("+14045550124", "+44404555012", "", None, "4045550123x", "+1404555012345678"):
-        assert pm.parkmobile_job({"scan_url": url, "phone": other})["use_session"] is False
+        assert pm.parkmobile_job({**ok, "phone": other})["use_session"] is False
     assert pm.parkmobile_job({"scan_url": url})["use_session"] is False
     assert pm.e164("0014045550123") == "+14045550123" and pm.e164("14045550123") == "+14045550123"
     assert pm.e164("555-0123") is None and pm.e164(4045550123) is None

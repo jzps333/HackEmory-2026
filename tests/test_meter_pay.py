@@ -415,7 +415,7 @@ def test_call_me_meter_code_without_scan_id_gets_a_server_scan(calls, client):
 def test_call_me_web_links_are_unchanged(calls):
     r = call_me({"url": "https://example.com"})
     assert r.status_code == 200 and "scan_id" not in r.json()
-    assert calls[-1] == ("https://example.com", PHONE, None)
+    assert calls[-1] == ("https://example.com", PHONE, {"phone_verified": False})
 
 
 @pytest.mark.parametrize("url", [FAKE_QR, DINER_QR, "solana:abc", f"solana:{DOGWOOD}",

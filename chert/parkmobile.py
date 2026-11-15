@@ -90,7 +90,10 @@ def parkmobile_job(job: Any) -> Optional[dict]:
         return None
     entry = f"https://{PM_HOST}{ZONE_DETAILS_PATH}?areaNo={area}" if area else ENTRY_URL
     return {"url": entry, "scan_url": url, "zone": zone, "plate": demo_plate(),
-            "minutes": DEFAULT_MINUTES, "use_session": is_session_owner(job.get("phone"))}
+            "minutes": DEFAULT_MINUTES,
+            # the owner's saved session only when /call-me took the phone from a sign-in token
+            # (phone_verified), never for an unsigned call to an allow-listed number
+            "use_session": job.get("phone_verified") is True and is_session_owner(job.get("phone"))}
 
 
 def _say_safe(s: Any, limit: int) -> str:

@@ -522,10 +522,11 @@ async def call_me(req: CallRequest, request: Request) -> dict:
     url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
     extra = await asyncio.to_thread(meter_job, url, req.scan_id) if url.startswith("solana:") else None
     _take_rate_slot()
+    verified = {"phone_verified": bool(signed_in)}   # the agent's ParkMobile session needs this
     if extra is None:
-        return await place_call(url, phone)
+        return await place_call(url, phone, extra=verified)
     _remember_scan_owner(extra["scan_id"], phone)
-    out = await place_call(url, phone, extra=extra)
+    out = await place_call(url, phone, extra={**extra, **verified})
     return {**out, "scan_id": extra["scan_id"]}
 
 

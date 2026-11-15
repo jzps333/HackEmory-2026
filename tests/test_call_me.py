@@ -250,6 +250,8 @@ def test_phone_sign_in_then_call_uses_token_phone(fakes, monkeypatch):
     r = client.post("/call-me", json={"url": "https://example.com", "phone": "+12125550000"},
                     headers={"Authorization": f"Bearer {v['token']}"})
     assert r.status_code == 200
+    md = json.loads([x for x in FakeLK.calls if x[0] == "dispatch"][-1][3])
+    assert md["phone"] == stranger and md["phone_verified"] is True     # the agent's ParkMobile gate
 
 
 def test_verify_needs_the_requesters_secret(monkeypatch):
