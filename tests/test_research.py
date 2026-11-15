@@ -92,7 +92,8 @@ class FakeGemini:
 
 
 @pytest.fixture
-def env(monkeypatch):
+def env(monkeypatch, tmp_path):
+    monkeypatch.setenv("RESEARCH_BUDGET_FILE", str(tmp_path / "research-budget.json"))
     monkeypatch.setenv("AGENT_INTERNAL_KEY", "agent-secret")
     monkeypatch.setenv("ACCOUNT_PEPPER", "test-pepper")
     monkeypatch.setenv("PUBLIC_API_BASE", "https://api.example.test")
@@ -645,3 +646,17 @@ def test_topic_in_texts_cannot_carry_links_or_numbers():
     from api import research as r
     t = r._topic_for_text({"topic": "stocks, see evil.com/x or call 404 555 0199 now"})
     assert "evil.com" not in t and "/" not in t and not any(ch.isdigit() for ch in t)
+
+
+def test_spending_caps_switch_to_wikipedia(monkeypatch, tmp_path):
+    from api import research as r
+    monkeypatch.setenv("RESEARCH_BUDGET_FILE", str(tmp_path / "budget.json"))
+    monkeypatch.setenv("RESEARCH_GROUNDED_PER_JOB", "2")
+    monkeypatch.setenv("RESEARCH_GROUNDED_PER_DAY", "3")
+    a, b = {"job_id": "a"}, {"job_id": "b"}
+    assert [r.take_grounding(a) for _ in range(3)] == [True, True, False]     # per-job cap
+    assert r.take_grounding(b) is True and r.take_grounding(b) is False       # day cap (3) reached
+    used = []
+    monkeypatch.setattr(r, "wikipedia_answer", lambda q, t, timeout: (used.append(q) or "wiki", []))
+    assert r.gemini_search("q1", "t", 5, allow_grounding=False) == ("wiki", [])
+    assert used == ["q1"]

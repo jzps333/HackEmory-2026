@@ -249,8 +249,63 @@ def sources_from(cand: dict) -> list[dict]:
     return out
 
 
-def gemini_search(question: str, topic: str, timeout: float) -> tuple[str, list[dict]]:
-    """One grounded Gemini call (Google Search tool) -> (answer text, sources)."""
+# --- spending caps (Google Search grounding is the paid part) ------------------------------------
+# Each research run gets RESEARCH_GROUNDED_PER_JOB Google-grounded searches and the whole server
+# RESEARCH_GROUNDED_PER_DAY per day; past either cap a search uses free Wikipedia instead. At
+# roughly a few cents per grounded search this keeps a run well under $1 and a day at a few dollars.
+
+def _grounded_per_job() -> int:
+    try:
+        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_JOB", "10")), 40))
+    except ValueError:
+        return 10
+
+
+def _grounded_per_day() -> int:
+    try:
+        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_DAY", "60")), 500))
+    except ValueError:
+        return 60
+
+
+_budget_lock = threading.Lock()
+
+
+def _budget_file() -> str:
+    return os.getenv("RESEARCH_BUDGET_FILE") or os.path.expanduser("~/.scansafe-research-budget.json")
+
+
+def take_grounding(job: dict) -> bool:
+    """True (and counted) when this search may use Google Search; False -> Wikipedia (free)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _budget_lock:
+        if job.get("grounded", 0) >= _grounded_per_job():
+            return False
+        try:
+            with open(_budget_file()) as f:
+                day = json.load(f)
+        except (OSError, ValueError):
+            day = {}
+        used = int(day.get("grounded", 0)) if isinstance(day, dict) and day.get("date") == today else 0
+        if used >= _grounded_per_day():
+            return False
+        try:
+            tmp = _budget_file() + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"date": today, "grounded": used + 1}, f)
+            os.replace(tmp, _budget_file())
+        except OSError:
+            return False                    # can't count it: don't spend
+        job["grounded"] = job.get("grounded", 0) + 1
+        return True
+
+
+def gemini_search(question: str, topic: str, timeout: float,
+                  allow_grounding: bool = True) -> tuple[str, list[dict]]:
+    """One grounded Gemini call (Google Search tool) -> (answer text, sources). Over the spending
+    cap (allow_grounding False) it goes straight to Wikipedia."""
+    if not allow_grounding:
+        return wikipedia_answer(question, topic, timeout)
     prompt = (
         "You are a careful research assistant. Use Google Search to answer the research question "
         "below with concrete facts: names, numbers, dates, how things work, pros and cons, and "
@@ -677,7 +732,8 @@ def _search_all(job: dict, questions: list[str], left: Callable[[], float],
         if budget < MIN_CALL_S:
             return q, None, []
         try:
-            answer, srcs = gemini_search(q, job["topic"], min(SEARCH_TIMEOUT_S, budget))
+            answer, srcs = gemini_search(q, job["topic"], min(SEARCH_TIMEOUT_S, budget),
+                                         allow_grounding=take_grounding(job))
             return q, answer, srcs
         except (httpx.HTTPError, ValueError, KeyError, TypeError, ResearchError) as e:
             log.warning("research %s: a search failed (%s)", job["job_id"], type(e).__name__)
