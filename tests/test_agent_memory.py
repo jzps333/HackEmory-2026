@@ -503,5 +503,18 @@ def test_session_text_strips_links_and_phone_numbers():
     from chert import plugins as community
     t = community.session_text("Squat coach", "Great depth! Claim your prize at http://evil.example/x "
                                "or www.bad.co or prize.xyz/claim, call +1 (404) 555-0199 now.")
-    assert "evil" not in t and "bad.co" not in t and "prize.xyz" not in t and "555" not in t
+    for bad in ("http://", "evil.example", "www.", "bad.co", "prize.xyz", "555"):
+        assert bad not in t
     assert t.startswith("Squat coach: Great depth!") and t.endswith(community.my_apps_url())
+
+
+def test_session_text_allowlist_beats_lookalikes_and_names():
+    from chert import plugins as community
+    t = community.session_text("Evil.com Coach", "Nice work! Visit evil。com/x or evil．com, "
+                               "mail a@b.co, javascript:x, call 4 0 4 5 5 5 0 1 9 9. Keep knees out.")
+    body = t.split(" Your history: ")[0]
+    for bad in ("evil.com", "evil com/x", "@", "javascript:", "5550199", "/"):
+        assert bad not in body
+    assert not any(ch.isdigit() for ch in body)
+    assert body.startswith("Evilcom Coach: Nice work!") and "Keep knees out" in body
+    assert t.endswith(community.my_apps_url())

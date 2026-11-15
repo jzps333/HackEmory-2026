@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from collections import Counter
 from typing import Any, Optional
 
@@ -371,17 +372,24 @@ def session_data(cues: list[str], summary: str, at: int) -> dict:
     return data
 
 
-_LINKISH = re.compile(r"(https?://|www\.)\S+|\b[\w-]+\.(com|net|org|io|co|app|xyz|info|link|ly|me)\b\S*", re.I)
-_PHONEISH = re.compile(r"\+?\d[\d\s().-]{6,}\d")
+def _sms_safe(text: str) -> str:
+    """Allowlist for model-written text in a text from the ScanSafe line: plain letters, digits,
+    spaces and , . ! ? ' ( ) : - only (after NFKC, so look-alike characters fold or drop). A dot not
+    followed by a space becomes a space, and any run holding 7+ digits is removed, so no link,
+    domain or phone number can survive."""
+    t = unicodedata.normalize("NFKC", text or "")
+    t = re.sub(r"[^A-Za-z0-9 ,.!?'():\-]", " ", t)
+    t = re.sub(r"[.:](?=[^\s)])", " ", t)            # "evil.com", "javascript:x" -> words
+    t = re.sub(r"\d[\d\s().,-]*", lambda m: " " if sum(c.isdigit() for c in m.group()) >= 7 else m.group(), t)
+    return re.sub(r"\s{2,}", " ", t).strip()
 
 
 def session_text(plugin_name: str, summary: str) -> str:
-    """The after-session text: "Squat coach: <summary> Your history: <url>". The summary is
-    model-written, so links and phone numbers are removed: the only link in a text from the
-    ScanSafe line is our own history page."""
-    text = _PHONEISH.sub("", _LINKISH.sub("", clean(summary, SESSION_SUMMARY_CHARS)))
-    text = re.sub(r"\s{2,}", " ", text).strip() or "Session saved."
-    return f"{clean(plugin_name, 60)}: {text} Your history: {my_apps_url()}"
+    """The after-session text: "Squat coach: <summary> Your history: <url>". The only link in a
+    text from the ScanSafe line is our own history page."""
+    name = re.sub(r"[^A-Za-z0-9 ]", "", unicodedata.normalize("NFKC", plugin_name or "")).strip()[:60] or "ScanSafe"
+    text = _sms_safe(clean(summary, SESSION_SUMMARY_CHARS)) or "Session saved."
+    return f"{name}: {text} Your history: {my_apps_url()}"
 
 
 class PluginSession:
