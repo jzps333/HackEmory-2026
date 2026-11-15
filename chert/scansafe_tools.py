@@ -351,7 +351,8 @@ def operate_stream(url: str, plate: str, hours: int, on_frame: Callable[[bytes],
 # --- ParkMobile (adapter "parkmobile"): the REAL official web app, stops before payment --------
 
 PARKMOBILE_TIMEOUT_S = 140.0   # sandbox caps the run at 120 s
-PARKMOBILE_STATUSES = ("ready_to_pay", "needs_sign_in", "robot_check", "failed")
+PARKMOBILE_STATUSES = ("ready_to_pay", "needs_sign_in", "needs_verification", "robot_check",
+                       "failed")
 
 
 def parkmobile_stream(url: str, zone: Optional[str], plate: str, minutes: int,
@@ -364,7 +365,8 @@ def parkmobile_stream(url: str, zone: Optional[str], plate: str, minutes: int,
     """POST {SANDBOX_URL}/operate/stream {"adapter": "parkmobile", url, zone, plate, minutes}: the
     sandbox fills in the real ParkMobile web app and stops at the first sign-in / contact-details /
     payment / price screen. Returns its result ({"status": "ready_to_pay" | "needs_sign_in" |
-    "robot_check" | "failed", "price_text"?, "zone_name"?, "stopped_at", ...}), None if
+    "needs_verification" | "robot_check" | "failed", "price_text"?, "zone_name"?, "stopped_at",
+    "session", ...}), None if
     ``should_stop()`` turned True, operate_failed(why) on any failure. Never raises, never pays."""
     body = {"adapter": "parkmobile", "url": url, "zone": zone, "plate": plate, "minutes": int(minutes)}
     return operate_stream(url, plate, 0, on_frame, on_nav, on_step, should_stop, client=client,

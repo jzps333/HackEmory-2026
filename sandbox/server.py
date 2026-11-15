@@ -7,7 +7,9 @@ POST /operate/stream {"url", "plate", "hours"} is operator mode (see operate.py)
 from scanning: it ONLY accepts https://scansafe-demo-sites.vercel.app/dogwood/... (else 400) and
 streams the container's browser while it drives the made-up official Dogwood Parking app.
 With {"adapter": "parkmobile", "url", "zone", "plate", "hours"|"minutes"} it instead fills in the
-REAL ParkMobile web app (https://app.parkmobile.io only) and stops before payment.
+REAL ParkMobile web app (https://app.parkmobile.io only) and stops before payment; if
+PARKMOBILE_STATE_FILE (default /etc/scansafe/parkmobile_state.json) exists, it is mounted read-only
+into that container only (a saved, signed-in session of the person's own ParkMobile account).
 
 Run on the sandbox VM:
     pip install fastapi uvicorn
@@ -68,15 +70,30 @@ def health() -> dict:
     return {"ok": True}
 
 
-def _container_cmd(name: str, *args: str) -> list[str]:
+def _container_cmd(name: str, *args: str, mounts: tuple = ()) -> list[str]:
     return [
         "docker", "run", "--rm", "--init", "--name", name,
         *(["--network", NETWORK] if NETWORK else []),
         "--memory", "1g", "--cpus", "1", "--pids-limit", "256",
         "--read-only", "--tmpfs", "/tmp", "--tmpfs", "/home/pwuser/.cache",
         "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+        *mounts,
         IMAGE, *args,   # passed as separate arguments, never through a shell
     ]
+
+
+PARKMOBILE_STATE_DEFAULT = "/etc/scansafe/parkmobile_state.json"
+PARKMOBILE_STATE_IN_CONTAINER = "/run/pm_state.json"     # operate.PM_STATE_PATH
+
+
+def _parkmobile_mounts() -> tuple:
+    """The saved ParkMobile session (the person's own account, captured on the Mac), mounted
+    read-only, for adapter "parkmobile" runs only and only if the file exists. Path from
+    PARKMOBILE_STATE_FILE. No file: () and the run stays a guest run."""
+    path = os.environ.get("PARKMOBILE_STATE_FILE") or PARKMOBILE_STATE_DEFAULT
+    if not os.path.isabs(path) or any(c in path for c in ",:\n") or not os.path.isfile(path):
+        return ()
+    return ("-v", f"{path}:{PARKMOBILE_STATE_IN_CONTAINER}:ro")
 
 
 def _check_token(authorization: str) -> None:
@@ -139,7 +156,8 @@ def _operate_parkmobile(req: OperateRequest) -> StreamingResponse:
         raise HTTPException(status_code=400, detail=f"url not allowed: {reason}")
     name = f"scansafe-pm-{uuid.uuid4().hex[:12]}"
     cmd = _container_cmd(name, "--operate-parkmobile", req.url, clean_zone(req.zone) or "-",
-                         clean_plate(req.plate), str(pm_minutes(req.hours, req.minutes)))
+                         clean_plate(req.plate), str(pm_minutes(req.hours, req.minutes)),
+                         mounts=_parkmobile_mounts())
     return _stream_container(name, cmd, PARKMOBILE_TIMEOUT_S, MAX_OPERATE_OUTPUT, "parkmobile")
 
 

@@ -4,8 +4,11 @@
 Trigger (demo): POST /call-me with url = an https://app.parkmobile.io link that names a zone:
   https://app.parkmobile.io/v2/parking?zone=91987                     (types the zone in the search)
   https://app.parkmobile.io/v2/parking/zone-details?areaNo=10891987   (ParkMobile's own zone page)
-The plate is PARKMOBILE_DEMO_PLATE (default DEMO123); the duration is 2 hours. Nothing is ever paid:
-the agent never offers to pay on real sites.
+The plate is PARKMOBILE_DEMO_PLATE (default DEMO123); the duration is 2 hours. If the sandbox has a
+saved, signed-in ParkMobile session (the person's own account, captured on the Mac) the run gets
+to ParkMobile's price; otherwise it stops at the guest "Add email" screen. Nothing is ever paid:
+the agent never offers to pay on real sites. The greeting is in the model's own words
+(ScanSafeCall.converse); the facts read back afterwards are fixed lines (speech()).
 """
 from __future__ import annotations
 
@@ -78,12 +81,15 @@ def duration_text(minutes: int) -> str:
     return f"{minutes} minutes"
 
 
-def greeting(job: dict) -> str:
+def hello_instructions(job: dict) -> str:
+    """Instructions for the greeting, said in the model's own words (ScanSafeCall.converse)."""
     zone = job.get("zone")
-    where = f"zone {zone}" if zone else "that parking zone"
-    return (f"Hi, this is ScanSafe. I'm opening the official ParkMobile site for {where} on our "
-            f"computer, so you can watch. I'll fill in {duration_text(job['minutes'])} and plate "
-            f"{job['plate']}, and I'll stop before any payment.")
+    where = f"zone {zone}" if zone else "the parking zone they picked"
+    return ("You just called this person about parking. Greet them warmly in your own words, in "
+            "one or two short sentences: say it's ScanSafe, that you're opening the official "
+            f"ParkMobile site for {where} on our computer so they can watch it on this video, that "
+            f"you'll fill in {duration_text(job['minutes'])} and plate {job['plate']}, and that "
+            "you'll stop before any payment. Don't ask them for any details and don't offer to pay.")
 
 
 def speech(result: Optional[dict], job: dict) -> str:
@@ -98,8 +104,17 @@ def speech(result: Optional[dict], job: dict) -> str:
     if status == "ready_to_pay":
         price = _say_safe(r.get("price_text"), 60)
         shows = f"ParkMobile shows {price}." if price else "ParkMobile is on its payment step."
+        check = ("" if r.get("duration_set", True) and r.get("plate_set", True) else
+                 " Please check the duration and plate on the screen before you pay yourself.")
         return (f"This is the official ParkMobile site. {where}, {dur}, plate {plate}. {shows} "
-                "I've stopped at the payment step, so nothing has been paid.")
+                f"I've stopped at the payment step, so nothing has been paid.{check}")
+    if status in ("needs_sign_in", "needs_verification") and r.get("session") == "loaded":
+        return (f"This is the official ParkMobile site. {where}. ParkMobile signed us out, so I "
+                "stopped at its sign-in screen and didn't type anything. Nothing has been paid. "
+                "Please sign in to ParkMobile again on the Mac, then call me again.")
+    if status == "needs_verification":
+        return ("ParkMobile asked for a sign-in code, so I stopped and didn't type anything. "
+                "Nothing has been paid.")
     if status == "needs_sign_in":
         return (f"This is the official ParkMobile site. {where}. ParkMobile asks for an email "
                 f"address and its terms before it shows the price for {dur}, so I've stopped there. "

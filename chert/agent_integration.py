@@ -860,11 +860,11 @@ async def run_meter_call(call: ScanSafeCall, meter: dict, room: rtc.Room,
 
 
 async def run_parkmobile_call(call: ScanSafeCall, job: dict) -> Optional[dict]:
-    """ParkMobile call (chert/parkmobile.py), once FaceTime is up: say what's about to happen,
-    show the sandbox filling in the official ParkMobile site live, then read back what it shows
+    """ParkMobile call (chert/parkmobile.py), once FaceTime is up: greet in the model's own words
+    (what's about to happen), show the sandbox filling in the official ParkMobile site live, then read back what it shows
     and that it stopped before payment. The agent never pays and never offers to on real sites."""
     call.debouncer.should_handle(job["scan_url"])     # the camera loop won't repeat it
-    greet = asyncio.create_task(call.say(parkmobile.greeting(job)))
+    greet = asyncio.create_task(call.converse(parkmobile.hello_instructions(job)))
     await asyncio.sleep(0)                            # let it take the speech lock
     live = asyncio.create_task(call.parkmobile_live(job))
     await greet
@@ -872,7 +872,8 @@ async def run_parkmobile_call(call: ScanSafeCall, job: dict) -> Optional[dict]:
     result = await live
     if result is None:                                # the caller said stop
         return None
-    log.info("parkmobile: status=%s stopped_at=%s", result.get("status"), result.get("stopped_at"))
+    log.info("parkmobile: status=%s session=%s stopped_at=%s", result.get("status"),
+             result.get("session"), result.get("stopped_at"))
     await call.say(parkmobile.speech(result, job))
     return result
 

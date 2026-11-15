@@ -220,8 +220,11 @@ def operate_status(done_steps: list[str], phase: str, error: str | None) -> str:
 #     that don't look like card / password / email / phone / address fields (pm_type_refused).
 #   - It refuses to click anything labelled like pay / purchase / checkout / buy / confirm /
 #     start parking / submit order / agree / sign in (pm_click_refused).
-#   - It stops as soon as a sign-in, contact-details (email), payment-method, review/price or
-#     robot-check screen shows, and reports what it saw. Nothing is ever paid.
+#   - It stops as soon as a sign-in, contact-details (email), verification-code, payment-method,
+#     review/price or robot-check screen shows, or the only way on is a pay-like button (refused),
+#     and reports what it saw. Nothing is ever paid; it never signs in or types an email or code.
+#   - Optional: a saved, signed-in session of the person's own account (see "saved session"
+#     below) so the run gets past the guest "Add email" screen to the price.
 # What the real guest flow looked like on 2026-11-14 (390x844 phone, see run_scan.py):
 #   /v2/parking (search box) -> zone result -> /v2/parking/zone-details?areaNo=... ("Park here")
 #   -> /v2/parking/guest-registration ("Add email" + Terms checkbox). Duration, plate and price
@@ -240,7 +243,7 @@ PM_STATIC_HOSTS = frozenset({
 # reCAPTCHA Enterprise (invisible, score-only) script and frame: allowed so the app's own API calls
 # work; never clicked or solved. A VISIBLE challenge stops the run with status "robot_check".
 PM_RECAPTCHA_HOSTS = frozenset({"www.google.com", "www.gstatic.com", "www.recaptcha.net"})
-PM_STATUSES = ("ready_to_pay", "needs_sign_in", "robot_check", "failed")
+PM_STATUSES = ("ready_to_pay", "needs_sign_in", "needs_verification", "robot_check", "failed")
 PM_MIN_MINUTES, PM_MAX_MINUTES = 15, 720
 ZONE_RE = re.compile(r"^\d{3,7}$")
 AREA_RE = re.compile(r"^\d{3,12}$")
@@ -375,7 +378,7 @@ def check_parkmobile_request(url: object, zone: object, plate: object,
 
 PM_CLICK_REFUSED = re.compile(
     r"\b(pay|paying|payment|paypal|purchase|checkout|check[\s-]?out|buy|order|confirm|"
-    r"start[\s-]?(parking|session)|place order|submit|agree|accept|"
+    r"start[\s-]?(parking|session)|park[\s-]?now|place order|submit|agree|accept|card|wallet|"
     r"sign[\s-]?(in|up)|log[\s-]?in|register|create account|subscribe|download)\b"
     r"|apple\s?pay|google\s?pay|g\s?pay", re.I)
 PM_TYPE_REFUSED = re.compile(
@@ -466,9 +469,19 @@ def _field_blob(f: dict) -> str:
     return " ".join(str(f.get(k) or "") for k in ("name", "id", "aria", "placeholder", "label", "testid"))
 
 
+def pm_has_card_fields(facts: object) -> bool:
+    """A card form is on screen (card-like inputs or a payment provider's frame)."""
+    if not isinstance(facts, dict):
+        return False
+    inputs = [f for f in facts.get("inputs") or [] if isinstance(f, dict)]
+    return (int(facts.get("pay_frames") or 0) > 0
+            or any(str(f.get("autocomplete", "")).startswith("cc-")
+                   or re.search(r"card|cvv|cvc|expir", _field_blob(f), re.I) for f in inputs))
+
+
 def pm_screen(facts: object, robot: bool = False) -> str:
-    """Where the ParkMobile page is: robot_check / payment / review / sign_in / unsupported /
-    space_number / plate / duration / zone_details / search / unknown. Stop screens first."""
+    """Where the ParkMobile page is: robot_check / payment / review / verification / sign_in /
+    unsupported / space_number / plate / zone_details / duration / search / unknown."""
     if robot:
         return "robot_check"
     if not isinstance(facts, dict):
@@ -476,13 +489,16 @@ def pm_screen(facts: object, robot: bool = False) -> str:
     inputs = [f for f in facts.get("inputs") or [] if isinstance(f, dict)]
     text = str(facts.get("text") or "")
     has_price = bool(PM_PRICE_RE.search(text))
-    card = (int(facts.get("pay_frames") or 0) > 0
-            or any(str(f.get("autocomplete", "")).startswith("cc-")
-                   or re.search(r"card|cvv|cvc|expir", _field_blob(f), re.I) for f in inputs))
-    if card or PM_PAYMENT_TEXT.search(text):
+    if pm_has_card_fields(facts) or PM_PAYMENT_TEXT.search(text):
         return "payment"
     if has_price and PM_REVIEW_TEXT.search(text):
         return "review"
+    path = str(facts.get("path") or "")
+    otp = any(str(f.get("autocomplete") or "") == "one-time-code" or _OTP_FIELD.search(_field_blob(f))
+              or (PM_AUTH_PATH.search(path) and re.search(r"\bcode\b", _field_blob(f), re.I))
+              for f in inputs)
+    if otp or (PM_AUTH_PATH.search(path) and PM_VERIFY_TEXT.search(text)):
+        return "verification"
     contact = any(f.get("type") in ("email", "password", "tel")
                   or re.search(r"e-?mail|password|phone|mobile", _field_blob(f), re.I) for f in inputs)
     if contact or PM_AUTH_PATH.search(str(facts.get("path") or "")):
@@ -510,9 +526,10 @@ def _speakable(s: object, limit: int) -> str:
 
 
 def pm_price_text(text: object) -> str | None:
-    """The first line of the page with a dollar amount, plain and clipped (e.g. 'Total $4.35')."""
+    """The first line of the page with a dollar amount, plain and clipped (e.g. 'Total $4.35').
+    Lines with an @ (an email address) are never used."""
     for line in str(text or "").splitlines():
-        if PM_PRICE_RE.search(line):
+        if PM_PRICE_RE.search(line) and "@" not in line:
             return _speakable(line, 80) or None
     return None
 
@@ -523,7 +540,7 @@ def pm_zone_info(lines: object, zone: str | None) -> dict:
     out = {"zone": zone, "zone_name": None, "operator": None}
     if not isinstance(lines, list):
         return out
-    ls = [str(x).strip() for x in lines if isinstance(x, str) and str(x).strip()]
+    ls = [str(x).strip() for x in lines if isinstance(x, str) and str(x).strip() and "@" not in x]
     idx = next((i for i, x in enumerate(ls) if ZONE_RE.fullmatch(x) and (zone is None or x == zone)), None)
     if idx is None:
         return out
@@ -557,13 +574,16 @@ PM_STOPPED_AT = {
     "robot_check": "a robot check on ParkMobile",
     "unsupported": "ParkMobile says this zone isn't supported on the web",
     "space_number": "ParkMobile asks for a space number",
+    "verification": "a ParkMobile verification-code screen (the saved sign-in is gone)",
+    "pay_button": "ParkMobile's pay button (refused), with the price on screen",
 }
 
 
 def pm_status(screen: str) -> str:
     """Final status for the screen the run stopped on."""
-    return {"payment": "ready_to_pay", "review": "ready_to_pay", "sign_in": "needs_sign_in",
-            "robot_check": "robot_check"}.get(screen, "failed")
+    return {"payment": "ready_to_pay", "review": "ready_to_pay", "pay_button": "ready_to_pay",
+            "sign_in": "needs_sign_in", "robot_check": "robot_check",
+            "verification": "needs_verification"}.get(screen, "failed")
 
 
 def pm_step_text(step: str, zone: str = "", plate: str = "", minutes: int = 0) -> str:
@@ -582,4 +602,69 @@ def pm_step_text(step: str, zone: str = "", plate: str = "", minutes: int = 0) -
         "stop_sign_in": "ParkMobile wants an email first. Stopping here",
         "stop_pay": "Price on screen. Stopped before payment",
         "stop_robot": "Robot check. Not touching it",
+        "session": "Using your saved ParkMobile sign-in",
+        "vehicle": f"Choosing your vehicle {plate}".rstrip(),
+        "stop_verify": "ParkMobile wants a sign-in code. Stopping here",
+        "stop_signed_out": "ParkMobile signed us out. Stopping here",
     }.get(step, step)
+
+
+# --- saved, signed-in session (the person's OWN ParkMobile account) ----------------------------
+#
+# ParkMobile sign-in is passwordless (an emailed one-time code), so nothing here ever signs in.
+# The person signs in once on the Mac; their Playwright storage_state (cookies + localStorage,
+# *.parkmobile.io only) is kept on the sandbox VM and server.py mounts it read-only at
+# PM_STATE_PATH for adapter "parkmobile" runs only. run_scan.py loads it into the context (filtered
+# again by pm_filter_state), never writes it back, and never prints a cookie or token. If ParkMobile
+# shows a sign-in / email / code screen anyway, the session is gone: stop (needs_sign_in /
+# needs_verification). No email or code is ever typed.
+
+PM_STATE_PATH = "/run/pm_state.json"
+PM_VERIFY_TEXT = re.compile(r"verification code|enter (the |your )?(\d-digit )?code|we (just )?sent"
+                            r"|one[\s-]?time (pass)?code|verify (your )?(email|phone|identity|account)"
+                            r"|check your (email|inbox|phone|texts)|two[\s-]?factor|\b2fa\b"
+                            r"|confirm your (email|phone)", re.I)
+_OTP_FIELD = re.compile(r"one[\s-]?time|\botp\b|verification|passcode", re.I)
+
+
+def _pm_domain_ok(host: object) -> bool:
+    h = str(host or "").lower().lstrip(".")
+    return h == "parkmobile.io" or h.endswith(".parkmobile.io")
+
+
+def _pm_origin_ok(origin: object) -> bool:
+    try:
+        parts = urlsplit(str(origin or ""))
+        port = parts.port
+    except ValueError:
+        return False
+    return parts.scheme == "https" and port is None and _pm_domain_ok(parts.hostname)
+
+
+def pm_filter_state(state: object) -> dict | None:
+    """Only the *.parkmobile.io cookies and https origins of a Playwright storage_state.
+    None if nothing usable is left (then the run is a guest run)."""
+    if not isinstance(state, dict):
+        return None
+    cookies = [c for c in state.get("cookies") or []
+               if isinstance(c, dict) and _pm_domain_ok(c.get("domain")) and c.get("name")]
+    origins = [o for o in state.get("origins") or []
+               if isinstance(o, dict) and _pm_origin_ok(o.get("origin"))]
+    if not cookies and not origins:
+        return None
+    return {"cookies": cookies, "origins": origins}
+
+
+def pm_redact_urls(text: object) -> str:
+    """Drop the query/fragment of every URL in a message (tokens never reach the result)."""
+    return re.sub(r"(https?://[^\s?#'\"]+)[?#][^\s'\"]*", r"\1", str(text or ""))
+
+
+def pm_clean_url(url: object) -> str:
+    """scheme://host/path only: no query, fragment or credentials in nav lines or the result."""
+    try:
+        parts = urlsplit(str(url or ""))
+    except ValueError:
+        return ""
+    host = (parts.hostname or "").lower()
+    return f"{parts.scheme}://{host}{parts.path}"[:300] if parts.scheme and host else str(url or "")[:40]
