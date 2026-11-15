@@ -242,7 +242,7 @@ class QRWatcher:
         self._tasks.clear()
 
 
-from chert.status_video import StatusVideo  # noqa: E402  (the agent's own video, step by step)
+from chert.status_video import StatusVideo, recording_path  # noqa: E402  (the agent's own video, step by step)
 
 
 # --- One call ----------------------------------------------------------------------------------
@@ -2043,6 +2043,34 @@ def wire_board_nudge(session, call) -> BoardNudge:
     return n
 
 
+def wire_transcript_file(session, path: str, clock=time.monotonic) -> None:
+    """For the demo video's captions (RECORD_CALLS=1 only): the caller's final transcripts and the
+    agent's replies, with times since the call started, next to the recording."""
+    t0 = clock()
+
+    def line(who: str, text: str) -> None:
+        t = clock() - t0
+        text = " ".join(str(text or "").split())[:600]
+        if not text:
+            return
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"[{int(t // 60)}:{t % 60:04.1f}] {who}: {text}\n")
+        except OSError:
+            pass
+
+    def _transcribed(ev) -> None:
+        if getattr(ev, "is_final", False):
+            line("caller", getattr(ev, "transcript", ""))
+
+    def _item(ev) -> None:
+        item = getattr(ev, "item", None)
+        if getattr(item, "role", None) == "assistant":
+            line("agent", getattr(item, "text_content", ""))
+    session.on("user_input_transcribed", _transcribed)
+    session.on("conversation_item_added", _item)
+
+
 def wire_turn_log(session, clock=time.monotonic) -> None:
     """One short log line per turn event, so a silent turn on a real call can be traced: how many
     words the caller's final transcript had (never the words), agent and caller state changes, the
@@ -2278,6 +2306,11 @@ async def entrypoint(ctx: JobContext) -> None:
     call.research_id = research_id            # the camera loop never checks codes on that call
     wire_transcripts(session, call.heard)     # before start, so the first words are kept too
     wire_turn_log(session)
+    rec_path = recording_path(getattr(ctx.room, "name", "") or "")
+    if rec_path:                                 # demo recording: video + transcript, same name
+        os.makedirs(os.path.dirname(rec_path), exist_ok=True)
+        call.video.record_to = rec_path
+        wire_transcript_file(session, rec_path[:-4] + ".txt")
     wire_board_nudge(session, call)
     wire_next_timer(session, call)
     call.watcher.start()                      # before connect, so no track event is missed

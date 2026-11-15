@@ -41,6 +41,7 @@ import io
 import math
 import os
 import re
+import subprocess
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -174,6 +175,55 @@ def _wrap(text: str, font, max_w: int, lines: int = 2) -> list[str]:
                 break
     out.append(cur)
     return [_fit(l, font, max_w) for l in out[:lines]]
+
+
+def recording_path(room_name: str) -> Optional[str]:
+    """Where to save this call's video for the demo (RECORD_CALLS=1), or None. Only calls we place
+    (scansafe-out-*), never idle warm rooms."""
+    if os.getenv("RECORD_CALLS") != "1" or not re.fullmatch(r"scansafe-out-[0-9a-f]{3,32}", room_name or ""):
+        return None
+    folder = os.getenv("RECORD_DIR") or "/root/recordings"
+    return f"{folder}/{time.strftime('%Y%m%d-%H%M%S')}-{room_name}.mp4"
+
+
+class FrameRecorder:
+    """Saves the frames we send (as drawn) to an MP4 through ffmpeg. Frames are repeated as needed
+    so the file runs in real time even when the render loop is slower than its FPS. Fragmented MP4:
+    a call cut short still leaves a playable file."""
+
+    def __init__(self, path: str, w: int, h: int, fps: int, clock=time.monotonic) -> None:
+        self.fps, self.clock = fps, clock
+        self.cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
+                    "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", "-c:v", "libx264", "-preset", "veryfast",
+                    "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+frag_keyframe+empty_moov", path]
+        self.proc = subprocess.Popen(self.cmd, stdin=subprocess.PIPE)
+        self.t0: Optional[float] = None
+        self.frames = 0
+
+    def write(self, data: bytes) -> None:
+        if self.proc is None:
+            return
+        now = self.clock()
+        if self.t0 is None:
+            self.t0 = now
+        due = int((now - self.t0) * self.fps) + 1
+        try:
+            while self.frames < due:
+                self.proc.stdin.write(data)
+                self.frames += 1
+        except (BrokenPipeError, ValueError, OSError):
+            log.warning("recording stopped (ffmpeg went away)")
+            self.close()
+
+    def close(self) -> None:
+        p, self.proc = self.proc, None
+        if p is None:
+            return
+        try:
+            p.stdin.close()
+            p.wait(timeout=15)
+        except Exception:  # noqa: BLE001
+            p.kill()
 
 
 def out_size() -> tuple[int, int]:
@@ -737,13 +787,29 @@ class StatusVideo:
             degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION,
         )
         await room.local_participant.publish_track(track, opts)
+        path = getattr(self, "record_to", None) or recording_path(getattr(room, "name", ""))
+        if path:
+            try:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                self._rec = FrameRecorder(path, self.W, self.H, self.FPS)
+                log.info("recording this call's video to %s", path)
+            except OSError as e:
+                log.warning("couldn't start recording (%s)", type(e).__name__)
         self._task = asyncio.create_task(self._loop())
+
+    def _frame(self, ow: int, oh: int) -> bytes:
+        """Draw, record (if on), then scale for sending. Runs in a worker thread."""
+        drawn = self._draw()
+        rec = getattr(self, "_rec", None)
+        if rec is not None:
+            rec.write(drawn)
+        return self._scaled(drawn, ow, oh)
 
     async def _loop(self) -> None:
         while True:
             try:
                 ow, oh = self.out_w, self.out_h
-                data = await asyncio.to_thread(lambda: self._scaled(self._draw(), ow, oh))  # off the audio loop
+                data = await asyncio.to_thread(self._frame, ow, oh)   # off the audio loop
                 self._last_good = data
             except asyncio.CancelledError:
                 raise
@@ -778,3 +844,7 @@ class StatusVideo:
     def close(self) -> None:
         if self._task:
             self._task.cancel()
+        rec = getattr(self, "_rec", None)
+        if rec is not None:
+            self._rec = None
+            rec.close()

@@ -555,3 +555,67 @@ def test_wait_timer_follows_the_conversation(monkeypatch):
     user(ns(old_state="listening", new_state="speaking"))
     user(ns(old_state="speaking", new_state="listening"))
     assert not waiting()                               # it was already talking: no countdown
+
+
+# --- recording calls for the demo video (RECORD_CALLS=1) ----------------------------------------
+
+def test_frame_recorder_keeps_real_time(monkeypatch, tmp_path):
+    from chert import status_video as sv
+    written, closed = [], []
+
+    class Proc:
+        def __init__(self, cmd, stdin=None, **kw):
+            self.cmd = cmd
+            self.stdin = self
+
+        def write(self, b):
+            written.append(len(b))
+
+        def close(self):
+            closed.append(True)
+
+        def wait(self, timeout=None):
+            return 0
+    monkeypatch.setattr(sv.subprocess, "Popen", Proc)
+    now = [100.0]
+    rec = sv.FrameRecorder(str(tmp_path / "x.mp4"), 4, 2, 10, clock=lambda: now[0])
+    frame = bytes(4 * 2 * 4)
+    rec.write(frame)                      # t = 0: one frame
+    now[0] = 100.35                       # 0.35 s later: the video should be 4 frames long
+    rec.write(frame)
+    assert len(written) == 4 and set(written) == {32}
+    rec.close()
+    rec.write(frame)                      # closed: ignored
+    assert closed and len(written) == 4
+    assert "frag_keyframe" in " ".join(rec.cmd)
+
+
+def test_recording_is_off_unless_asked(monkeypatch):
+    from chert import status_video as sv
+    monkeypatch.delenv("RECORD_CALLS", raising=False)
+    assert sv.recording_path("scansafe-out-abc") is None
+    monkeypatch.setenv("RECORD_CALLS", "1")
+    monkeypatch.setenv("RECORD_DIR", "/tmp/rec-test")
+    p = sv.recording_path("scansafe-out-abc")
+    assert p.startswith("/tmp/rec-test/") and p.endswith("-scansafe-out-abc.mp4")
+    assert sv.recording_path("chert-warm-xyz") is None          # idle warm rooms aren't recorded
+    assert sv.recording_path("../../etc/passwd") is None
+
+
+def test_transcript_file_for_captions(monkeypatch, tmp_path):
+    import types as _t
+    ai = agent_mod(monkeypatch)
+    handlers = {}
+    session = _t.SimpleNamespace(on=lambda name, fn: handlers.setdefault(name, fn))
+    path = tmp_path / "call.txt"
+    now = [50.0]
+    ai.wire_transcript_file(session, str(path), clock=lambda: now[0])
+    ns = _t.SimpleNamespace
+    now[0] = 53.2
+    handlers["user_input_transcribed"](ns(transcript="teach me derivatives", is_final=False))
+    handlers["user_input_transcribed"](ns(transcript="teach me what a derivative is", is_final=True))
+    now[0] = 55.0
+    handlers["conversation_item_added"](ns(item=ns(role="assistant", text_content="Sure! A derivative is a slope.")))
+    handlers["conversation_item_added"](ns(item=ns(role="user", text_content="ignored here")))
+    assert path.read_text().splitlines() == ["[0:03.2] caller: teach me what a derivative is",
+                                             "[0:05.0] agent: Sure! A derivative is a slope."]
