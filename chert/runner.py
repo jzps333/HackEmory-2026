@@ -23,6 +23,8 @@ imports (unit-testable).
 """
 from __future__ import annotations
 
+import os
+
 import asyncio
 import logging
 import re
@@ -283,7 +285,15 @@ def form_url(url: Any) -> Optional[str]:
         p = urlparse(url)
     except ValueError:
         return None
-    return url if p.scheme in ("http", "https") and p.hostname else None
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return None
+    # A link the model passes must be one the caller can't be tricked into: only our own demo
+    # form. Anything else is filled only from the tab the caller already has open in Chrome ("").
+    allowed = {u.strip() for u in os.getenv("FORM_FILL_ALLOWED_URLS", DEMO_FORM_URL).split(",") if u.strip()}
+    return url if url.split("#")[0] in allowed else None
+
+
+DEMO_FORM_URL = "https://api.scansafe.nyc/demo/forms/permit"
 
 
 def project_name(name: Any) -> Optional[str]:

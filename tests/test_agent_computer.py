@@ -132,7 +132,7 @@ def test_computer_tool_is_verified_only_and_both_plugins_ship_on():
     assert "computer" not in community.APP_ONLY_TOOLS and "computer" not in community.BASE_TOOLS
     assert community.FUNCTIONS["computer"] == ("fill_form", "submit_form", "vercel_status",
                                                "vercel_redeploy", "list_connections")
-    assert list(STARTER_IDS) == sorted(STARTER_IDS) and {"form-filler", "vercel"} <= set(STARTER_IDS)
+    assert list(STARTER_IDS) == sorted(STARTER_IDS) and "vercel" in STARTER_IDS and "form-filler" not in STARTER_IDS
     plugins = starter()
     for pid, name in (("form-filler", "Form filler"), ("vercel", "Vercel")):
         p = by_id(plugins, pid)

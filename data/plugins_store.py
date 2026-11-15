@@ -25,8 +25,7 @@ from data import tiger_store
 log = logging.getLogger("scansafe.plugins")
 
 PLUGINS_STATE_FILE = os.getenv("PLUGINS_STATE_FILE") or os.path.expanduser("~/.scansafe-plugins/enabled.json")
-STARTER_IDS = ("form-filler", "parking", "plugin-finder", "qr-checker", "research", "safe-browser",
-               "solana-pay", "squat-coach", "study-buddy", "vercel")
+STARTER_IDS = ("parking", "plugin-finder", "qr-checker", "research", "safe-browser", "solana-pay", "squat-coach", "study-buddy", "vercel")
 INSTALLS_SQL = """CREATE TABLE IF NOT EXISTS plugin_installs (
     plugin_id TEXT NOT NULL,
     at        TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -14,7 +14,8 @@ from api import routes_plugins
 from data import plugins_store, typesense_store
 
 REPO_PLUGINS = Path(__file__).resolve().parent.parent / "plugins"
-STARTERS = ["form-filler", "parking", "plugin-finder", "qr-checker", "research", "safe-browser", "solana-pay",
+OFF_BY_DEFAULT = ["form-filler"]      # in the library, verified, but not switched on by default
+STARTERS = ["parking", "plugin-finder", "qr-checker", "research", "safe-browser", "solana-pay",
             "squat-coach", "study-buddy", "vercel"]
 
 UNVERIFIED = """id: tip-jar
@@ -66,7 +67,7 @@ def test_list_shows_verified_and_enabled(client, env):
     assert r.status_code == 200
     body = r.json()
     by_id = {p["id"]: p for p in body["plugins"]}
-    assert sorted(by_id) == sorted(STARTERS + ["tip-jar"])
+    assert sorted(by_id) == sorted(STARTERS + OFF_BY_DEFAULT + ["tip-jar"])
     assert all(by_id[i]["verified"] for i in STARTERS)
     assert by_id["tip-jar"]["verified"] is False
     assert "solana_pay" not in by_id["tip-jar"]["effective_tools"]
@@ -125,7 +126,7 @@ def test_search_falls_back_without_typesense(client, env):
     assert client.get("/plugins/search", params={"q": "send a tip"}).json()["plugins"][0]["id"] == "tip-jar"
     assert client.get("/plugins/search", params={"q": "zzzz-nothing"}).json()["plugins"] == []
     everything = client.get("/plugins/search", params={"q": ""}).json()["plugins"]
-    assert len(everything) == len(STARTERS) + 1      # starters + tip-jar
+    assert len(everything) == len(STARTERS) + len(OFF_BY_DEFAULT) + 1      # + tip-jar
 
 
 def test_search_uses_typesense_and_falls_back_when_it_errors(client, env, monkeypatch):
@@ -171,7 +172,7 @@ def test_plugins_endpoint_survives_a_broken_plugin(client, env):
     assert r.status_code == 200
     body = r.json()
     assert set(body["skipped"]) == {"broken", "shell-tool"}
-    assert sorted(p["id"] for p in body["plugins"]) == STARTERS
+    assert sorted(p["id"] for p in body["plugins"]) == sorted(STARTERS + OFF_BY_DEFAULT)
     assert client.get("/plugins/broken").status_code == 404
     assert client.post("/plugins/broken/enable").status_code == 404
     assert all(p["id"] != "shell-tool" for p in client.get("/plugins/enabled").json()["plugins"])
