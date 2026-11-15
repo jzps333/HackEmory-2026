@@ -23,24 +23,48 @@ when you say yes, and researches on its own. Anyone can build, verify and share 
 (Chert-only version) Toolstone gives Chert agents verified, open-source skills that use what only
 Chert has: FaceTime. A live tutor whiteboard, research that calls you back, your infrastructure by voice.
 
-## 3. Devpost video (2:00, split screen, every track)
+## 3. Devpost video (2:00): with vs without skills
 
-Speed-ups and several things on one screen are allowed. Judges read captions at 1x, so every
-panel gets a caption strip; the call audio is muted and a voice-over plus captions tell the story.
+Speed-ups and several clips on one screen are allowed. Call audio is muted; captions say what the AI
+did and a voice-over ties it together. Layout: four phones across one 16:9 frame, labelled
+**Tutor · out of the box | Tutor · with skill | Research · out of the box | Research · with skill**.
 
-| Time | On screen | Voice-over (short) | Tracks hit |
-|---|---|---|---|
-| 0:00-0:06 | Title card: "Toolstone: verified skills for Chert" over the Community plugins page | "Toolstone gives any Chert agent new skills that work on a real FaceTime call." | Chert |
-| 0:06-0:50 | **Three phones side by side**, each its own screen recording at 2-3x, a label on top and a caption strip under it: **Tutor** (handwritten steps, countdown chip) · **Research** (asks, hangs up, "4 min later", text, report with green Study tags, call-back) · **Vercel** ("How's my site?", deploys read back) | "On the left it teaches with handwritten notes. In the middle it researches published studies on its own and calls back. On the right it checks my Vercel site through a helper on my own computer: my key never leaves it." | Chert, Gemini, Google Cloud, Typesense, Security |
-| 0:50-1:15 | **ScanSafe**, split: phone holding up `docs/demo-scam-qr.png` · the locked-down browser streaming from the Vultr VM · the scam warning | "Hold up a QR code and it opens the link in a throwaway, locked-down browser on a Vultr VM, so the scam never touches your phone." | Security, Vultr |
-| 1:15-1:30 | Community plugins page: search (Typesense), Verified / Needs verification, GitHub `plugins/` + `verified.json` | "Every skill is a recipe in a public repo. It's verified by fingerprint; edit it and it's unverified again, and unverified skills never touch money, research or your computer." | Security, Chert, Typesense |
-| 1:30-1:52 | **Under the hood grid**, 2x3 tiles, 3 s each lit up: Tiger Data tables (plugin_records, research_jobs, runners) · Typesense collections · Gemini on our Google Cloud project with spend caps · Vultr agent server + sandbox VM · Coder workspace "Write a Toolstone skill" · Solana devnet: Parking pays only after "yes, pay" | one line per tile | Tiger Data, Typesense, Gemini/Google Cloud, Vultr, Coder, Solana |
-| 1:52-2:00 | End card: Toolstone, repo link, track logos | "Toolstone. Skills for Chert." | |
+### Clips to record (AirDrop each one to the Mac as soon as it's done)
 
-Editing (CapCut or iMovie): one 16:9 canvas, three vertical phone clips at equal width, speed each to
-2-3x so the key moment lands inside 0:06-0:50, add a caption strip per panel, mute clip audio, record
-the voice-over last. Chapters in the YouTube description: 0:00 Intro · 0:06 Tutor, Research, Vercel ·
-0:50 ScanSafe · 1:15 Verified skills · 1:30 Under the hood.
+Phone = iPhone screen recording (Control Center, Screen Recording). Mac = Cmd+Shift+5, "Record
+Selected Portion". Audio doesn't matter (it gets muted).
+
+| # | Device | Setup | Do | Length |
+|---|---|---|---|---|
+| 1 | Phone | Community plugins page: switch to **Chert out of the box** | Call me now, "Teach me how matrix multiplication works", let it answer, hang up | ~30 s |
+| 2 | Phone | Switch to **Chert + community skills** | Call me now, same question; 2-3 steps with check-ins; "can you draw an example?" | 60-90 s |
+| 3 | Phone | **Out of the box** | Call me now, "Research what Adderall does to dopamine receptors in teenagers", let it answer, hang up | ~30 s |
+| 4a | Phone | **With skills** | Same ask; record until it hangs up by itself | ~40 s |
+| 4b | Phone | (when the text arrives) | Open the text, open the report, scroll past the sections to the green **Study** sources | ~30 s |
+| 4c | Phone | (the call-back) | Answer, let it walk through one section | ~25 s |
+| 5 | Phone | With skills; open `docs/demo-scam-qr.png` big on the laptop | Call me now, "Is this QR code safe?", point the camera at the sticker, record until the warning | ~45 s |
+| 6 | Mac | chert-community-plugins.vercel.app | Quickstart and docs, Community plugins, type "tutor" in the search, show the Verified badges and the out-of-the-box switch | ~15 s |
+| 7 | Mac | GitHub repo | `plugins/` folder, then `verified.json` | ~8 s |
+| 8 | Mac | Tiger Data console | the table list (plugin_records, research_jobs, runners, scans): never the connection URL | ~6 s |
+| 9 | Mac | Vultr dashboard | the agent server and the sandbox VM | ~6 s |
+| 10 | Mac | http://144.202.25.65:3000 | the Coder workspace page | ~6 s |
+| 11 | Mac | https://explorer.solana.com/tx/5yKKNDzwTjTaP5AkgzHv3DRQFP2iuPsmDeDDgpg2npQhz4pKZttFqH81xj4viKYn2iVKWNuXrZeDx1EtnBRwFVC5?cluster=devnet | a real Parking payment on devnet ("Success") | ~6 s |
+| 12 | Mac | Google AI Studio / Cloud billing | Gemini usage or the budget cap (optional, Google Cloud track) | ~6 s |
+| 13 | Voice memo | after the clips | read the voice-over below, calmly | ~70 s |
+
+### Edit (0:00-2:00)
+
+| Time | On screen | Voice-over |
+|---|---|---|
+| 0:00-0:06 | Title over clip 6 | "Chert gives AI agents a FaceTime line. Toolstone gives them skills." |
+| 0:06-0:50 | Clips 1, 2, 3, 4a-c as four phones across, sped up, caption strip under each | "Out of the box, Chert just talks. With the Tutor skill, it writes handwritten notes on my screen and checks in after every step. Out of the box, it can't research. With the Research skill, it hangs up, reads published studies on its own, texts me a cited report and calls me back." |
+| 0:50-1:15 | Clip 5 (QR, live locked-down browser, warning) | "And for security: hold up a QR code, and ScanSafe opens it in a throwaway browser on a Vultr VM, so the scam never touches your phone." |
+| 1:15-1:30 | Clips 6, 7 | "Anyone can publish a skill. Typesense powers the search, and a skill is only verified by its fingerprint: edit it and it's unverified, and unverified skills can't touch money, research or your computer." |
+| 1:30-1:52 | Grid of clips 8-12, 3-4 s each | "Under the hood: Tiger Data holds skill memory and research, Gemini on Google Cloud runs the agent with spend caps, Vultr runs it all, Coder is where you write a skill, and the Parking skill pays on Solana devnet only after you say yes, pay." |
+| 1:52-2:00 | End card | "Toolstone. Skills for Chert." |
+
+YouTube chapters: 0:00 Intro · 0:06 Tutor and Research, with vs without · 0:50 ScanSafe · 1:15 Verified
+skills · 1:30 Under the hood.
 
 ## 3b. Live pitch to Chert (they've already seen the project)
 
