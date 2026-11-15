@@ -96,7 +96,7 @@ def test_repo_plugins_are_all_valid_and_verified():
     plugins, skipped = pi.load_plugins(pi.PLUGINS_DIR)
     assert skipped == {}
     assert {p.id for p in plugins} == {"qr-checker", "safe-browser", "solana-pay", "parking",
-                                       "squat-coach", "plugin-finder"}
+                                       "squat-coach", "plugin-finder", "study-buddy"}
     assert all(p.verified for p in plugins)
 
 

@@ -26,7 +26,7 @@ import yaml
 
 PLUGINS_DIR = Path(os.getenv("PLUGINS_DIR") or Path(__file__).resolve().parent.parent / "plugins")
 TOOLS = frozenset({"camera", "speak", "screen", "memory", "safe_browser", "scam_check",
-                   "plugin_search", "solana_pay", "parking"})
+                   "plugin_search", "solana_pay", "parking", "flashcards"})
 MONEY_TOOLS = frozenset({"solana_pay", "parking"})
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
 RESERVED_IDS = frozenset({"search", "enabled"})     # API routes /plugins/search, /plugins/enabled

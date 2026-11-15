@@ -1,0 +1,13 @@
+id: study-buddy
+name: "Study buddy"
+summary: "Spaced-repetition flashcards by voice: add cards on a call, say \"quiz me\", and it asks what's due and schedules the next review."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["quiz me", "study buddy", "add a card", "flashcards"]
+  qr: false
+tools: [speak, screen, memory, flashcards]
+permissions: "This plugin saves the flashcards you add and how well you remember them to your private history."
+instructions: "Help the caller study with flashcards. When they say add a card (for example: add a card, mitochondria, the powerhouse of the cell), call add_card with the front and back. When they say quiz me, call next_card, read the front, and wait for their answer. Judge it fairly (the meaning matters, not exact words), say whether it was right and give the back, then call grade_card with correct true or false and tell them when it comes back. Keep going with next_card until they stop or nothing is due. Keep it quick and encouraging."

@@ -14,7 +14,7 @@ from api import routes_plugins
 from data import plugins_store, typesense_store
 
 REPO_PLUGINS = Path(__file__).resolve().parent.parent / "plugins"
-STARTERS = ["parking", "plugin-finder", "qr-checker", "safe-browser", "solana-pay", "squat-coach"]
+STARTERS = ["parking", "plugin-finder", "qr-checker", "safe-browser", "solana-pay", "squat-coach", "study-buddy"]
 
 UNVERIFIED = """id: tip-jar
 name: Tip jar
@@ -124,7 +124,7 @@ def test_search_falls_back_without_typesense(client, env):
     assert client.get("/plugins/search", params={"q": "send a tip"}).json()["plugins"][0]["id"] == "tip-jar"
     assert client.get("/plugins/search", params={"q": "zzzz-nothing"}).json()["plugins"] == []
     everything = client.get("/plugins/search", params={"q": ""}).json()["plugins"]
-    assert len(everything) == 7
+    assert len(everything) == len(STARTERS) + 1      # starters + tip-jar
 
 
 def test_search_uses_typesense_and_falls_back_when_it_errors(client, env, monkeypatch):
