@@ -1668,20 +1668,30 @@ def make_model():
         realtime_input_config=gtypes.RealtimeInputConfig(
             automatic_activity_detection=gtypes.AutomaticActivityDetection(
                 start_of_speech_sensitivity=gtypes.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=gtypes.EndSensitivity.END_SENSITIVITY_HIGH,
+                # Low end sensitivity and 800 ms of silence: people pause mid-thought ("um,
+                # like...") and at 500 ms it started talking over them.
+                end_of_speech_sensitivity=gtypes.EndSensitivity.END_SENSITIVITY_LOW,
                 prefix_padding_ms=200,
-                silence_duration_ms=500,
+                silence_duration_ms=int(os.getenv("GEMINI_LIVE_SILENCE_MS", "800")),
             )),
         temperature=0.6,
-        # We send the caller's camera, and Gemini Live ends audio+video sessions after 2 minutes
-        # unless context compression is on (a tutor lesson died at 2:00). Sliding-window
-        # compression lifts that; session resumption lets the plugin reconnect into the same
-        # conversation when Google rotates the connection.
-        context_window_compression=gtypes.ContextWindowCompressionConfig(
-            sliding_window=gtypes.SlidingWindow(),
-            trigger_tokens=int(os.getenv("GEMINI_LIVE_COMPRESS_AT", "25600"))),
+        # Session resumption lets the plugin reconnect into the same conversation when Google
+        # rotates the connection. No context compression by default: with this native-audio
+        # model it ended a call at 1:24 with 1007 "CONTENT_TYPE_AUDIO is not supported". Audio-
+        # only sessions (gemini_sees_video off) run 15 minutes without it.
         session_resumption=gtypes.SessionResumptionConfig(),
+        **({"context_window_compression": gtypes.ContextWindowCompressionConfig(
+            sliding_window=gtypes.SlidingWindow(),
+            trigger_tokens=int(os.environ["GEMINI_LIVE_COMPRESS_AT"]))}
+           if os.getenv("GEMINI_LIVE_COMPRESS_AT", "").isdigit() else {}),
     )
+
+
+def gemini_sees_video() -> bool:
+    """Send the caller's camera to Gemini too (GEMINI_SEES_VIDEO=1). Off by default: frames cost
+    about 258 tokens a second and Gemini Live caps audio+video sessions at 2 minutes (a lesson
+    died at 2:00). Our own QR watcher reads the camera either way."""
+    return os.getenv("GEMINI_SEES_VIDEO") == "1"
 
 
 def _bridge_ready(metadata: str | None) -> bool:
@@ -2313,15 +2323,22 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(
         room=ctx.room,
         agent=agent,
-        # Also lets Gemini see the caller (it implements push_video). TODO(verify): RoomIO only
-        # forwards camera/screenshare-source tracks; if Chert's bridge track has another source,
-        # Gemini won't see video, but our QRWatcher still reads every video track.
-        room_options=room_io.RoomOptions(video_input=True),
+        # Gemini only sees the caller when gemini_sees_video() (off: 2-minute cap); our
+        # QRWatcher reads every video track either way.
+        room_options=room_io.RoomOptions(video_input=gemini_sees_video()),
     )
     await ctx.connect()
     # Lets a skill end the call itself (research: "on it, bye" then hang up). Deleting the room
     # disconnects Chert's FaceTime bridge, which ends the call on the phone.
     call.end_call = lambda: ctx.delete_room()
+
+    def _closed(ev) -> None:
+        # Gemini's session died (it can't be resumed): hang up rather than leave the caller
+        # talking to silence. They can call again.
+        if getattr(ev, "error", None) is not None:
+            log.error("session closed on an error (%s); hanging up", type(ev.error).__name__)
+            asyncio.get_running_loop().create_task(ctx.delete_room())
+    session.on("close", _closed)
     for p in ctx.room.remote_participants.values():
         _participant(p)
     await call.video.publish(ctx.room)

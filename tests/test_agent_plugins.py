@@ -471,7 +471,7 @@ def test_gemini_sessions_outlive_two_minutes(monkeypatch):
         "ContextWindowCompressionConfig", "SlidingWindow", "SessionResumptionConfig",
         "AudioTranscriptionConfig", "RealtimeInputConfig", "AutomaticActivityDetection")},
         StartSensitivity=types.SimpleNamespace(START_SENSITIVITY_HIGH="hi"),
-        EndSensitivity=types.SimpleNamespace(END_SENSITIVITY_HIGH="hi"))
+        EndSensitivity=types.SimpleNamespace(END_SENSITIVITY_HIGH="hi", END_SENSITIVITY_LOW="lo"))
     genai = types.ModuleType("google.genai")
     genai.types = gtypes
     google_pkg = types.ModuleType("google")
@@ -483,8 +483,16 @@ def test_gemini_sessions_outlive_two_minutes(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.genai", genai)
     monkeypatch.setitem(sys.modules, "google.genai.types", gtypes)
     monkeypatch.setitem(sys.modules, "livekit.plugins", plugins_pkg)
+    monkeypatch.delenv("GEMINI_LIVE_COMPRESS_AT", raising=False)
     model = ai.make_model()
-    cw = model.k["context_window_compression"]
-    assert type(cw).__name__ == "ContextWindowCompressionConfig"
-    assert type(cw.k["sliding_window"]).__name__ == "SlidingWindow"
     assert type(model.k["session_resumption"]).__name__ == "SessionResumptionConfig"
+    assert "context_window_compression" not in model.k       # it killed a call at 1:24 (1007)
+    vad = model.k["realtime_input_config"].k["automatic_activity_detection"].k
+    assert vad["end_of_speech_sensitivity"] == "lo" and vad["silence_duration_ms"] == 800
+    monkeypatch.setenv("GEMINI_LIVE_COMPRESS_AT", "64000")    # still there if we ever want it
+    cw = ai.make_model().k["context_window_compression"]
+    assert cw.k["trigger_tokens"] == 64000 and type(cw.k["sliding_window"]).__name__ == "SlidingWindow"
+    monkeypatch.delenv("GEMINI_SEES_VIDEO", raising=False)
+    assert ai.gemini_sees_video() is False                     # no camera to Gemini: no 2-min cap
+    monkeypatch.setenv("GEMINI_SEES_VIDEO", "1")
+    assert ai.gemini_sees_video() is True
