@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 import re
+import socket
+import ipaddress
 import subprocess
 import sys
 import time
@@ -32,6 +34,43 @@ class JobError(Exception):
         self.code = code[:200]
 
 
+DEFAULT_SITES = ("api.scansafe.nyc",)    # our demo permit form
+
+
+def approved_sites() -> set:
+    """Sites the person approved ON THIS COMPUTER for filling: ~/.toolstone/allowed_sites
+    (one hostname per line). The demo form's host is always allowed."""
+    from . import config
+    sites = set(DEFAULT_SITES)
+    try:
+        for line in (config.home() / "allowed_sites").read_text().splitlines():
+            line = line.strip().lower()
+            if line and not line.startswith("#"):
+                sites.add(line)
+    except OSError:
+        pass
+    return sites
+
+
+def _private_host(host: str) -> bool:
+    """Loopback, private, link-local or reserved address, or a name that resolves to one, or a
+    single-label / .local name. TOOLSTONE_ALLOW_LOCAL=1 lifts this (tests, local dev only)."""
+    if os.getenv("TOOLSTONE_ALLOW_LOCAL") == "1":
+        return False
+    host = (host or "").strip("[]").lower()
+    if not host or "." not in host or host.endswith((".local", ".localhost", ".internal")) or host == "localhost":
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return True
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            return True
+    return False
+
+
 def allowed_url(url: str) -> bool:
     try:
         parts = urlsplit(url.strip())
@@ -39,6 +78,16 @@ def allowed_url(url: str) -> bool:
         return False
     return (parts.scheme in ("http", "https") and bool(parts.hostname) and len(url) <= 2048
             and not parts.username and not parts.password)
+
+
+def site_ok(url: str) -> tuple[bool, str]:
+    """(ok, reason): an approved site on this computer and not a local/private address."""
+    host = (urlsplit(url).hostname or "").lower()
+    if os.getenv("TOOLSTONE_ALLOW_LOCAL") != "1" and host not in approved_sites():
+        return False, "site_not_approved"
+    if _private_host(host):
+        return False, "private_address"
+    return True, ""
 
 
 def public_url(url: str) -> str:
@@ -160,13 +209,16 @@ class Frames:
         self.page = page
         self.reporter = reporter
         self.last = 0.0
+        self.mask: list = []        # filled fields: blacked out, so saved info never leaves the computer
 
     def shot(self) -> None:
         self.last = time.monotonic()   # also on failure (mid-navigation), so no busy loop
         try:
-            jpeg = self.page.screenshot(type="jpeg", quality=60, timeout=5000)
+            jpeg = self.page.screenshot(type="jpeg", quality=60, timeout=5000, mask=self.mask,
+                                        mask_color="#1f2a44")
             if len(jpeg) > MAX_FRAME:
-                jpeg = self.page.screenshot(type="jpeg", quality=30, timeout=5000)
+                jpeg = self.page.screenshot(type="jpeg", quality=30, timeout=5000, mask=self.mask,
+                                            mask_color="#1f2a44")
         except Exception:
             return
         if len(jpeg) <= MAX_FRAME:
@@ -258,6 +310,9 @@ class FormRunner:
             url = active_chrome_url()
         if not allowed_url(url):
             raise JobError("bad_url:only_http_https")
+        ok, why = site_ok(url)
+        if not ok:   # approve a site by adding its hostname to ~/.toolstone/allowed_sites
+            raise JobError(why)
         browser = self._ensure_browser()
         reporter.progress("Opening the form in a browser window on your computer")
         context = browser.new_context(viewport={"width": 1200, "height": 800})
@@ -275,6 +330,12 @@ class FormRunner:
             page.wait_for_load_state("networkidle", timeout=4000)
         except Exception:
             pass
+        if not site_ok(page.url)[0]:      # a redirect left the approved site: stop before filling
+            try:
+                context.close()
+            except Exception:
+                pass
+            raise JobError("site_not_approved")
         frames = Frames(page, reporter)
         frames.shot()
 
@@ -301,6 +362,7 @@ class FormRunner:
                 missing.append(fields.label_of(desc))
                 continue
             filled.append({"label": fields.label_of(desc), "key": key})
+            frames.mask.append(loc)                 # screenshots black this field out from now on
             form_votes[int(desc.get("form", -1))] = form_votes.get(int(desc.get("form", -1)), 0) + 1
             if self.fill_delay > 0:
                 try:

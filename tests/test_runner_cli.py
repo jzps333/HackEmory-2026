@@ -645,3 +645,17 @@ def test_form_fill_and_submit_real_browser(tmp_path, home):
     finally:
         runner.close()
         srv.shutdown()
+
+
+def test_form_sites_must_be_approved_and_public(monkeypatch, tmp_path):
+    from toolstone_helper import forms
+    monkeypatch.setenv("TOOLSTONE_HOME", str(tmp_path))
+    monkeypatch.delenv("TOOLSTONE_ALLOW_LOCAL", raising=False)
+    assert forms.site_ok("https://evil.example/form") == (False, "site_not_approved")
+    assert forms.site_ok("http://localhost:8000/x") == (False, "site_not_approved")
+    (tmp_path / "allowed_sites").write_text("# my sites\nlocalhost\n")
+    assert forms.site_ok("http://localhost:8000/x") == (False, "private_address")   # approved but local
+    monkeypatch.setattr(forms.socket, "getaddrinfo", lambda h, p: [(None, None, None, None, ("93.184.216.34", 0))])
+    assert forms.site_ok("https://api.scansafe.nyc/demo/forms/permit") == (True, "")
+    monkeypatch.setattr(forms.socket, "getaddrinfo", lambda h, p: [(None, None, None, None, ("10.0.0.5", 0))])
+    assert forms.site_ok("https://api.scansafe.nyc/demo/forms/permit") == (False, "private_address")
