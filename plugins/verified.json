@@ -1,4 +1,8 @@
 {
+  "form-filler": {
+    "sha256": "92e2e42eabbce5727367a6486dbee64d6f979d5819d7e1efb6a4b9257cb3d797",
+    "by": "jzps333"
+  },
   "parking": {
     "sha256": "47ed63ff7227ffbcb41d883732893cb0a70b8ebf1316c31811f90a7a2d951986",
     "by": "jzps333"
@@ -29,6 +33,10 @@
   },
   "study-buddy": {
     "sha256": "ff34f6b4367c3aeffb21113768f91abfddaa092c9a69e5499c9e993f66627742",
+    "by": "jzps333"
+  },
+  "vercel": {
+    "sha256": "1d5c16a607a24c429c81408bf8653486093d02ff500fb64334cf6a70a6b597d0",
     "by": "jzps333"
   }
 }

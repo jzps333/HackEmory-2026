@@ -27,6 +27,10 @@ instead of the site (note_step). Paid shows over the app's receipt picture.
 Community plugins (chert/plugins.py) add:
   card     - the plugin that is on (big title) and its latest line, e.g. "Squat coach" /
              "Knees out over your toes" (set_card). Text only, clipped, never run.
+Helper app jobs (chert/runner.py: form filler, Vercel) reuse the live view (begin_live): the
+caller's OWN computer streams its browser, the header says "Your computer · Form filler", the
+line under it the helper's latest progress note, and the LIVE tag "on your computer". Before
+the first frame a waiting screen; end_live puts a tick where the spinner was.
 """
 from __future__ import annotations
 
@@ -180,6 +184,9 @@ class StatusVideo:
     consent: Optional[str] = None         # "Say “yes, pay” to confirm · 0.03 SOL · 3 h · GA 4821K"
     card: Optional[tuple[str, str]] = None   # (title, body) of a plugin card
     plain = False                         # baseline ("Chert out of the box"): no ScanSafe idle screen
+    live_title = ""                       # helper app: "Your computer · Form filler" (begin_live)
+    live_tag = ""                         # helper app: LIVE tag text instead of "on our computer"
+    live_done = False                     # helper app: job over, a tick instead of the spinner
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -203,6 +210,7 @@ class StatusVideo:
         self.state, self.result, self.shot, self.thumb = "checking", None, None, None
         self.live, self.live_host, self.code = None, "", code
         self.live_step = ""
+        self.live_title, self.live_tag, self.live_done = "", "", False   # begin_live sets them again
         self.meter = None          # an ordinary check; begin_meter_view sets it again
         self.code_host = _host(code) or _clip(code, 28)
         self.check_started = time.monotonic()
@@ -239,6 +247,20 @@ class StatusVideo:
         from the sandbox's fixed step names, never from the page."""
         self.live_step = _clip(text, 60)
 
+    def begin_live(self, key: str, title: str, tag: str = " · on your computer") -> None:
+        """Helper app job (chert/runner.py): the live view of the caller's own computer under
+        ``title`` ("Your computer · Form filler"). ``key`` names the job, so frames of an older
+        job can't land on this view (video.code)."""
+        self.begin_check(key)
+        self.live_title, self.live_tag = _clip(title, 60), " ".join((tag or "").split(" "))[:40]
+        self.live_step = "Waiting for your computer"
+
+    def end_live(self, step: str) -> None:
+        """The job is over: keep its last picture, a tick instead of the spinner, ``step`` below."""
+        if self.state == "checking" and self.live_title:
+            self.live_done = True
+            self.note_step(step)
+
     def set_result(self, result: dict) -> None:
         verdict = result.get("verdict")
         self.result = result
@@ -256,6 +278,7 @@ class StatusVideo:
         self.state, self.shot, self.thumb, self.result = "idle", None, None, None
         self.live, self.live_host, self.code = None, "", ""
         self.live_step = ""
+        self.live_title, self.live_tag, self.live_done = "", "", False
         self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
         self.consent = None
         self.card = None
@@ -394,10 +417,13 @@ class StatusVideo:
         elapsed = now - self.check_started
         # a frame means the sandbox is already open, so never show "Reading the code" here
         current = max(1, max(j for j, s in enumerate(STEPS) if elapsed >= s[2]))
-        self._spinner(d, 60, 106, now)
+        if self.live_done:
+            self._tick(d, 60, 106, "ok")
+        else:
+            self._spinner(d, 60, 106, now)
         meter = self.meter
         head = (f"{hours_text(meter['hours'])} · {sol_text(meter['amount'])} SOL" if meter
-                else STEPS[current][0] + "…")
+                else self.live_title or STEPS[current][0] + "…")
         d.text((96, 86), _fit(head, f["step"], self.W - 136), font=f["step"], fill=WHITE)
         step = self.live_step
         where = step or self.live_host or self.code_host
@@ -406,7 +432,7 @@ class StatusVideo:
         x = 40 + int(f["detail"].getlength(lead))
         d.text((x, 142), _fit(where, f["detail"], self.W - 40 - x), font=f["detail"], fill=WHITE)
         # the LIVE tag, centered between header and picture
-        tag_b, tag_r = "LIVE", " · on our computer, not your phone"
+        tag_b, tag_r = "LIVE", self.live_tag or " · on our computer, not your phone"
         fb, fr = f["tag_b"], f["tag"]
         tw = 22 + int(fb.getlength(tag_b) + fr.getlength(tag_r))
         w = tw + 40
@@ -419,6 +445,22 @@ class StatusVideo:
         px, py = (self.W - pic.width) // 2, LIVE_TOP
         d.rounded_rectangle((px - 6, py - 6, px + pic.width + 5, py + pic.height + 5), 32, fill=LIVE_RED)
         img.paste(pic, (px, py), mask)
+
+    def _live_wait(self, img: Image.Image, now: float) -> None:
+        """Helper app job before its first frame: the header, a big spinner and the latest note."""
+        d = ImageDraw.Draw(img)
+        f = self._f
+        d.text((48, 70), "ScanSafe", font=f["label"], fill=DIM)
+        for k, line in enumerate(_wrap(self.live_title, f["big"], self.W - 96)):
+            d.text((48, 180 + 80 * k), line, font=f["big"], fill=WHITE)
+        cy = 700
+        if self.live_done:
+            self._tick(d, self.W // 2, cy, "ok")
+        else:
+            a = (now * 360 * 1.2) % 360
+            d.arc((self.W // 2 - 70, cy - 70, self.W // 2 + 70, cy + 70), a, a + 270, fill=AMBER, width=14)
+        for k, line in enumerate(_wrap(self.live_step or "Working…", f["label"], self.W - 120)):
+            d.text((60, cy + 150 + 56 * k), line, font=f["label"], fill=WHITE)
 
     def _verdict(self, img: Image.Image) -> None:
         d = ImageDraw.Draw(img)
@@ -534,7 +576,7 @@ class StatusVideo:
             m = self.meter or {}
             return ("checking", int((now - self.check_started) * 8), id(self.result),
                     self.live_seq if self.live is not None else None, self.live_host,
-                    m.get("hours"), m.get("amount"), self.live_step)
+                    m.get("hours"), m.get("amount"), self.live_step, self.live_title, self.live_done)
         if self.state in VERDICTS:
             n = self._replaying(now)
             return ("verdict", self.state, n, id(self.result), id(self.shot))
@@ -563,6 +605,8 @@ class StatusVideo:
                 self._live(img, now, live)
             elif self.meter is not None:
                 self._meter_screen(img, now)         # "Opening the meter…" until frames arrive
+            elif self.live_title:
+                self._live_wait(img, now)            # helper app: waiting for its first frame
             else:
                 self._checklist(img, now, None)
         elif self.state in VERDICTS:
