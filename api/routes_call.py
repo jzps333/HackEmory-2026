@@ -379,11 +379,17 @@ def meter_code(url: str):
     return (payment, meter) if meter is not None else None
 
 
+SKILLS_CALL_URL = "toolstone:call"   # no link to open: Chert just calls with your skills
+
+
 def validate(req: CallRequest, signed_in: bool = False) -> tuple[str, str]:
     url, phone = req.url.strip(), req.phone.strip().replace(" ", "")
     if not url or len(url) > 2000:
         raise HTTPException(status_code=400, detail=URL_REFUSED)
-    if not re.match(r"^https?://", url, re.I) and not (url.startswith("solana:") and meter_code(url)):
+    if url == SKILLS_CALL_URL:
+        if not signed_in:                     # "call me with my skills": signed-in phones only
+            raise HTTPException(status_code=403, detail="Sign in with your phone to get a skills call.")
+    elif not re.match(r"^https?://", url, re.I) and not (url.startswith("solana:") and meter_code(url)):
         raise HTTPException(status_code=400, detail=URL_REFUSED)
     if not PHONE_RE.match(phone):
         raise HTTPException(status_code=400, detail="phone must be in international format, e.g. +14045550123")

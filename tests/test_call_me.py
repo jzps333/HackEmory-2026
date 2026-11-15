@@ -345,3 +345,8 @@ def test_full_store_evicts_from_the_biggest_holder(monkeypatch):
         routes_call.start_sign_in(f"+1312555{i:04d}", "flooder")
     reqs = list(routes_call._load_consent()["requests"].values())
     assert len(reqs) <= 6 and any(r["client"] == "normal-user" for r in reqs)
+
+
+def test_skills_call_url_needs_sign_in(fakes, monkeypatch):
+    r = client.post("/call-me", json={"url": "toolstone:call", "phone": "+18042459861"})
+    assert r.status_code == 403

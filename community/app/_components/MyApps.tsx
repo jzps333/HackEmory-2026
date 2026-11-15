@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowRight, Dumbbell, Layers, LogOut, NotebookPen, Puzzle } from "lucide-react";
+import { ArrowRight, Dumbbell, Layers, LogOut, NotebookPen, PhoneCall, Puzzle } from "lucide-react";
+import { callMeNow } from "@/lib/auth";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, checkedAt, errorText } from "@/lib/api";
@@ -29,13 +30,33 @@ export function KindBadge({ kind }: { kind: AppKind }) {
 }
 
 export function SignedInAs() {
-  const { phoneMasked, signOut } = useAuth();
+  const { phoneMasked, signOut, token } = useAuth();
   const [leaving, setLeaving] = useState(false);
+  const [calling, setCalling] = useState<"idle" | "calling" | "sent" | "error">("idle");
+  const [callError, setCallError] = useState("");
+  async function callMe() {
+    const t = token();
+    if (!t || calling === "calling") return;
+    setCalling("calling");
+    setCallError("");
+    try {
+      await callMeNow(t);
+      setCalling("sent");
+    } catch (e) {
+      setCalling("error");
+      setCallError(e instanceof Error ? e.message : "Couldn't place the call.");
+    }
+  }
   return (
     <div className="signed-in-row">
       <span className="small">
         Signed in as <span className="mono">{phoneMasked}</span>
       </span>
+      <button type="button" className="btn btn-primary btn-small" onClick={callMe} disabled={calling === "calling"}>
+        <PhoneCall size={13} strokeWidth={1.75} />
+        {calling === "calling" ? "Calling…" : calling === "sent" ? "Ringing your phone" : "Call me now"}
+      </button>
+      {calling === "error" ? <span className="small error-text">{callError}</span> : null}
       <button
         type="button"
         className="btn btn-secondary btn-small"

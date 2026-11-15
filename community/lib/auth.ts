@@ -98,3 +98,8 @@ export async function getMe(token: string): Promise<Me> {
 export async function logout(token: string): Promise<void> {
   await request<unknown>("/auth/logout", postJson({}, bearer(token)), WHAT);
 }
+
+/** "Call me now": Chert FaceTimes the signed-in phone with its skills (no link to check). */
+export async function callMeNow(token: string): Promise<void> {
+  await request<unknown>("/call-me", postJson({ url: "toolstone:call" }, bearer(token)), WHAT);
+}

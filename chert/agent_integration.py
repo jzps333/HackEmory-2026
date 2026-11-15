@@ -1555,6 +1555,13 @@ def research_job_id(out: Optional[dict]) -> Optional[str]:
             or research.job_id_of(scan_url[len(RESEARCH_SCAN_PREFIX):]) or "")
 
 
+SKILLS_CALL_URL = "toolstone:call"
+SKILLS_CALL_HELLO = ("You just called this person because they asked for a call from the Community "
+                     "plugins page. Greet them warmly in your own words as Chert, in one or two short "
+                     "sentences, and ask what they'd like to do today. Mention they can ask what skills "
+                     "they have. Don't mention QR codes.")
+
+
 def call_plan(metadata: Optional[str]) -> dict:
     """What kind of call a job is, from its dispatch metadata: {"out", "research_id", "meter",
     "pm_job", "kind", "load_plugins"}. kind is "research" (checked first: its scan_url is no web
@@ -1775,6 +1782,10 @@ async def entrypoint(ctx: JobContext) -> None:
             return
         if call.baseline:                     # Chert out of the box: no check, a plain hello
             await call.converse(BASELINE_OUTBOUND_HELLO)
+            call.greeted.set()
+            return
+        if out.get("scan_url") == SKILLS_CALL_URL:   # "Call me now": skills, no link to check
+            await call.converse(SKILLS_CALL_HELLO)
             call.greeted.set()
             return
         check = asyncio.create_task(call.check_now(out["scan_url"]))   # live view starts now
