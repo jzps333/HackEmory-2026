@@ -8,9 +8,12 @@ Final lineup. Chert pitch: **Tutor, Research, Vercel**. Security track: **ScanSa
 - [ ] Signed in at https://chert-community-plugins.vercel.app/apps (that page has **Call me now**).
 - [ ] Mac: the Toolstone helper is running (`runner/toolstone_runner.py run`) for the Vercel part.
 - [ ] Laptop tabs: Community plugins page; GitHub `plugins/` folder; one research report link.
-- [ ] A scam QR code ready on a second screen (security cut).
-- [ ] Record each part separately; keep a backup take. Research takes 5-10 min: record the
+- [ ] A scam QR code ready on a second screen (security cut): open `docs/demo-scam-qr.png` (a fake
+      "unpaid toll" sticker pointing at our demo scam page).
+- [ ] Record each part separately; keep a backup take. Research takes 4-10 min: record the
       request, cut, then record the call-back.
+- [ ] Never on screen: `~/.toolstone/.env`, `.env` files, the Coder token, the Tiger connection URL.
+- [ ] Vercel: only "How's my site?" today (a redeploy hits Vercel's free 100-deploys/day limit).
 
 ## 2. Elevator pitch (188 characters)
 
@@ -20,20 +23,36 @@ when you say yes, and researches on its own. Anyone can build, verify and share 
 (Chert-only version) Toolstone gives Chert agents verified, open-source skills that use what only
 Chert has: FaceTime. A live tutor whiteboard, research that calls you back, your infrastructure by voice.
 
-## 3. Video script (about 2:45)
+## 3. Devpost video (2:00, every track, YouTube chapters)
 
-| Time | Show | Say |
-|---|---|---|
-| 0:00 | Title card | "Chert gives AI agents iMessage and FaceTime. Toolstone gives them skills: open-source, verified, shareable." |
-| 0:12 | Community plugins page, switch to **Chert out of the box**, Call me now | "Out of the box, Chert is a friendly assistant." (one quick exchange) |
-| 0:30 | Switch to **Chert + community skills**, Call me now | "Same line, now with community skills." |
-| 0:38 | "Help me learn derivatives" — handwritten steps appear; say "why are we using h?"; "can you draw it?" | "The Tutor writes notes by hand on my screen, checks I'm following after every step, explains the why, and draws the graph." |
-| 1:10 | "Research the best beginner NASDAQ strategies" → it hangs up by itself | "Research works on its own, then calls me back." |
-| 1:20 | Text arrives with the report link; incoming FaceTime walks through sections with cards | "A cited report on my phone, and a walkthrough I can steer." |
-| 1:45 | "How's my site?" — deploys read from Vercel via the helper on my Mac | "Vercel runs through a helper on my own computer. My key never leaves it; the AI never sees it. Redeploy only after I say 'yes, redeploy'." |
-| 2:15 | Community plugins: Verified / Needs verification, GitHub `plugins/` | "Every skill is a recipe in a public repo. Unverified skills can't touch money, research or your computer, and editing a skill un-verifies it." |
-| 2:30 | Security cut: scam QR on FaceTime | "ScanSafe opens strangers' links in a throwaway Vultr VM and stops scams before you pay." |
-| 2:40 | End card | "Toolstone. Skills for Chert." |
+Judges watch at 1x: every sped-up clip gets an on-screen caption ("2x", "4 minutes later"). Paste
+the chapter list into the YouTube description and the Devpost "Tracks" text.
+
+| Chapter | Clip (record separately) | Say / caption | Tracks |
+|---|---|---|---|
+| 0:00 What Toolstone is | **Mac screen**: Community plugins page under Quickstart and docs, flip to "Chert + community skills", click Call me now | "Chert gives AI agents a phone line. Toolstone is the skill layer on top: anyone builds a skill, it gets verified, and any Chert agent can use it on a real FaceTime call." | Chert |
+| 0:12 Tutor | **Phone**: "Teach me matrix multiplication"; first handwritten step at 1x, the rest at 2x; the "Next step in ~3s" chip | "It writes the notes by hand on my screen and checks in after every step." | Chert, Gemini |
+| 0:35 Research | **Phone**: ask (1x) → it hangs up by itself → card "4 minutes later" → text with link → report page scrolled at 2x (green **Study** tags) → 5 s of the call-back | "It researches on its own from published studies, texts me a cited report and calls me back." | Gemini, Typesense |
+| 1:05 Vercel | **Phone**: "How's my site?" + **Mac**: the helper's terminal running (never the .env) | "It runs through a helper on my own computer: my Vercel key never leaves it." | Security |
+| 1:20 ScanSafe | **Phone**: hold up `docs/demo-scam-qr.png`; live locked-down browser at 2x; the scam warning | "Hold up a QR code: it opens the link in a throwaway VM on Vultr and stops the scam before you pay." | Security, Vultr |
+| 1:40 Under the hood | **Mac**, fast cuts with captions: GitHub `plugins/` + `verified.json` · Tiger Data tables (plugin_records, research_jobs) · Coder workspace · Solana devnet | "Skills are recipes in a public repo, verified by fingerprint. Tiger Data holds memory and research, Typesense searches it, Coder is where you write a skill." | Tiger Data, Coder, Solana, Typesense |
+| 1:55 End card | "Toolstone. Skills for Chert." + repo link | | |
+
+## 3b. Live pitch to Chert (they've already seen the project)
+
+Lead with the why, demo the three Chert skills live, keep time for questions.
+
+1. **Why (20 s):** Chert's superpower is FaceTime, and nobody builds for it (Photon has messaging and
+   MCP, no FaceTime). Toolstone makes skills that use the call itself: the screen, the voice, calling back.
+2. **Tutor (live, 45 s):** a real question in your own words; point at the handwriting, the check-ins,
+   the countdown chip.
+3. **Research (live, 30 s):** ask, it hangs up by itself; show a finished report on the laptop (Study
+   tags, cited papers) instead of waiting for the call-back.
+4. **Vercel (live, 20 s):** "How's my site?" through the helper; the key stays on the Mac; a redeploy
+   needs "yes, redeploy".
+5. **The platform (30 s):** Community plugins page in the Chert console, verified vs unverified,
+   editing a skill un-verifies it, unverified skills never touch money, research or your computer.
+6. **Ask:** Chert-hosted skills: a "Community plugins" tab in the real console.
 
 ## 4. Devpost text
 
@@ -55,8 +74,9 @@ like a QR code from a stranger, you don't know what it does until it runs.
 - **Skills we built:**
   - **Tutor:** a handwritten whiteboard on your FaceTime screen, step by step, checks in after every
     step, explains the why on sticky notes, and draws graphs (safe math parser, no code execution).
-  - **Research agent:** you say a topic and it hangs up; it researches on its own (Gemini + Google
-    Search, at least four rounds, capped spend), texts you a cited report page and FaceTimes you a
+  - **Research agent:** you say a topic and it hangs up; it researches on its own (published studies
+    from OpenAlex plus Google Search, read by Gemini over at least four rounds, capped spend), texts
+    you a report page that cites the papers (journal, year, citations) and FaceTimes you a
     section-by-section walkthrough you can steer. Past reports are searchable (Typesense).
   - **Vercel:** "how's my site?" / "redeploy" through a helper app on your own computer: your key
     stays in a local file, the AI and our servers never see it, and redeploys need "yes, redeploy".
