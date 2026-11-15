@@ -322,6 +322,14 @@ class StatusVideo:
             self._show_board()
         return n
 
+    def board_graph(self, graph: whiteboard.Graph) -> Optional[int]:
+        """A graph under the newest step; it draws itself. That step's number, or None when
+        there's no step."""
+        n = self.board.add_graph(graph) if self.board is not None else None
+        if n is not None:
+            self._show_board()
+        return n
+
     def board_clear(self) -> None:
         """Wipe the steps; the title stays."""
         if self.board is None:
