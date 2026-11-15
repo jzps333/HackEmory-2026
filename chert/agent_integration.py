@@ -295,6 +295,9 @@ class ScanSafeCall:
         self.watcher = QRWatcher(room, self._on_code)
         self.video = StatusVideo()
         self.caller_phone: Optional[str] = os.getenv("SCANSAFE_DEMO_PHONE") or None
+        # True only once the number comes from THIS call (the FaceTime bridge or the outbound job),
+        # not the demo-phone default: memory and research never act on a guessed number.
+        self.phone_known = False
         self._inflight: dict[str, asyncio.Task] = {}
         self._results: dict[str, tuple[float, dict]] = {}
         self._texted: set[str] = set()
@@ -580,11 +583,19 @@ TEXT_TIMEOUT_S = 8.0       # finish_session's text (in the background)
 SHUTDOWN_TEXT_TIMEOUT_S = 2.0   # per Chert request at call end
 
 
+def known_phone(call) -> Optional[str]:
+    """The caller's number only when this call told us (bridge or outbound job), else None."""
+    phone = getattr(call, "caller_phone", None)
+    if call is None or getattr(call, "phone_known", False) is not True:
+        return None
+    return phone.strip() if isinstance(phone, str) and phone.strip() else None
+
+
 async def text_caller(call: Optional[ScanSafeCall], plugin_name: str, summary: str,
                       timeout: float = TEXT_TIMEOUT_S) -> bool:
     """The after-session text through Chert, once per call. Never raises; logs no phone or body."""
     mem = memory_of(call)
-    phone = getattr(call, "caller_phone", None)
+    phone = known_phone(call)
     if mem.texted or not phone:
         return False
     mem.texted = True
@@ -601,7 +612,7 @@ async def text_caller(call: Optional[ScanSafeCall], plugin_name: str, summary: s
 
 async def _save_call_memory(call: ScanSafeCall) -> bool:
     mem = memory_of(call)
-    phone = getattr(call, "caller_phone", None)
+    phone = known_phone(call)
     saved = False
     if not mem.finished and phone:
         # A coaching plugin (camera + memory) showed cues and nobody called finish_session:
@@ -870,8 +881,8 @@ class PluginAgent(ScanSafeAgent):
         if p is None:
             return ("No community plugin is on. If the caller asked for one, call use_plugin first.",
                     None, None)
-        phone = getattr(self.call, "caller_phone", None) if self.call is not None else None
-        if not isinstance(phone, str) or not phone.strip():
+        phone = known_phone(self.call)
+        if not phone:
             return NO_PHONE, None, None
         return None, p, phone.strip()
 
@@ -1686,7 +1697,9 @@ async def entrypoint(ctx: JobContext) -> None:
 
     def _participant(p: rtc.RemoteParticipant) -> None:
         log.info("participant %s joined; attributes=%s", p.identity, sorted((p.attributes or {}).keys()))
-        call.caller_phone = call.caller_phone or phone_from_participant(p)
+        got = phone_from_participant(p)
+        if got:
+            call.caller_phone, call.phone_known = got, True
     ctx.room.on("participant_connected", _participant)
 
     def _participant_left(p: rtc.RemoteParticipant) -> None:
@@ -1736,7 +1749,8 @@ async def entrypoint(ctx: JobContext) -> None:
     if out:
         # Chert is about to FaceTime the person (/call-me waits for our audio+video first).
         # Our own room has no chert_bridge_ready signal, so poll the call instead.
-        call.caller_phone = out.get("phone") or call.caller_phone
+        if out.get("phone"):
+            call.caller_phone, call.phone_known = out["phone"], True
         # The person may hold up the very code this call is about (it's often on another screen):
         # skip it from the start, before FaceTime connects, so no second scan races this call.
         for code in (out.get("scan_url"), (pm_job or {}).get("scan_url"), (meter or {}).get("scan_url")):

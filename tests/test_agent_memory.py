@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import types
 
 import httpx
 import pytest
@@ -121,6 +122,7 @@ def setup(monkeypatch, phone=PHONE):
     ai = agent_mod(monkeypatch)
     call = make_call(ai, PLUGINS)
     call.caller_phone = phone
+    call.phone_known = phone is not None
     agent, _ = plugin_agent(ai, call)
     return ai, call, agent
 
@@ -354,6 +356,7 @@ def test_call_end_does_nothing_without_cues_or_phone(monkeypatch, api, texts):
         # Study buddy cues (no camera) aren't a coaching session.
         call2 = make_call(ai, PLUGINS)
         call2.caller_phone = PHONE
+        call2.phone_known = PHONE is not None
         agent2, _ = plugin_agent(ai, call2)
         await agent2.use_plugin(None, "study buddy")
         await agent2.coach_cue(None, "Capital of France?")
@@ -527,3 +530,13 @@ def test_session_text_digits_split_by_punctuation_and_in_the_name():
     assert not any(ch.isdigit() for ch in body) and body.startswith("Call: ")
     ok = community.session_text("Squat coach", "Most common cue: knees out! (2 of 4). 4 cues this session.")
     assert "(2 of 4)" in ok and "4 cues" in ok                     # few digits: kept
+
+
+def test_demo_phone_default_is_not_a_known_caller(monkeypatch):
+    """An inbound caller whose number didn't come from the bridge must not act as the demo owner."""
+    ai = agent_mod(monkeypatch)
+    call = types.SimpleNamespace(caller_phone="+14045550123", phone_known=False)
+    assert ai.known_phone(call) is None
+    call.phone_known = True
+    assert ai.known_phone(call) == "+14045550123"
+    assert ai.known_phone(None) is None

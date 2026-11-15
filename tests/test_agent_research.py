@@ -90,6 +90,7 @@ def done_job(report=REPORT, topic="NASDAQ trading strategies"):
 def research_call(ai, phone=PHONE, plugins=None):
     call = make_call(ai, starter() if plugins is None else plugins)
     call.caller_phone = phone
+    call.phone_known = phone is not None
     agent, seen = plugin_agent(ai, call)
     return call, agent, seen
 
@@ -249,6 +250,7 @@ def suggest_setup(monkeypatch, ai, enabled_ids, library):
     monkeypatch.setattr(community, "fetch_enabled", fetch)
     call = make_call(ai, state["enabled"])
     call.caller_phone = PHONE
+    call.phone_known = PHONE is not None
     agent, seen = plugin_agent(ai, call)
     return plugins, state, call, agent, seen
 
