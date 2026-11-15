@@ -398,7 +398,11 @@ def _abstract(inv: Any) -> str:
 def openalex_papers(query: str, timeout: float, limit: int = PAPERS_PER_QUESTION) -> list[dict]:
     """[{"title", "url", "abstract", "meta", "kind": "paper"}] for the most relevant studies with an
     abstract. url: the DOI, else the publisher page, else the OpenAlex page (http(s) only)."""
-    params = {"search": query[:250], "filter": "has_abstract:true", "per-page": limit,
+    # Journal articles and reviews cited at least 5 times: drops blog posts on repositories and
+    # one-patient case reports, keeps reviews like Cochrane's.
+    params = {"search": query[:250], "per-page": limit,
+              "filter": "has_abstract:true,type:article|review,primary_location.source.type:journal,"
+                        "cited_by_count:>4",
               "select": "id,doi,title,publication_year,primary_location,cited_by_count,"
                         "abstract_inverted_index"}
     with httpx.Client(transport=_transport, timeout=timeout, headers={"User-Agent": WIKI_UA}) as c:
