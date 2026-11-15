@@ -219,7 +219,7 @@ def phone_start(req: PhoneRequest, request: Request) -> dict:
     client = _client_ip(request)
     code, request_id = start_sign_in(phone, client)
     return {"code": code, "request_id": request_id, "line": "+16504444331",
-            "sms_body": f"Hi ScanSafe! My sign-in code is {code}"}
+            "sms_body": f"Hi Toolstone! My sign-in code is {code}"}
 
 
 @router.post("/auth/phone/verify")

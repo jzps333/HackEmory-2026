@@ -135,7 +135,7 @@ function PhoneSignInFlow() {
       <div className="signin-code-step">
         <p className="signin-lead">
           From the phone ending in <span className="mono">{shown.phone.replace(/\D/g, "").slice(-4)}</span>, text
-          this code to the ScanSafe Chert line:
+          this code to the Chert line:
         </p>
         <p className="signin-code mono">
           <span className="sr-only">Your code: </span>
@@ -238,7 +238,7 @@ export default function SignInCard() {
         Sign in with your phone
       </h2>
       <p className="muted signin-explain">
-        Your apps&apos; data is tied to your phone number. Sign in by texting a code to the ScanSafe Chert line.
+        Your apps&apos; data is tied to your phone number. Sign in by texting a code to the Chert line.
       </p>
       {notice ? (
         <p className="notice small signin-notice">

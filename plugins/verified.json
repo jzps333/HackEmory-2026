@@ -1,34 +1,34 @@
 {
   "parking": {
-    "sha256": "8b12f8cd790959ec7a2d61a2c68f75263e2514247a54947a1040195c570a9e20",
+    "sha256": "47ed63ff7227ffbcb41d883732893cb0a70b8ebf1316c31811f90a7a2d951986",
     "by": "jzps333"
   },
   "plugin-finder": {
-    "sha256": "b42fcb554ddd792bebcaaa05f9beb5e0a8f5401d54772438e7ddeda661853dc8",
+    "sha256": "2f28caf7ed6410163a8336cbe4f9b04dea5ed5d8890c42dcd998981bcc5f773f",
     "by": "jzps333"
   },
   "qr-checker": {
-    "sha256": "151ba89b1fe7b90231ddb0b3ac341d6b3602b2d81b278e1ba4431161b8eebb9b",
+    "sha256": "be624ece1d2a6a4ffc59a1c956e067ed1739a2c12a346a050ccd651fa69eaaff",
     "by": "jzps333"
   },
   "research": {
-    "sha256": "dfdcd61ddfdde63d8c184f29d90ec15aa9b96750b969929b433e1955b86bd455",
+    "sha256": "a5755df69f46fd06423cd6477cc3e3e4fab453802121f8f07114f366b195c72c",
     "by": "jzps333"
   },
   "safe-browser": {
-    "sha256": "cc2e361dd121c263d8604677aabfafe5d9c538c40f72b33566931a22c02422ee",
+    "sha256": "ec48c15ba09c0663062bd2fd8806a0fd459a68c5790f310d762c105662987eee",
     "by": "jzps333"
   },
   "solana-pay": {
-    "sha256": "b69a3eb934839187523b90a71120a48d9653ed49af1b47c08d67f0ca2523056e",
+    "sha256": "4f0af427b43468fa82df89f29c161a977b078875c8fe12712e33a5b0a3ab8f8c",
     "by": "jzps333"
   },
   "squat-coach": {
-    "sha256": "d7cca88010f94296c7fa4b1fc7065fb1592eaddb04c1608f7feb62c942223816",
+    "sha256": "876cfc31623f7681235e9bfc54e23db79eea7cd4a7dd3eae80ee5f8282d07554",
     "by": "jzps333"
   },
   "study-buddy": {
-    "sha256": "66846a1bfa012386fe3869bae368d6bad3ffbba1d4fe6e9a2b68029b727ab9e3",
+    "sha256": "ff34f6b4367c3aeffb21113768f91abfddaa092c9a69e5499c9e993f66627742",
     "by": "jzps333"
   }
 }

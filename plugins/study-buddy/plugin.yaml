@@ -1,7 +1,7 @@
 id: study-buddy
 name: "Study buddy"
 summary: "Spaced-repetition flashcards by voice: add cards on a call, say \"quiz me\", and it asks what's due and schedules the next review."
-author: scansafe-team
+author: toolstone
 version: 1
 kind: live
 runs_on: server

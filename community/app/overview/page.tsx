@@ -18,7 +18,7 @@ export default function OverviewPage() {
     <>
       <PageHeader
         title="Overview"
-        subtitle="Your lines, live calls and recent activity for ScanSafe demo."
+        subtitle="Your lines, live calls and recent activity for Toolstone demo."
         checked="11:22 PM"
       />
 
@@ -57,7 +57,7 @@ export default function OverviewPage() {
             <span className="pill pill-green">Active</span>
           </div>
           <div className="card-foot muted small">
-            Agent: ScanSafe FaceTime agent. Plugins come from{" "}
+            Agent: Toolstone FaceTime agent. Plugins come from{" "}
             <Link href="/plugins" className="link">
               Community plugins
             </Link>
@@ -94,7 +94,7 @@ export default function OverviewPage() {
         </span>
         <span className="promo-text">
           <span className="promo-title">New: Community plugins</span>
-          <span className="muted small">Open-source skills for your Chert agent, like the ScanSafe QR checker.</span>
+          <span className="muted small">Open-source skills for your Chert agent, like ScanSafe, the QR checker.</span>
         </span>
         <ArrowUpRight size={16} className="muted-icon" />
       </Link>

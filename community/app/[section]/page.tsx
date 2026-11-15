@@ -29,7 +29,7 @@ export default async function StaticSection({ params }: Params) {
       <section className="card empty">
         <div className="empty-title">Static page in this demo</div>
         <p className="muted">
-          This is a look-alike of the {page.title} page. Only Community plugins works in the ScanSafe demo.
+          This is a look-alike of the {page.title} page. Only Community plugins works in the Toolstone demo.
         </p>
         <Link href="/plugins" className="btn btn-secondary">
           <Puzzle size={15} strokeWidth={1.75} />

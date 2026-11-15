@@ -39,7 +39,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <Link href="/overview" className="topbar-brand">
           <Wordmark />
         </Link>
-        <span className="topbar-project">ScanSafe demo</span>
+        <span className="topbar-project">Toolstone demo</span>
         <button
           type="button"
           className="icon-btn"
@@ -64,10 +64,10 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <button type="button" className="project-switch" aria-label="Project: ScanSafe demo, Free trial">
+        <button type="button" className="project-switch" aria-label="Project: Toolstone demo, Free trial">
           <span className="project-avatar" aria-hidden="true">S</span>
           <span className="project-text">
-            <span className="project-name">ScanSafe demo</span>
+            <span className="project-name">Toolstone demo</span>
             <span className="project-plan"> · Free trial</span>
           </span>
           <ChevronsUpDown size={15} className="muted-icon" />
@@ -98,7 +98,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
           <span className="account-avatar" aria-hidden="true">D</span>
           <span className="account-text">
             <span className="account-name">Demo account</span>
-            <span className="account-sub">ScanSafe demo · Owner</span>
+            <span className="account-sub">Toolstone demo · Owner</span>
           </span>
         </div>
       </aside>

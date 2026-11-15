@@ -1,7 +1,7 @@
 id: safe-browser
 name: "Safe browser"
 summary: "Opens any link in a throwaway, locked-down browser on a Vultr VM and streams it to your FaceTime, so nothing runs on your device."
-author: scansafe-team
+author: toolstone
 version: 1
 kind: live
 runs_on: vm

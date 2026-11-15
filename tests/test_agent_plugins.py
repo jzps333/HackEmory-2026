@@ -178,7 +178,7 @@ def test_use_plugin_switches_and_reads_permissions_once(monkeypatch):
         # QR checker is built into ScanSafe: no permissions read, and plain ScanSafe comes back.
         qr = by_id(plugins, "qr-checker")
         out = await agent.use_plugin(None, "QR checker")
-        assert qr["permissions"] not in out and "built into ScanSafe" in out
+        assert qr["permissions"] not in out and "built in" in out
         assert call.plugins.active is None and squat["instructions"] not in seen[-1]
         # Switching to another real plugin reads ITS permissions once, and swaps the instructions.
         finder = by_id(plugins, "plugin-finder")

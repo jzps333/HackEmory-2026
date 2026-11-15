@@ -158,7 +158,7 @@ export default function PluginDetail({ id }: { id: string }) {
 
         <section className="card">
           <h2 className="card-title">Tools</h2>
-          <p className="section-hint muted small">Wired by name from ScanSafe&apos;s code. Plugin text is never run.</p>
+          <p className="section-hint muted small">Wired by name from Toolstone&apos;s code. Plugin text is never run.</p>
           <div className="chips">
             {p.tools.map((t) => {
               const blocked = !effective.has(t);

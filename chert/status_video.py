@@ -57,7 +57,7 @@ REPLAY_STEP_S = 1.1          # how long each finding stays as "newest" during th
 COLORS = {"idle": (30, 58, 95), "checking": (32, 40, 56), "safe": (22, 128, 61),
           "suspicious": (180, 110, 10), "malicious": (185, 28, 28), "error": (90, 90, 90),
           "meter": (30, 58, 95), "paid": (22, 128, 61), "card": (30, 58, 95)}
-LABELS = {"idle": "Hold the QR code up", "checking": "Checking...", "safe": "Looks safe",
+LABELS = {"idle": "Ask me anything", "checking": "Checking...", "safe": "Looks safe",
           "suspicious": "Be careful", "malicious": "Don't pay this", "error": "Try again",
           "meter": "Parking meter", "paid": "Paid"}
 VERDICTS = ("safe", "suspicious", "malicious")
@@ -491,8 +491,8 @@ class StatusVideo:
         d = ImageDraw.Draw(img)
         f = self._f
         title, body = card
-        d.text((48, 70), "ScanSafe", font=f["label"], fill=DIM)
-        d.text((48, 124), "Community plugin", font=f["small"], fill=DIM)
+        d.text((48, 70), "Toolstone", font=f["label"], fill=DIM)
+        d.text((48, 124), "Community skill", font=f["small"], fill=DIM)
         y = 300
         for line in _wrap(title, f["big"], self.W - 96):
             d.text((48, y), line, font=f["big"], fill=WHITE)
@@ -514,11 +514,11 @@ class StatusVideo:
             cx, cy = self.W // 2, 860
             d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=WHITE, width=10)
             return
-        d.text((60, 420), "ScanSafe", font=_font(110, True), fill=WHITE)
+        d.text((60, 420), "Toolstone", font=_font(110, True), fill=WHITE)
         label = LABELS.get(self.state, "")
         d.text((64, 580), label, font=self._f["label"], fill=WHITE)
         if self.state == "idle":
-            d.text((64, 650), "about a hand's length away", font=self._f["detail"], fill=DIM)
+            d.text((64, 650), "or hold up a QR code to check it", font=self._f["detail"], fill=DIM)
             # a simple QR-frame graphic that breathes, so the picture keeps changing
             s = 150 + int(10 * math.sin((int(now * 4) % 24) / 24 * 2 * math.pi))
             cx, cy = self.W // 2, 920

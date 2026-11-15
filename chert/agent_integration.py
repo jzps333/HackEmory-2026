@@ -63,8 +63,8 @@ BRIDGE_TRACK = "facetime-remote-video"
 LIVE_BUDGET_S = 0.35       # max decode time per sampled frame in the live loop
 
 SYSTEM_INSTRUCTIONS = """\
-You are ScanSafe, a kind helper on a FaceTime call. People call you to check if a QR code is safe
-before they pay or sign in. Many callers are older and not comfortable with technology.
+You are Chert, a kind helper on a FaceTime call, with community skills from Toolstone. One of
+them, ScanSafe, checks whether a QR code is safe before people pay or sign in. Many callers are older and not comfortable with technology.
 
 How you talk:
 - Warm, calm and patient. Speak slowly. Use short, simple sentences. One idea at a time.
@@ -73,7 +73,7 @@ How you talk:
 
 What you do:
 - Talk naturally, like a helpful person on the phone. Greet the caller and ask how you can help.
-  Answer their questions about QR codes, scams, links, payments and how ScanSafe works.
+  Answer their questions about QR codes, scams, links, payments and what your skills can do.
 - When they want a code checked, invite them to hold it up to the camera. Only give tips (closer,
   steadier, about a hand's length away, better light, less glare) if a code can't be read.
 - The app reads the code for you and tells you the result. When you get a result, say it
@@ -101,13 +101,13 @@ Safety rules (always):
 CHECKING = "I can see a code. Give me a moment while I check it."
 SPEECH_TIMEOUT_S = 20.0
 # Greetings are said in the model's own words (ScanSafeCall.converse), not read from a script.
-INBOUND_HELLO = ("Greet the caller warmly as ScanSafe in one or two short sentences and ask how you "
+INBOUND_HELLO = ("Greet the caller warmly as Chert in one or two short sentences and ask how you "
                  "can help today. Mention, in passing, that they can show you a QR code or ask you about "
                  "a link or a message. Don't give camera distance tips yet.")
-INBOUND_HELLO_SEEING = ("Greet the caller warmly in one short sentence as ScanSafe, and say you can "
+INBOUND_HELLO_SEEING = ("Greet the caller warmly in one short sentence as Chert, and say you can "
                         "already see a code on their camera and you're checking it now.")
 OUTBOUND_HELLO = ("You just called this person because they scanned a QR code in the ScanSafe app. "
-                  "Greet them warmly in your own words, in one or two short sentences: say it's ScanSafe, "
+                  "Greet them warmly in your own words, in one or two short sentences: say it's Chert, "
                   "that you're opening the link they scanned in a locked-down browser on our side, and "
                   "that they can watch it on this video. Don't ask them to show you a code.")
 # Baseline ("Chert out of the box", the demo's before/after): the demo's switch in GET
@@ -815,7 +815,7 @@ class PluginAgent(ScanSafeAgent):
             await self._apply()
             if self.call is not None and self.call.video.state == "card":
                 self.call.video.reset()
-            return "No plugin is on now. Carry on as ScanSafe."
+            return "No skill is on now. Carry on as Chert."
         p = s.find(name)
         if p is None:
             return (f"There's no enabled plugin called that. The ones on this call are: {s.names()}. "
@@ -833,7 +833,7 @@ class PluginAgent(ScanSafeAgent):
             if s.active is not None:
                 s.activate(None)
                 await self._apply()
-            return "That's built into ScanSafe, so nothing to switch on. Just do it now."
+            return "That's built in, so nothing to switch on. Just do it now."
         first = s.activate(p)
         await self._apply()
         if self.call is not None:
@@ -1073,7 +1073,7 @@ class PluginAgent(ScanSafeAgent):
     async def list_skills(self, context: RunContext) -> str:
         """Say which skills (community plugins) the caller has on this call, one short line each.
         Use it when they ask "what skills do I have?", "what can you do?" or "what plugins are on?"."""
-        built_in = ("Built into ScanSafe: checking a QR code (they hold it up to the camera, or ask you "
+        built_in = ("Built in (the ScanSafe skill): checking a QR code (they hold it up to the camera, or ask you "
                     "to check it) and showing a safe picture of the website it opens.")
         skills = [p for p in self._plugins().plugins if p["verified"] and not community.is_builtin(p)]
         if not skills:
