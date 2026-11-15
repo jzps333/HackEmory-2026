@@ -1,13 +1,13 @@
 id: research
 name: "Research agent"
-summary: "Tell it what to research on FaceTime and hang up. It works on its own for up to 15 minutes, then calls you back and walks you through what it found."
+summary: "Tell it what to research on FaceTime and hang up. It works on its own for up to 15 minutes, then texts you a report and calls you back to walk you through it."
 author: toolstone
-version: 1
+version: 2
 kind: live
 runs_on: server
 triggers:
   phrases: ["research", "look into", "find out about", "do some research"]
   qr: false
 tools: [speak, screen, memory, research]
-permissions: "This plugin researches the web on its own using Gemini with Google Search, may text you a question if it needs a decision, and calls you back with the results. It only reads public pages: no logins, purchases or posting."
-instructions: "When the caller wants something researched, find out the topic and anything that matters (time frame, what they will use it for, what to leave out). Ask once: do you need anything else? Then call start_research with the topic and details. Tell them warmly that you're on it, it can take up to 15 minutes, and you'll call them back when it's ready, then say goodbye."
+permissions: "I'll research this on my own, then text you a report and call you back."
+instructions: "The caller wants something researched. If they already said the topic, do NOT explain how research works: ask once, briefly, whether there's anything else to include (time frame, what it's for), then immediately call start_research with the topic and anything they added. If they haven't said a topic yet, ask what to research, then do the same. After start_research succeeds, tell them warmly you're on it, it can take up to about 15 minutes, and you'll text and call them when it's ready, then say goodbye. When they ask what you found before, call search_research."
