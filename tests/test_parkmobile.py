@@ -932,3 +932,14 @@ def test_email_mask_script_masks_addresses_in_page_text():
         assert pg.inner_text("#b") == "Total $4.35"
         assert pg.inner_text("#c") == "••••@ex.co"
         b.close()
+
+
+def test_duration_preview_is_the_only_price_screen_that_doesnt_stop():
+    dur = facts(path="/v2/parking/duration", text="Select parking time\nHourly Rate\n1 h\n2 h\nTotal\n$1.55\nContinue")
+    assert op.pm_price_visible(dur) and op.pm_duration_preview(dur) and not op.pm_must_stop(dur)
+    confirm = facts(path="/v2/parking/confirm", text="Confirm parking\n91987\nDEMO123\n2h\nTotal $3.10\nAdd payment method\nStart parking")
+    assert op.pm_must_stop(confirm)
+    with_card = facts(path="/v2/parking/duration", text="Total $1.55\nVisa ending in 4242\nContinue")
+    assert op.pm_must_stop(with_card)
+    elsewhere = facts(path="/v2/parking/duration/extra", text="Total $1.55")
+    assert op.pm_must_stop(elsewhere)

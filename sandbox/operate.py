@@ -717,6 +717,25 @@ def pm_price_visible(facts: object) -> bool:
                 or PM_SAVED_CARD_TEXT.search(text) or pm_has_card_fields(facts))
 
 
+PM_DURATION_PATH = "/v2/parking/duration"
+
+
+def pm_duration_preview(facts: object) -> bool:
+    """ParkMobile's "Select parking time" screen (real, 2026-11-14) shows a live Total for the
+    chosen hours with a Continue button that only goes to "Confirm parking" (where "Start
+    parking" is). There, and only there, the hours may still be picked and exactly "Continue"
+    tapped although a price shows. Never with a saved card, card fields or payment text."""
+    if not isinstance(facts, dict) or str(facts.get("path") or "").rstrip("/") != PM_DURATION_PATH:
+        return False
+    text = pm_scrub(facts.get("text"))
+    return not (PM_SAVED_CARD_TEXT.search(text) or PM_PAYMENT_TEXT.search(text) or pm_has_card_fields(facts))
+
+
+def pm_must_stop(facts: object) -> bool:
+    """The payment fence: a price / payment step / saved card is showing, except the duration preview."""
+    return pm_price_visible(facts) and not pm_duration_preview(facts)
+
+
 def pm_forward_ok(info: object) -> bool:
     """The only forward buttons ever tapped: exactly "Continue" or "Next" (trimmed, any case)
     in both its text and its accessible name, whichever are set."""

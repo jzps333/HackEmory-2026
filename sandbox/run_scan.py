@@ -47,7 +47,7 @@ from operate import SEL as OP_SEL
 from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_MASK_EMAIL_JS, PM_SEL, PM_STATE_PATH, PM_STOPPED_AT,
                      check_parkmobile_request, clean_zone, parkmobile_request_allowed,
                      pm_area_from_url, pm_clean_url, pm_click_refused, pm_duration_patterns,
-                     pm_filter_state, pm_forward_ok, pm_minutes, pm_price_text, pm_price_visible,
+                     pm_filter_state, pm_forward_ok, pm_must_stop, pm_minutes, pm_price_text, pm_price_visible,
                      pm_redact_urls, pm_request_blocked, pm_result_selector, pm_screen,
                      pm_session_items, pm_session_script, pm_status, pm_step_text,
                      pm_type_refused, pm_type_value_ok, pm_zone_info)
@@ -1424,7 +1424,13 @@ def _pm_add_vehicle(page, refused: list) -> bool:
 
 def _pm_continue(page, refused: list) -> bool:
     """Tap a button labelled exactly Continue or Next (pm_forward_ok, then pm_click). Only called
-    while no price is on screen."""
+    while no price is on screen, or on the duration preview (pm_duration_preview), whose Continue
+    only goes to "Confirm parking"; re-checked here right before the tap."""
+    try:
+        if pm_must_stop(page.evaluate(PM_FACTS_JS)):
+            return False
+    except Exception:   # noqa: BLE001 - can't tell: don't tap
+        return False
     for b in page.get_by_role("button", name=PM_FORWARD).filter(visible=True).all()[:4]:
         if pm_forward_ok(b.evaluate(PM_BUTTON_JS)):
             pm_click(b, refused)
@@ -1576,7 +1582,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                 nonlocal screen, facts
                 page.wait_for_timeout(400)
                 s2, f2 = look(page)
-                if s2 in PM_HARD_STOPS or pm_price_visible(f2):
+                if s2 in PM_HARD_STOPS or pm_must_stop(f2):
                     screen = s2 if s2 in PM_HARD_STOPS + ("payment", "review") else "price"
                     facts = f2
                     return True
@@ -1584,7 +1590,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
 
             def fence_quick() -> bool:
                 try:
-                    return pm_price_visible(page.evaluate(PM_FACTS_JS))
+                    return pm_must_stop(page.evaluate(PM_FACTS_JS))
                 except Exception:
                     return True
 
@@ -1593,7 +1599,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                 screen, facts = look(page)
                 if screen in PM_HARD_STOPS:
                     break
-                if pm_price_visible(facts):                       # hard stop: price / payment
+                if pm_must_stop(facts):                           # hard stop: price / payment
                     if screen not in ("payment", "review"):
                         screen = "price"
                     break
