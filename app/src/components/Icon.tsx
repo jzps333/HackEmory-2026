@@ -2,7 +2,11 @@ import type { ReactNode } from "react";
 
 type IconName =
   | "arrow-right"
+  | "camera"
   | "back"
+  | "car"
+  | "check"
+  | "home"
   | "help"
   | "lock"
   | "location"
@@ -20,10 +24,30 @@ const iconContent: Record<IconName, ReactNode> = {
       <path d="m12 5 7 7-7 7" />
     </>
   ),
+  camera: (
+    <>
+      <path d="M14 5h-4l-2 2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2-2Z" />
+      <circle cx="12" cy="13" r="3" />
+    </>
+  ),
   back: (
     <>
       <path d="M19 12H5" />
       <path d="m12 19-7-7 7-7" />
+    </>
+  ),
+  car: (
+    <>
+      <path d="m5 11 1.5-4.5A2 2 0 0 1 8.4 5h7.2a2 2 0 0 1 1.9 1.5L19 11" />
+      <path d="M3 11h18v7H3z" />
+      <path d="M6 18v2M18 18v2M6 14h.01M18 14h.01" />
+    </>
+  ),
+  check: <path d="m5 12 4 4L19 6" />,
+  home: (
+    <>
+      <path d="m3 10 9-7 9 7" />
+      <path d="M5 9v12h14V9M9 21v-7h6v7" />
     </>
   ),
   help: (

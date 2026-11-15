@@ -1,10 +1,17 @@
-# ScanSafe onboarding web app
+# ScanSafe
 
-This Next.js app implements the three-screen onboarding flow:
+ScanSafe is a mobile-first QR safety and parking demo built with Next.js, React, and TypeScript.
 
-1. Collect a name, email address, and phone number.
-2. Request the device's real location with the browser Geolocation API.
-3. Offer the optional Solana wallet setup screen. Wallet connectivity is intentionally not implemented.
+## What works in this demo
+
+- Three-step onboarding for name, email, and phone, followed by optional wallet information and a location choice.
+- Home screen with QR safety and parking actions plus Home, Scan, Parking, and Profile navigation.
+- QR camera scanning in browsers that provide `BarcodeDetector`, with manual link entry as a fallback.
+- Local mock QR results for safe, suspicious, and malicious examples. Links are checked in the browser and are never opened. Demo examples are available in the scanner.
+- Parking QR parsing, local vehicle and license plate storage, duration and price estimate, six-digit simulated verification, and a local confirmation.
+- Profile, vehicles, and parking session data saved in browser local storage.
+
+This project does not contact a backend, send SMS, process a payment, connect Phantom, or perform a live threat-intelligence scan. The verification demo code is `123456`; no message is sent. Example QR results are demonstrations only and are not security guarantees.
 
 ## Run locally
 
@@ -14,12 +21,12 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Browser geolocation requires a secure context; `localhost` is supported for local development, while deployed environments must use HTTPS. Location permission is requested only after the user selects **Use my location**.
+Open [http://localhost:3000](http://localhost:3000). Camera and location access require browser permission and a secure context; `localhost` is supported for local development and deployed environments must use HTTPS. If camera QR detection is unavailable, paste a link or choose a demo link instead.
 
-## Backend integration
+Run `npm run typecheck` and `npm run build` to validate the app.
 
-Form data and coordinates are held in the onboarding flow's client-side state while the user moves between steps. No data is sent to or stored by the backend yet. The `OnboardingCompletionHandler` type in `src/lib/onboarding.ts` defines the callback seam for a future backend integration; pass a handler to `OnboardingFlow` to submit the completed `OnboardingData`.
+## App structure
 
-The app does not connect a Solana wallet and does not call Gemini or any other AI service.
+Screen components are in `src/components/`, with flow state coordinated by `ScanSafeApp.tsx`. Local persistence, the storage migration, QR demo checks, sample parking lots, pricing, and session creation live in `src/services/appServices.ts`.
 
-Run `npm run typecheck` and `npm run build` to validate the frontend.
+The service module is the integration seam for future server-backed QR checks, parking data, and verification. No backend, SMS, wallet, or payment service is configured. Existing `scansafe-app-v1` data is migrated when it can be read.

@@ -4,11 +4,10 @@ export interface Coordinates {
 }
 
 export interface OnboardingData {
-  fullName: string;
+  firstName: string;
+  lastName: string;
   email: string;
   phone: string;
-  location: Coordinates | null;
-  walletAddress: string | null;
 }
 
 export type OnboardingCompletionHandler = (

@@ -1,5 +1,5 @@
-import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { ScanSafeApp } from "@/components/ScanSafeApp";
 
 export default function Home() {
-  return <OnboardingFlow />;
+  return <ScanSafeApp />;
 }
