@@ -730,6 +730,9 @@ def pm_forward_ok(info: object) -> bool:
 PM_PAY_PATH_WORDS = re.compile(r"start|extend|purchase|checkout|payment|pay|order|charge|transaction"
                                r"|session|park", re.I)
 PM_SAFE_PATH_WORDS = re.compile(r"search|quote", re.I)
+# Exact non-payment writes the flow needs: saving the plate on the Add vehicle screen (real path,
+# 2026-11-14: POST /v2/parking/api/vehicle). Exact paths only, never a prefix.
+PM_ALLOWED_WRITES = {("POST", "/v2/parking/api/vehicle")}
 
 
 def pm_request_blocked(method: object, url: object) -> bool:
@@ -743,6 +746,8 @@ def pm_request_blocked(method: object, url: object) -> bool:
     except ValueError:
         return True
     if not _pm_domain_ok(parts.hostname):
+        return False
+    if (str(method).upper(), unquote(parts.path).rstrip("/")) in PM_ALLOWED_WRITES:
         return False
     path = re.sub(r"parkmobile", "", unquote(parts.path).lower())
     return bool(PM_PAY_PATH_WORDS.search(path)) and not PM_SAFE_PATH_WORDS.search(path)

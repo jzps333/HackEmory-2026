@@ -901,3 +901,11 @@ def test_zone_name_skips_the_accepted_payment_methods_box():
              "Park Tavern", "Accepted payment methods", "Park here"]
     info = op.pm_zone_info(lines, "91987")
     assert info["zone_name"] == "Park Tavern" and info["operator"] == "Atlanta, GA - Off St Operator"
+
+
+def test_fence_allows_only_the_exact_add_vehicle_write():
+    assert not op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/vehicle")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/vehicle/start")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/vehicles/pay")
+    assert op.pm_request_blocked("PUT", "https://app.parkmobile.io/v2/parking/api/vehicle")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/session/start")
