@@ -25,6 +25,7 @@ from api.routes_plugins import router as plugins_router
 from api.routes_memory import router as memory_router
 from api.routes_result import router as result_router
 from api.routes_research import router as research_router
+from api.routes_runner import router as runner_router
 from api.routes_voicepay import router as voicepay_router
 from api.scan import (SandboxStreamError, failed_result, parse_solana_pay, sandbox_result, scan,
                       stream_sandbox, with_location)
@@ -47,6 +48,7 @@ app.include_router(voicepay_router)  # /pay/intent* (FaceTime agent: voice-confi
 app.include_router(plugins_router)   # /plugins* (community plugins: index, search, enabled set)
 app.include_router(memory_router)    # /plugins/{id}/memory|flashcards (agent), /me/apps (signed in)
 app.include_router(research_router)  # /research/start, /research/{job_id} (agent), /research/r/{token} (page)
+app.include_router(runner_router)    # /runner/* (Toolstone helper app relay), /demo/forms/permit
 
 
 class ScanRequest(BaseModel):
