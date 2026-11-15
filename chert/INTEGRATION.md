@@ -67,7 +67,7 @@ Add to `chert/scansafe-agent/.env.local` (agent server) or the repo `.env`. Neve
 | `AGENT_INTERNAL_KEY` | agent + API | shared key (header `X-Agent-Key`) for `POST /operators/dogwood/app-session` and the voice-payment routes `POST /pay/intent*`; the SAME value on both. Without it the agent uses the plain meter flow and can't pay by voice (the app's Pay button still works) |
 | `SANDBOX_URL`, `SANDBOX_TOKEN` | agent + API | the agent calls the sandbox's `/operate/stream` directly for the Dogwood app (the backend doesn't proxy it yet); same values as the API's |
 
-Optional: `SCANSAFE_RESULT_BASE` (default `https://scansafe.nyc/r`), `CHERT_API_BASE`.
+Optional: `SCANSAFE_RESULT_BASE` (default `https://api.scansafe.nyc/r`, the API's own result page), `CHERT_API_BASE`.
 
 ### Who gets the text?
 

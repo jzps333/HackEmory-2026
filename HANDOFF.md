@@ -148,7 +148,7 @@ screen shows the live stream (falls back to `/scan`); results with verdict, expl
 - Agent server is 2 vCPU: `AgentServer(load_threshold=0.95)` so video work doesn't mark the worker unavailable.
 - `chert doctor` reports the starter's `OPENAI_API_KEY` placeholder as a problem: harmless (our agent uses Gemini).
 - Pre-existing test failure: `tests/test_sandbox.py::test_public_ips_allowed[::ffff:8.8.8.8]` on the servers' Python.
-- `SCANSAFE_RESULT_BASE` defaults to `https://scansafe.nyc/r/<id>` in iMessage links, but the app has no `/r` route yet.
+- Follow-up texts link to `https://api.scansafe.nyc/r/<id>`, an HTML result page served by the API (api/routes_result.py): safe → "Continue to <site>", scam/suspicious → FTC / IC3 report buttons, no link to the site. `SCANSAFE_RESULT_BASE` overrides it. The web app has no `/r` route.
 - **Done since:** app report messages that say what really happened + map/dashboard "sample data" notice; `/report`
   answers not_malicious/no_location even without Typesense.
 - **In progress as of writing (check `git log` / ask the user):** sandbox click-past of cookie banners /

@@ -138,7 +138,7 @@ def test_debounce():
 
 def test_followup_text():
     t = imessage.followup_text(MAL)
-    assert "DON'T pay" in t and "https://scansafe.nyc/r/mock-mal-001" in t
+    assert "DON'T pay" in t and "https://api.scansafe.nyc/r/mock-mal-001" in t
     assert "redirect" not in t.lower() and "REPORT" in t
 
 

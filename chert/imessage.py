@@ -22,7 +22,7 @@ HMAC-SHA256 with the *subscription* secret over "<ts>.<raw body>", lowercase hex
 reject if the timestamp is more than 300 s off; answer 401 on failure; dedupe on event id.
 
 Env: CHERT_API_KEY, CHERT_PROJECT_ID, CHERT_LINE_ID (optional; looked up if empty),
-CHERT_WEBHOOK_SECRET, SCANSAFE_RESULT_BASE (default https://scansafe.nyc/r).
+CHERT_WEBHOOK_SECRET, SCANSAFE_RESULT_BASE (default https://api.scansafe.nyc/r, served by api/routes_result.py).
 """
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ HEADLINES = {
 def result_link(scan_id: Optional[str]) -> Optional[str]:
     if not scan_id:
         return None
-    base = os.getenv("SCANSAFE_RESULT_BASE", "https://scansafe.nyc/r").rstrip("/")
+    base = os.getenv("SCANSAFE_RESULT_BASE", "https://api.scansafe.nyc/r").rstrip("/")
     return f"{base}/{scan_id}"
 
 

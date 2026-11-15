@@ -61,7 +61,7 @@ def _location(req: ScanRequest) -> list[float] | None:
 def _finish(result: ScanResult, background_tasks: BackgroundTasks) -> ScanResult:
     result.flagged_before = flagged_before(result)   # "reported N times near you"; never raises
     recent_scans.remember(result)                    # so /report can trust only our own results
-    background_tasks.add_task(result_store.save, result)   # for scansafe.nyc/r/<id> (follow-up text link)
+    background_tasks.add_task(result_store.save, result)   # for api.scansafe.nyc/r/<id> (follow-up text link)
     background_tasks.add_task(record_scan, result)   # log to Tiger Data off the request path
     return result
 

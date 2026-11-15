@@ -1,4 +1,4 @@
-"""Finished checks saved for a week, so the link in the follow-up text (scansafe.nyc/r/<id>)
+"""Finished checks saved for a week, so the link in the follow-up text (api.scansafe.nyc/r/<id>)
 works later and survives restarts. One small JSON file per scan_id in RESULT_DIR (chmod 700).
 
 Anyone with the link can see that one result, like a shared photo link: scan ids are random
