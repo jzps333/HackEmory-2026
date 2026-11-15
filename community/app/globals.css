@@ -1831,3 +1831,13 @@ p {
     transition: none !important;
   }
 }
+
+/* Demo switch: Chert out of the box vs with community skills */
+.baseline-toggle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 18px; }
+.baseline-label { font-size: 13px; color: var(--muted, #6b6b68); margin-right: 4px; }
+.baseline-toggle .pill { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 999px;
+  border: 1px solid var(--border, #e7e7e5); background: #fff; color: inherit; cursor: pointer; }
+.baseline-toggle .pill-on { background: #1f2a44; border-color: #1f2a44; color: #fff; }
+.baseline-toggle .pill:focus-visible { outline: 2px solid #1d4f91; outline-offset: 2px; }
+.baseline-toggle .pill:disabled { cursor: default; opacity: .7; }
+.baseline-error { font-size: 13px; color: #a3302a; }

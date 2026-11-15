@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, GitPullRequest, Search, Terminal } from "lucide-react";
+import BaselineToggle from "./BaselineToggle";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -127,6 +128,8 @@ export default function PluginsBrowser() {
           </a>
         </div>
       </PageHeader>
+
+      <BaselineToggle />
 
       <div className="toolbar">
         <label className="search">

@@ -183,3 +183,17 @@ export const NEEDS_VERIFICATION_HELP = "An admin has to verify this plugin befor
 export function checkedAt(d = new Date()): string {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
+
+export async function getBaseline(): Promise<boolean> {
+  const data = await request<Record<string, unknown>>("/plugins/baseline", { method: "GET" });
+  return data.baseline === true;
+}
+
+export async function setBaseline(on: boolean): Promise<boolean> {
+  const data = await request<Record<string, unknown>>("/plugins/baseline", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ on }),
+  });
+  return data.baseline === true;
+}
