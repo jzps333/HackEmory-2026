@@ -732,7 +732,21 @@ PM_PAY_PATH_WORDS = re.compile(r"start|extend|purchase|checkout|payment|pay|orde
 PM_SAFE_PATH_WORDS = re.compile(r"search|quote", re.I)
 # Exact non-payment writes the flow needs: saving the plate on the Add vehicle screen (real path,
 # 2026-11-14: POST /v2/parking/api/vehicle). Exact paths only, never a prefix.
-PM_ALLOWED_WRITES = {("POST", "/v2/parking/api/vehicle")}
+PM_ALLOWED_WRITES = {("POST", "/v2/parking/api/vehicle"),          # save the plate (Add vehicle)
+                     ("POST", "/v2/parking/api/order/calculate")}  # price for the confirm screen
+
+# Display-only: the signed-in Confirm parking screen shows the account's email. Mask every email
+# address in the page text so it never reaches the FaceTime video or a recording.
+PM_MASK_EMAIL_JS = r"""
+(() => {
+  const RE = /[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})/g;
+  const fix = n => { if (n.nodeType === 3) { const v = n.nodeValue; if (v && v.indexOf('@') >= 0) { const m = v.replace(RE, '\u2022\u2022\u2022\u2022@$1'); if (m !== v) n.nodeValue = m; } }
+                     else if (n.nodeType === 1) { const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); let t; while ((t = w.nextNode())) fix(t); } };
+  const start = () => { fix(document.body); new MutationObserver(ms => { for (const m of ms) { if (m.type === 'characterData') fix(m.target); else m.addedNodes.forEach(fix); } })
+                          .observe(document.body, {subtree: true, childList: true, characterData: true}); };
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();
+"""
 
 
 def pm_request_blocked(method: object, url: object) -> bool:

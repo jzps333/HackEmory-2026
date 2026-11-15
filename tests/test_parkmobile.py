@@ -517,7 +517,8 @@ def test_session_storage_is_injected_as_data(monkeypatch, tmp_path):
                                                           {"name": "evil", "value": evil}]},
         {"origin": "https://evil.com", "items": [{"name": "x", "value": "y"}]}]}
     out, lines, launched = run_fake(monkeypatch, FakePage({"facts": GUEST, "els": []}), state=state, tmp_path=tmp_path)
-    (script,) = launched["init_scripts"]
+    mask, script = launched["init_scripts"]                    # the email mask always comes first
+    assert mask == op.PM_MASK_EMAIL_JS
     assert script.startswith('(() => { if (location.origin !== "https://app.parkmobile.io") return;')
     i = script.index("JSON.parse(") + len("JSON.parse(")
     literal, end = json.JSONDecoder().raw_decode(script, i)       # one JS string literal ...
@@ -909,3 +910,25 @@ def test_fence_allows_only_the_exact_add_vehicle_write():
     assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/vehicles/pay")
     assert op.pm_request_blocked("PUT", "https://app.parkmobile.io/v2/parking/api/vehicle")
     assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/session/start")
+
+
+def test_fence_allows_the_price_calculation_but_not_placing_the_order():
+    assert not op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/order/calculate")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/order")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/order/create")
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/v2/parking/api/order/calculate/../start")
+
+
+def test_email_mask_script_masks_addresses_in_page_text():
+    sync_playwright = pytest.importorskip("playwright.sync_api").sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_context().new_page()
+        pg.add_init_script(script=op.PM_MASK_EMAIL_JS)
+        pg.set_content("<div id=a>someone.alt@gmail.com</div><div id=b>Total $4.35</div>")
+        pg.evaluate("() => { const d = document.createElement('div'); d.id = 'c'; d.textContent = 'x@ex.co'; document.body.appendChild(d); }")
+        pg.wait_for_timeout(100)
+        assert pg.inner_text("#a") == "••••@gmail.com"
+        assert pg.inner_text("#b") == "Total $4.35"
+        assert pg.inner_text("#c") == "••••@ex.co"
+        b.close()

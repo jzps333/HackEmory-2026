@@ -44,7 +44,7 @@ from operate import (PHASE_JS, STEPS_FROM_APP, clean_plate, hours_selector, oper
                      operate_status, operate_url_allowed, page_phase, plan_steps, step_text,
                      valid_hours)
 from operate import SEL as OP_SEL
-from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_SEL, PM_STATE_PATH, PM_STOPPED_AT,
+from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_MASK_EMAIL_JS, PM_SEL, PM_STATE_PATH, PM_STOPPED_AT,
                      check_parkmobile_request, clean_zone, parkmobile_request_allowed,
                      pm_area_from_url, pm_clean_url, pm_click_refused, pm_duration_patterns,
                      pm_filter_state, pm_forward_ok, pm_minutes, pm_price_text, pm_price_visible,
@@ -1519,6 +1519,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
         if state:
             opts["storage_state"] = state               # read-only copy; never saved back
         browser, context = _launch(p, on_route, **opts)
+        context.add_init_script(script=PM_MASK_EMAIL_JS)  # account email never on the video
         if session_items:     # sessionStorage for https://app.parkmobile.io, passed as JSON data
             context.add_init_script(script=pm_session_script(session_items))
         state = session_items = None
