@@ -122,7 +122,7 @@ async def _get_plugins(path: str, params: Optional[dict], timeout: float,
         return []
 
 
-async def fetch_enabled(timeout: float = 3.0, *,
+async def fetch_enabled(timeout: float = 1.5, *,
                         transport: Optional[httpx.AsyncBaseTransport] = None) -> list[dict]:
     """The demo's enabled plugins (GET /plugins/enabled). [] on any error."""
     return await _get_plugins("/plugins/enabled", None, timeout, transport)
@@ -213,15 +213,25 @@ class PluginSession:
         return True
 
     def menu(self) -> str:
-        """One line per enabled plugin, for the instructions. "" when none."""
+        """One line per enabled plugin, for the instructions. "" when none. Plugins that only use
+        ScanSafe's own abilities (QR checker, safe browser) are left out: those work directly, so a
+        QR check never detours through use_plugin and a permissions read."""
         lines = []
         for p in self.plugins:
+            if is_builtin(p):
+                continue
             said = ", ".join(f'"{x}"' for x in p["phrases"])
             app_only = MONEY_TOOLS & set(p["effective_tools"])
             lines.append(f"- {p['name']} ({'verified' if p['verified'] else 'not verified'}): "
                          f"{p['summary']}" + (f" Phrases: {said}." if said else "")
                          + (f" {APP_ONLY}" if app_only else ""))
         return "\n".join(lines)
+
+
+def is_builtin(plugin: dict) -> bool:
+    """Every tool it uses is one plain ScanSafe already has (camera, speak, screen, scam check,
+    safe browser): nothing to switch on or ask permission for."""
+    return set(plugin.get("effective_tools") or ()) <= BASE_TOOLS
 
 
 def functions_for(plugin: dict) -> list[str]:

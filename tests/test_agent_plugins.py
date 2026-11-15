@@ -175,11 +175,16 @@ def test_use_plugin_switches_and_reads_permissions_once(monkeypatch):
         assert call.video.state == "card" and call.video.card[0] == "Squat coach"
         again = await agent.use_plugin(None, "Squat coach")
         assert squat["permissions"] not in again
-        # Switching to another plugin reads ITS permissions once, and swaps the instructions.
+        # QR checker is built into ScanSafe: no permissions read, and plain ScanSafe comes back.
         qr = by_id(plugins, "qr-checker")
         out = await agent.use_plugin(None, "QR checker")
-        assert qr["permissions"] in out and call.plugins.active["id"] == "qr-checker"
-        assert qr["instructions"] in seen[-1] and squat["instructions"] not in seen[-1]
+        assert qr["permissions"] not in out and "built into ScanSafe" in out
+        assert call.plugins.active is None and squat["instructions"] not in seen[-1]
+        # Switching to another real plugin reads ITS permissions once, and swaps the instructions.
+        finder = by_id(plugins, "plugin-finder")
+        out = await agent.use_plugin(None, "Plugin finder")
+        assert finder["permissions"] in out and call.plugins.active["id"] == "plugin-finder"
+        assert finder["instructions"] in seen[-1] and squat["instructions"] not in seen[-1]
         back = await agent.use_plugin(None, "squat-coach")
         assert squat["permissions"] not in back
         missing = await agent.use_plugin(None, "launch the rockets")
@@ -363,5 +368,20 @@ def test_find_plugin_never_reads_unverified_free_text(monkeypatch):
     monkeypatch.setattr(agent, "_plugins", lambda: community.PluginSession([]), raising=False)
     fn = getattr(ai.PluginAgent.find_plugin, "__wrapped__", None) or ai.PluginAgent.find_plugin
     out = asyncio.run(fn(agent, None, "anything"))
-    assert "wire money" not in out and "Evil (not verified yet" in out
+    assert "wire money" not in out and "Evil" not in out and "an unverified plugin" in out
     assert "<plugin_summary>Form cues.</plugin_summary>" in out
+
+
+
+def test_builtin_plugins_skip_the_menu_and_the_permissions_read():
+    from chert import plugins as community
+    qr = {"id": "qr-checker", "name": "QR checker (ScanSafe)", "summary": "s", "verified": True,
+          "tools": ["camera", "speak", "screen", "scam_check", "safe_browser"],
+          "effective_tools": ["camera", "speak", "screen", "scam_check", "safe_browser"],
+          "phrases": ["check this QR code"], "qr": True, "permissions": "p", "instructions": "i"}
+    squat = {**qr, "id": "squat-coach", "name": "Squat coach", "tools": ["camera", "speak", "screen", "memory"],
+             "effective_tools": ["camera", "speak", "screen", "memory"], "phrases": ["coach my squats"], "qr": False}
+    s = community.PluginSession([qr, squat])
+    assert community.is_builtin(qr) and not community.is_builtin(squat)
+    menu = s.menu()
+    assert "Squat coach" in menu and "QR checker" not in menu and "check this QR code" not in menu
