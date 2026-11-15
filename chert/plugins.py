@@ -371,9 +371,17 @@ def session_data(cues: list[str], summary: str, at: int) -> dict:
     return data
 
 
+_LINKISH = re.compile(r"(https?://|www\.)\S+|\b[\w-]+\.(com|net|org|io|co|app|xyz|info|link|ly|me)\b\S*", re.I)
+_PHONEISH = re.compile(r"\+?\d[\d\s().-]{6,}\d")
+
+
 def session_text(plugin_name: str, summary: str) -> str:
-    """The after-session text: "Squat coach: <summary> Your history: <url>"."""
-    return f"{plugin_name}: {clean(summary, SESSION_SUMMARY_CHARS)} Your history: {my_apps_url()}"
+    """The after-session text: "Squat coach: <summary> Your history: <url>". The summary is
+    model-written, so links and phone numbers are removed: the only link in a text from the
+    ScanSafe line is our own history page."""
+    text = _PHONEISH.sub("", _LINKISH.sub("", clean(summary, SESSION_SUMMARY_CHARS)))
+    text = re.sub(r"\s{2,}", " ", text).strip() or "Session saved."
+    return f"{clean(plugin_name, 60)}: {text} Your history: {my_apps_url()}"
 
 
 class PluginSession:

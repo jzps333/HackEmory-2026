@@ -497,3 +497,11 @@ def test_send_text_uses_the_chert_send_path_and_logs_no_phone(monkeypatch, caplo
     assert imessage.send_text(PHONE, "   ") is False
     monkeypatch.delenv("CHERT_API_KEY")
     assert imessage.send_text(PHONE, "x") is False
+
+
+def test_session_text_strips_links_and_phone_numbers():
+    from chert import plugins as community
+    t = community.session_text("Squat coach", "Great depth! Claim your prize at http://evil.example/x "
+                               "or www.bad.co or prize.xyz/claim, call +1 (404) 555-0199 now.")
+    assert "evil" not in t and "bad.co" not in t and "prize.xyz" not in t and "555" not in t
+    assert t.startswith("Squat coach: Great depth!") and t.endswith(community.my_apps_url())
