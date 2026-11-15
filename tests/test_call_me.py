@@ -350,3 +350,24 @@ def test_full_store_evicts_from_the_biggest_holder(monkeypatch):
 def test_skills_call_url_needs_sign_in(fakes, monkeypatch):
     r = client.post("/call-me", json={"url": "toolstone:call", "phone": "+18042459861"})
     assert r.status_code == 403
+
+
+def test_busy_line_waits_in_line_and_never_blocks_the_retry(env, monkeypatch):
+    """Right after a call ends, Chert's shared line can still be busy: we ask Chert to queue the
+    call (up to 2 minutes). If it still says busy, the caller gets a clear 409 and may retry at once."""
+    monkeypatch.setattr(lk, "LiveKitAPI", FakeLK)
+    monkeypatch.setattr(routes_call.asyncio, "sleep", lambda *_: _real_sleep(0))
+    routes_call._last_call_at = 0.0
+    seen = {}
+
+    def busy(req):
+        seen["body"] = json.loads(req.content)
+        return httpx.Response(409, json={"error": {"code": "line_busy", "message": "Your shared line is on another call."}})
+    _chert(monkeypatch, busy)
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})
+    assert seen["body"]["when_busy"] == "queue"
+    assert r.status_code == 409 and "still on another call" in r.json()["detail"]
+    assert FakeLK.calls[-1][0] == "delete_room"
+    _chert(monkeypatch, lambda req: httpx.Response(202, json={"data": {"id": "call-9", "status": "queued"}}))
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})   # no 30 s wait
+    assert r.status_code == 200 and r.json()["call_id"] == "call-9"

@@ -140,7 +140,7 @@ SWAP_SETTLE_S = 3.0        # longest wait for a baseline agent swap to take over
 RESEARCH_HANGUP_S = 2.0    # research call with no report: let the apology reach FaceTime, then leave
 CHERT_FACETIME_API = os.getenv("CHERT_FACETIME_API", "https://facetime.trychert.com/api/v1").rstrip("/")
 CALL_DONE = {"ended", "failed", "rejected"}
-OUTBOUND_ANSWER_TIMEOUT_S = 150.0
+OUTBOUND_ANSWER_TIMEOUT_S = 270.0      # Chert may hold the call in line up to 2 min first
 DOGWOOD_SESSION_WAIT_S = 4.0   # once FaceTime is up, how long the app-session answer may still take
 # Paid: keep the Dogwood app live until its own receipt is on the video (the run ends by itself
 # about 4-5 s after payment: the app polls every 1.5 s, then the sandbox holds the receipt 1.5 s).

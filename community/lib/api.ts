@@ -119,7 +119,7 @@ export async function request<T>(
     try {
       const body = (await res.json()) as Record<string, unknown>;
       code = str(body.error);
-      message = str(body.message);
+      message = str(body.message) || str(body.detail);   // FastAPI errors: {"detail": "..."}
     } catch {
       /* not JSON */
     }

@@ -353,14 +353,23 @@ def _chert_headers(idempotency_key: Optional[str] = None) -> dict:
     return h
 
 
-def _take_rate_slot() -> None:
+def _take_rate_slot() -> float:
+    """Claim the call slot; returns the previous claim time so a call that never got placed can
+    give the slot back (a failed attempt must not block the retry for 30 s)."""
     global _last_call_at
     with _rate_lock:
         now = time.monotonic()
         wait = CALL_MIN_GAP_S - (now - _last_call_at)
         if _last_call_at and wait > 0:
             raise HTTPException(status_code=429, detail=f"one call at a time: try again in {int(wait) + 1} s")
-        _last_call_at = now
+        prev, _last_call_at = _last_call_at, now
+        return prev
+
+
+def _give_back_rate_slot(prev: float) -> None:
+    global _last_call_at
+    with _rate_lock:
+        _last_call_at = prev
 
 
 URL_REFUSED = ("only web links (http/https) or a verified parking meter payment code can be "
@@ -480,11 +489,17 @@ async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict
             "livekit_url": os.getenv("LIVEKIT_URL"),
             "participant_token": bridge_token(room, bridge_identity),
             "remote_participant_identity": agent_identity,
+            # The shared line takes one call at a time and stays busy for a moment after a call
+            # ends: wait in Chert's line (up to 2 minutes) instead of refusing.
+            "when_busy": os.getenv("CHERT_WHEN_BUSY", "queue"),
         }
         async with httpx.AsyncClient(timeout=40, follow_redirects=True) as c:
             r = await c.post(f"{CHERT_FACETIME_API}/calls", json=body, headers=_chert_headers(uuid.uuid4().hex))
-        if r.status_code not in (200, 201):
+        if not 200 <= r.status_code < 300:
             log.warning("chert create call failed: HTTP %s %s", r.status_code, r.text[:300])
+            if r.status_code == 409 and "line_busy" in r.text:
+                raise HTTPException(status_code=409, detail="The line is still on another call. "
+                                                            "Try again in a few seconds.")
             raise HTTPException(status_code=502, detail=f"Chert refused the call (HTTP {r.status_code}): {r.text[:200]}")
         data = r.json().get("data", r.json())
         call_id = data.get("id")
@@ -527,12 +542,16 @@ async def call_me(req: CallRequest, request: Request) -> dict:
         req = req.model_copy(update={"phone": signed_in})
     url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
     extra = await asyncio.to_thread(meter_job, url, req.scan_id) if url.startswith("solana:") else None
-    _take_rate_slot()
+    prev = _take_rate_slot()
     verified = {"phone_verified": bool(signed_in)}   # the agent's ParkMobile session needs this
-    if extra is None:
-        return await place_call(url, phone, extra=verified)
-    _remember_scan_owner(extra["scan_id"], phone)
-    out = await place_call(url, phone, extra={**extra, **verified})
+    try:
+        if extra is None:
+            return await place_call(url, phone, extra=verified)
+        _remember_scan_owner(extra["scan_id"], phone)
+        out = await place_call(url, phone, extra={**extra, **verified})
+    except HTTPException:
+        _give_back_rate_slot(prev)               # nothing was placed: the retry may go right away
+        raise
     return {**out, "scan_id": extra["scan_id"]}
 
 
