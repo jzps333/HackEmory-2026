@@ -1359,20 +1359,30 @@ def _pm_pick_state(page, refused: list) -> bool:
     """Add vehicle screen (real, signed in, 2026-11-14): Country / License plate / State/province /
     Nickname, then "Add vehicle" (disabled until the state is set). Sets State/province only."""
     code, name = PM_PLATE_STATE
-    for sel in page.locator("select:visible").all()[:4]:
-        if re.search(r"state|province", sel.evaluate(PM_LABEL_JS) or "", re.I):
-            for opt in ({"value": code}, {"label": name}, {"label": code}):
+    # A native <select> (often styled, label drawn on top): the one listing the US states.
+    for sel in page.locator("select").all()[:6]:
+        try:
+            labels = sel.evaluate("el => Array.from(el.options).map(o => [o.value, o.label || o.text])")
+        except Exception:   # noqa: BLE001
+            continue
+        for value, label in labels or []:
+            if str(value).strip().upper() in (code, f"US-{code}") or str(label).strip().lower() in (name.lower(), code.lower()):
                 try:
-                    sel.select_option(**opt, timeout=3000)
+                    sel.select_option(value=value, timeout=3000, force=True)
                     return True
-                except Exception:   # noqa: BLE001 - try the next form of the option
-                    pass
+                except Exception:   # noqa: BLE001
+                    break
     box = page.get_by_role("combobox", name=re.compile(r"state|province", re.I)).filter(visible=True)
     if not box.count():
         box = page.get_by_text(re.compile(r"^\s*State\s*/\s*province\s*$", re.I)).filter(visible=True)
     if not box.count():
         return False
-    pm_click(box.first, refused)
+    try:
+        pm_click(box.first, refused)
+    except GuardRefused:
+        raise
+    except Exception:   # noqa: BLE001 - label drawn over the real control: give up on the state
+        return False
     page.wait_for_timeout(600)
     want = re.compile(rf"^\s*({name}|{code})(\s*\(?{code}\)?)?\s*$", re.I)
     for opt in (page.get_by_role("option", name=want), page.get_by_text(want)):
