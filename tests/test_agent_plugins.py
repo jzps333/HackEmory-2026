@@ -103,6 +103,7 @@ def plugin_agent(ai, call):
     async def update_instructions(text):
         seen.append(text)
     agent.update_instructions = update_instructions
+    agent.auto_switch = False     # these tests check gating; auto-switching has its own test
     return agent, seen
 
 
@@ -168,7 +169,7 @@ def test_use_plugin_switches_and_reads_permissions_once(monkeypatch):
 
     async def go():
         first = await agent.use_plugin(None, "coach my squats")
-        assert squat["permissions"] in first
+        assert squat["permissions"] not in first and "ask permission" in first
         assert call.plugins.active["id"] == "squat-coach"
         assert seen and squat["instructions"] in seen[-1]
         assert seen[-1].startswith(ai.SYSTEM_INSTRUCTIONS)
@@ -183,7 +184,7 @@ def test_use_plugin_switches_and_reads_permissions_once(monkeypatch):
         # Switching to another real plugin reads ITS permissions once, and swaps the instructions.
         finder = by_id(plugins, "plugin-finder")
         out = await agent.use_plugin(None, "Plugin finder")
-        assert finder["permissions"] in out and call.plugins.active["id"] == "plugin-finder"
+        assert finder["permissions"] not in out and call.plugins.active["id"] == "plugin-finder"
         assert finder["instructions"] in seen[-1] and squat["instructions"] not in seen[-1]
         back = await agent.use_plugin(None, "squat-coach")
         assert squat["permissions"] not in back
@@ -385,3 +386,17 @@ def test_builtin_plugins_skip_the_menu_and_the_permissions_read():
     assert community.is_builtin(qr) and not community.is_builtin(squat)
     menu = s.menu()
     assert "Squat coach" in menu and "QR checker" not in menu and "check this QR code" not in menu
+
+
+
+def test_tools_switch_to_the_enabled_skill_on_their_own(monkeypatch):
+    """Asking for something an enabled skill does switches to it without use_plugin or a
+    permission speech (the owner turned the skill on)."""
+    ai = agent_mod(monkeypatch)
+    call = make_call(ai, starter())
+    agent, seen = plugin_agent(ai, call)
+    agent.auto_switch = True
+    assert call.plugins.active is None
+    assert agent._refusal("whiteboard") is None
+    assert call.plugins.active is not None and "whiteboard" in call.plugins.active["effective_tools"]
+    assert agent._refusal("no_such_tool") is not None          # nothing provides it: still refused

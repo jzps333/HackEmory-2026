@@ -94,6 +94,7 @@ class FakeGemini:
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     monkeypatch.setenv("RESEARCH_BUDGET_FILE", str(tmp_path / "research-budget.json"))
+    monkeypatch.setenv("RESEARCH_MIN_ROUNDS", "1")       # tests stop as soon as Gemini says enough
     monkeypatch.setenv("AGENT_INTERNAL_KEY", "agent-secret")
     monkeypatch.setenv("ACCOUNT_PEPPER", "test-pepper")
     monkeypatch.setenv("PUBLIC_API_BASE", "https://api.example.test")
@@ -609,9 +610,9 @@ def test_build_report_limits():
     raw = {"summary": "S.", "sections": [{"title": f"T{i}", "body": "word " * 400} for i in range(9)],
            "sources": [], "next_steps": ["a"] * 9}
     rep = research.build_report(raw, srcs)
-    assert len(rep["sections"]) == 6 and all(len(s["body"]) <= 900 for s in rep["sections"])
+    assert len(rep["sections"]) == research.MAX_SECTIONS and all(len(s["body"]) <= research.MAX_BODY for s in rep["sections"])
     assert rep["sections"][0]["body"].endswith("…")
-    assert len(rep["sources"]) == 15 and len(rep["next_steps"]) == 5
+    assert len(rep["sources"]) == min(20, research.MAX_SOURCES) and len(rep["next_steps"]) == 5
     with pytest.raises(ValueError):
         research.build_report({"summary": "", "sections": raw["sections"]}, srcs)
     with pytest.raises(ValueError):

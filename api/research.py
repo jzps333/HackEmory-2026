@@ -68,9 +68,9 @@ CALLBACK_RETRY_S = 60          # the call rate limit refused: try once more afte
 MAX_PROGRESS = 40
 MAX_NOTE_CHARS = 1500
 MAX_NOTES_CHARS = 60000        # notes given to the report prompt, newest dropped first
-MAX_SOURCES = 15
-MAX_SECTIONS = 6
-MAX_BODY = 900
+MAX_SOURCES = 25
+MAX_SECTIONS = 8
+MAX_BODY = 1600
 TOPIC_MAX, DETAILS_MAX = 300, 1000
 JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
@@ -117,6 +117,14 @@ def max_seconds() -> float:
     except ValueError:
         v = DEFAULT_MAX_S
     return max(1.0, min(v, HARD_MAX_S))
+
+
+def min_rounds() -> int:
+    """Rounds done before Gemini may stop early ("enough"): keeps a run in-depth."""
+    try:
+        return max(1, min(int(os.getenv("RESEARCH_MIN_ROUNDS", "4")), 8))
+    except ValueError:
+        return 4
 
 
 def max_iterations() -> int:
@@ -256,16 +264,16 @@ def sources_from(cand: dict) -> list[dict]:
 
 def _grounded_per_job() -> int:
     try:
-        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_JOB", "10")), 40))
+        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_JOB", "28")), 40))
     except ValueError:
-        return 10
+        return 28
 
 
 def _grounded_per_day() -> int:
     try:
-        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_DAY", "60")), 500))
+        return max(0, min(int(os.getenv("RESEARCH_GROUNDED_PER_DAY", "120")), 500))
     except ValueError:
-        return 60
+        return 120
 
 
 _budget_lock = threading.Lock()
@@ -400,7 +408,8 @@ def plan_prompt(job: dict, notes: list[dict], missing: list[str], asked: list[st
         f"Notes so far:\n<notes>{_notes_block(notes, 20000)}</notes>\n"
         + (f"Still missing (from the last review): {_untrusted('; '.join(missing))}\n" if missing else "")
         + (f"Already searched (don't repeat): {_untrusted('; '.join(asked[-24:]))}\n" if asked else "")
-        + "Write 3 to 5 focused, specific web search questions that would fill the biggest gaps. "
+        + "Write 4 to 6 focused, specific web search questions that would fill the biggest gaps: "
+        + "go deeper each round (numbers, recent data, real examples, risks, expert disagreement). "
         'Answer with JSON only: {"questions": ["...", "..."]}')
 
 
@@ -426,7 +435,7 @@ def report_prompt(job: dict, notes: list[dict], sources: list[dict]) -> str:
         f"Sources found by the searches (pick them by number only, never write URLs):\n{listed}\n"
         "Plain text only (no markdown, no URLs). Answer with JSON only:\n"
         '{"summary": "3 to 5 sentences", '
-        '"sections": [{"title": "short title", "body": "at most 900 characters"}] (3 to 6 sections), '
+        '"sections": [{"title": "short title", "body": "600 to 1500 characters, concrete and specific"}] (5 to 8 sections), '
         '"sources": [numbers of the sources the report relies on], '
         '"next_steps": ["short practical next step", ...] (2 to 5)}')
 
@@ -691,7 +700,7 @@ def research(job: dict) -> dict:
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
             log.warning("research %s: review failed (%s)", job["job_id"], type(e).__name__)
             break
-        if verdict.get("enough") is True:
+        if verdict.get("enough") is True and rnd >= min_rounds():
             _progress(job, "That covers it: writing the report.")
             break
         missing = [_one_line(m, 150) for m in (verdict.get("missing") or []) if isinstance(m, str)][:6]

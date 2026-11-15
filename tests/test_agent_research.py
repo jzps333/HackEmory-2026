@@ -133,7 +133,7 @@ def test_start_research_posts_the_body_and_says_it_will_call_back(monkeypatch, a
         assert api.calls == [("POST", "/research/start",
                               {"phone": PHONE, "topic": "NASDAQ ‹b›strategies‹/b›",
                                "details": "intraday, last 5 years"}, "agent-key-test")]
-        assert "10 to 15 minutes" in out and "call them back" in out and "goodbye" in out
+        assert "call them back" in out and "bye" in out and "ends by itself" in out
         assert call.video.card == ("Research agent", "On it: NASDAQ ‹b›strategies‹/b›")
         again = await agent.start_research(None, "something else")       # once per call
         assert "already started" in again and len(api.calls) == 1
@@ -274,7 +274,7 @@ def test_enable_skill_only_turns_on_what_find_plugin_offered(monkeypatch, api):
         state["enabled"] = state["enabled"] + [rsch]                    # the API turns it on
         out = await agent.enable_skill(None, "research agent")
         assert api.calls == [("POST", "/plugins/research/enable", None, "agent-key-test")]  # no body
-        assert "turned on for this line" in out and rsch["permissions"] in out
+        assert "turned on for this line" in out and rsch["permissions"] not in out
         assert call.plugins.active["id"] == "research" and rsch["instructions"] in seen[-1]
         assert call.video.card[0] == "Research agent"
         again = await agent.enable_skill(None, "research agent")         # already on: no 2nd POST
@@ -300,7 +300,7 @@ def test_enable_skill_403_and_feed_lag(monkeypatch, api):
         api.enable_reply = (200, {"enabled": ["squat-coach", "research"]})
         out = await agent.enable_skill(None, "Research agent")
         assert call.plugins.has("research") and call.plugins.active["id"] == "research"
-        assert rsch["permissions"] in out
+        assert rsch["permissions"] not in out
     asyncio.run(go())
 
 

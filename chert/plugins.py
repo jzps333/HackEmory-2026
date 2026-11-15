@@ -508,6 +508,11 @@ class PluginSession:
             return tool in BASE_TOOLS
         return tool in self.active["effective_tools"]
 
+    def provider_plugin(self, tool: str) -> Optional[dict]:
+        """The first enabled (verified) plugin that may use ``tool``, so the agent can switch to it
+        on its own instead of making the caller ask for the skill first."""
+        return next((p for p in self.plugins if tool in p["effective_tools"]), None)
+
     def provider(self, tool: str) -> Optional[str]:
         """Name of an enabled plugin that may use ``tool``."""
         return next((p["name"] for p in self.plugins if tool in p["effective_tools"]), None)
