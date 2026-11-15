@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   BookOpen,
   Bot,
   CodeXml,
@@ -25,9 +26,10 @@ export const NAV: NavItem[] = [
   { href: "/settings", label: "Members and settings", icon: Settings },
   { href: "/docs", label: "Quickstart and docs", icon: BookOpen },
   { href: "/plugins", label: "Community plugins", icon: Puzzle },
+  { href: "/apps", label: "My apps", icon: AppWindow },
 ];
 
-/** Static look-alike pages (everything except Overview and Community plugins). */
+/** Static look-alike pages (everything except Overview, Community plugins and My apps). */
 export const STATIC_SECTIONS: Record<string, { title: string; subtitle: string }> = {
   lines: { title: "Lines", subtitle: "Phone numbers your agents answer and call from." },
   calls: { title: "Calls", subtitle: "FaceTime and phone calls placed or answered by your agents." },
