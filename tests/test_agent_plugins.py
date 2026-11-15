@@ -456,3 +456,35 @@ def test_turn_log_traces_a_call(monkeypatch, caplog):
     assert any("tools: use_plugin" in m for m in lines)
     assert any("agent reply (cut off): 11 chars" in m for m in lines)
     assert any("error: RuntimeError" in m for m in lines)
+
+
+def test_gemini_sessions_outlive_two_minutes(monkeypatch):
+    """Audio+video Gemini Live sessions end at 2 minutes unless context compression is on; session
+    resumption lets the plugin reconnect into the same conversation."""
+    ai = agent_mod(monkeypatch)
+
+    class Rec:
+        def __init__(self, *a, **k):
+            self.a, self.k = a, k
+
+    gtypes = types.SimpleNamespace(**{n: type(n, (Rec,), {}) for n in (
+        "ContextWindowCompressionConfig", "SlidingWindow", "SessionResumptionConfig",
+        "AudioTranscriptionConfig", "RealtimeInputConfig", "AutomaticActivityDetection")},
+        StartSensitivity=types.SimpleNamespace(START_SENSITIVITY_HIGH="hi"),
+        EndSensitivity=types.SimpleNamespace(END_SENSITIVITY_HIGH="hi"))
+    genai = types.ModuleType("google.genai")
+    genai.types = gtypes
+    google_pkg = types.ModuleType("google")
+    google_pkg.genai = genai
+    lk_google = types.SimpleNamespace(realtime=types.SimpleNamespace(RealtimeModel=Rec))
+    plugins_pkg = types.ModuleType("livekit.plugins")
+    plugins_pkg.google = lk_google
+    monkeypatch.setitem(sys.modules, "google", google_pkg)
+    monkeypatch.setitem(sys.modules, "google.genai", genai)
+    monkeypatch.setitem(sys.modules, "google.genai.types", gtypes)
+    monkeypatch.setitem(sys.modules, "livekit.plugins", plugins_pkg)
+    model = ai.make_model()
+    cw = model.k["context_window_compression"]
+    assert type(cw).__name__ == "ContextWindowCompressionConfig"
+    assert type(cw.k["sliding_window"]).__name__ == "SlidingWindow"
+    assert type(model.k["session_resumption"]).__name__ == "SessionResumptionConfig"

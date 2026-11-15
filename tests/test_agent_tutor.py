@@ -424,3 +424,68 @@ def test_stop_is_by_meaning_and_has_no_fixed_line(monkeypatch):
     for text in (ai.SYSTEM_INSTRUCTIONS, ai.BASELINE_INSTRUCTIONS):
         assert "I've stopped" not in text
         assert "hold on" not in text            # a pause to ask something isn't a stop
+
+
+# --- the frame FaceTime gets: Chert's bridge doesn't enlarge it, so we send it big ----------------
+
+def test_video_goes_out_bigger_than_it_is_drawn(monkeypatch):
+    from chert import status_video as sv
+    v = make_video()
+    drawn = v._draw()
+    assert len(drawn) == sv.StatusVideo.W * sv.StatusVideo.H * 4
+    monkeypatch.delenv("STATUS_VIDEO_OUT", raising=False)
+    assert sv.out_size() == (1080, 1920)                              # default: 1.5x
+    for bad in ("huge", "100x100", "9000x9000", "1080x"):
+        monkeypatch.setenv("STATUS_VIDEO_OUT", bad)
+        assert sv.out_size() == (1080, 1920)
+    monkeypatch.setenv("STATUS_VIDEO_OUT", "1440x2560")
+    assert sv.out_size() == (1440, 2560)
+    out = v._scaled(drawn, 1080, 1920)
+    assert len(out) == 1080 * 1920 * 4
+    assert v._scaled(drawn, 1080, 1920) is out                        # unchanged frame: no resize again
+    assert v._scaled(drawn, sv.StatusVideo.W, sv.StatusVideo.H) is drawn
+    wide = v._scaled(drawn, 1920, 1440)                               # other shape: fitted, centred
+    assert len(wide) == 1920 * 1440 * 4 and wide[:4] == bytes((0, 0, 0, 255))
+
+
+# --- the board keeps up: teaching out loud without writing gets a nudge -------------------------
+
+def test_board_nudge_when_the_tutor_talks_without_writing(monkeypatch):
+    import types as _t
+    ai, call, agent = tutor_call(monkeypatch)
+    asyncio.run(agent.whiteboard_title(None, "Derivatives"))
+    asyncio.run(agent.write_step(None, "A derivative is a slope"))
+    asked = []
+    nudge = ai.BoardNudge(call, lambda text: asked.append(text), later=lambda delay, fn: fn())
+    long = "So integrals go the other way: they add up tiny slices under the curve to get an area. " * 2
+    nudge.on_tools(["write_step"])
+    nudge.on_reply(long, interrupted=False)               # explained right after writing: fine
+    assert asked == []
+    nudge.on_caller_done()                                 # "yeah" ... then it teaches without writing
+    nudge.on_reply("Great!", interrupted=False)            # short: fine
+    assert asked == []
+    nudge.on_reply(long, interrupted=False)
+    assert len(asked) == 1 and "write_step" in asked[0] and "write_note" in asked[0]
+    nudge.on_reply(long, interrupted=False)                # once per caller turn
+    assert len(asked) == 1
+    nudge.on_caller_done()
+    nudge.on_reply(long, interrupted=True)                 # cut off by the caller: leave it
+    assert len(asked) == 1
+    call.plugins.activate(None)                            # tutor off: never
+    nudge.on_caller_done()
+    nudge.on_reply(long, interrupted=False)
+    assert len(asked) == 1
+
+
+def test_board_nudge_waits_for_a_write_that_is_on_its_way(monkeypatch):
+    ai, call, agent = tutor_call(monkeypatch)
+    asyncio.run(agent.whiteboard_title(None, "Derivatives"))
+    asyncio.run(agent.write_step(None, "A derivative is a slope"))
+    asked, pending = [], []
+    nudge = ai.BoardNudge(call, asked.append, later=lambda delay, fn: pending.append((delay, fn)))
+    nudge.on_caller_done()
+    nudge.on_reply("Integrals add up thin slices under a curve to find the area, the reverse of slope. " * 2, False)
+    assert pending and pending[0][0] == ai.BOARD_NUDGE_WAIT_S
+    nudge.on_tools(["write_step"])            # the step lands within the wait
+    pending[0][1]()
+    assert asked == []

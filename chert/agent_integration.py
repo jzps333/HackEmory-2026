@@ -967,8 +967,10 @@ class PluginAgent(ScanSafeAgent):
     async def write_step(self, context: RunContext, text: str) -> str:
         """Write the next step of the lesson on the caller's screen, numbered: one idea in one
         short line (under 140 characters). Write math in plain text with Unicode, like x², √x, ∫,
-        π, ≤, → or ((x+h)²−x²)/h. Call it before you explain the step, and explain it only once,
-        after it returns. One step at a time, never several in a row."""
+        π, ≤, → or ((x+h)²−x²)/h. Every new idea you teach goes on the board with this, every
+        time, including when the lesson moves on to a new topic: call it before you explain the
+        step, and explain it only once, after it returns. One step at a time, never several in a
+        row."""
         refused, p = self._board()
         if refused:
             return refused
@@ -1671,6 +1673,14 @@ def make_model():
                 silence_duration_ms=500,
             )),
         temperature=0.6,
+        # We send the caller's camera, and Gemini Live ends audio+video sessions after 2 minutes
+        # unless context compression is on (a tutor lesson died at 2:00). Sliding-window
+        # compression lifts that; session resumption lets the plugin reconnect into the same
+        # conversation when Google rotates the connection.
+        context_window_compression=gtypes.ContextWindowCompressionConfig(
+            sliding_window=gtypes.SlidingWindow(),
+            trigger_tokens=int(os.getenv("GEMINI_LIVE_COMPRESS_AT", "25600"))),
+        session_resumption=gtypes.SessionResumptionConfig(),
     )
 
 
@@ -1929,6 +1939,76 @@ def wire_transcripts(session: AgentSession, heard: "voice_pay.Heard") -> None:
     session.on("user_state_changed", _user_state)
 
 
+BOARD_TOOLS = frozenset({"whiteboard_title", "write_step", "write_note", "draw_graph", "clear_whiteboard"})
+BOARD_NUDGE_CHARS = 120        # shorter replies are check-ins ("Great, with me?"), not teaching
+BOARD_NUDGE_WAIT_S = 2.0       # Gemini's reply lands just before its tool calls: give them time
+BOARD_NUDGE = ("You just taught that out loud without putting it on their screen. Right now, call "
+               "write_step with that idea in one short line (or write_note if it answered a why). "
+               "Don't explain it again; once it's written, just check in briefly.")
+
+
+class BoardNudge:
+    """While the Tutor is on, every idea goes on the board. Gemini sometimes slips into just
+    talking (a lesson moved on to integrals and the board stayed on step 1). After a caller turn,
+    a long reply with no board tool gets one nudge to write it down."""
+
+    def __init__(self, call, ask, later=None) -> None:
+        self.call, self.ask = call, ask
+        self.later = later or (lambda delay, fn: asyncio.get_running_loop().call_later(delay, fn))
+        self.wrote = False
+        self.nudged = False
+
+    def _tutor_on(self) -> bool:
+        active = getattr(getattr(self.call, "plugins", None), "active", None)
+        return (active is not None and "whiteboard" in (active.get("effective_tools") or ())
+                and getattr(getattr(self.call, "video", None), "state", None) == "whiteboard")
+
+    def on_caller_done(self) -> None:
+        self.wrote = self.nudged = False
+
+    def on_tools(self, names) -> None:
+        if BOARD_TOOLS & set(names):
+            self.wrote = True
+
+    def on_reply(self, text: str, interrupted: bool) -> None:
+        if interrupted or self.wrote or self.nudged or len(text or "") < BOARD_NUDGE_CHARS:
+            return
+        if self._tutor_on():
+            self.later(BOARD_NUDGE_WAIT_S, self._fire)
+
+    def _fire(self) -> None:
+        if self.wrote or self.nudged or not self._tutor_on():
+            return
+        self.nudged = True
+        log.info("tutor: taught without writing; nudging it to write that down")
+        self.ask(BOARD_NUDGE)
+
+
+def wire_board_nudge(session, call) -> BoardNudge:
+    def ask(text: str) -> None:
+        try:
+            session.generate_reply(instructions=text)
+        except Exception:  # noqa: BLE001 - session closing
+            log.exception("tutor: couldn't nudge")
+    n = BoardNudge(call, ask)
+
+    def _transcribed(ev) -> None:
+        if getattr(ev, "is_final", False):
+            n.on_caller_done()
+
+    def _tools(ev) -> None:
+        n.on_tools([str(getattr(c, "name", "")) for c in (getattr(ev, "function_calls", None) or [])])
+
+    def _item(ev) -> None:
+        item = getattr(ev, "item", None)
+        if getattr(item, "role", None) == "assistant":
+            n.on_reply(getattr(item, "text_content", "") or "", bool(getattr(item, "interrupted", False)))
+    session.on("user_input_transcribed", _transcribed)
+    session.on("function_tools_executed", _tools)
+    session.on("conversation_item_added", _item)
+    return n
+
+
 def wire_turn_log(session, clock=time.monotonic) -> None:
     """One short log line per turn event, so a silent turn on a real call can be traced: how many
     words the caller's final transcript had (never the words), agent and caller state changes, the
@@ -2164,6 +2244,7 @@ async def entrypoint(ctx: JobContext) -> None:
     call.research_id = research_id            # the camera loop never checks codes on that call
     wire_transcripts(session, call.heard)     # before start, so the first words are kept too
     wire_turn_log(session)
+    wire_board_nudge(session, call)
     call.watcher.start()                      # before connect, so no track event is missed
 
     def _participant(p: rtc.RemoteParticipant) -> None:

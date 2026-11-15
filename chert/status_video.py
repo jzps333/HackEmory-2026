@@ -39,6 +39,8 @@ import asyncio
 import base64
 import io
 import math
+import os
+import re
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -174,6 +176,18 @@ def _wrap(text: str, font, max_w: int, lines: int = 2) -> list[str]:
     return [_fit(l, font, max_w) for l in out[:lines]]
 
 
+def out_size() -> tuple[int, int]:
+    """The size of the frame we send (env STATUS_VIDEO_OUT, "WxH"). Screens are drawn at 720x1280,
+    but Chert's FaceTime bridge shows our frame at its own pixel size without enlarging it, so a
+    720x1280 frame is a small box on the caller's phone. We scale it up before sending."""
+    m = re.fullmatch(r"(\d{3,4})x(\d{3,4})", (os.getenv("STATUS_VIDEO_OUT") or "").strip())
+    if m:
+        w, h = int(m.group(1)), int(m.group(2))
+        if StatusVideo.W <= w <= 2160 and StatusVideo.W <= h <= 3840:
+            return w, h
+    return 1080, 1920
+
+
 class StatusVideo:
     """Publishes the agent's camera track (Chert needs one, from the agent's own participant)."""
 
@@ -206,7 +220,8 @@ class StatusVideo:
         self.live: Optional[tuple[Image.Image, Image.Image]] = None   # (picture, rounded mask)
         self.live_seq = 0          # bumps on every new live frame, so it gets drawn
         self.live_host = ""        # where the sandbox browser is now (from note_nav)
-        self.source = rtc.VideoSource(self.W, self.H)
+        self.out_w, self.out_h = out_size()
+        self.source = rtc.VideoSource(self.out_w, self.out_h)
         self._task: Optional[asyncio.Task] = None
         self._f = _fonts()
 
@@ -691,7 +706,7 @@ class StatusVideo:
         opts = rtc.TrackPublishOptions(
             source=rtc.TrackSource.SOURCE_CAMERA,
             simulcast=False,                         # one sharp layer; FaceTime is the only viewer
-            video_encoding=rtc.VideoEncoding(max_bitrate=3_000_000, max_framerate=self.FPS),
+            video_encoding=rtc.VideoEncoding(max_bitrate=4_000_000, max_framerate=self.FPS),
             degradation_preference=rtc.DegradationPreference.MAINTAIN_RESOLUTION,
         )
         await room.local_participant.publish_track(track, opts)
@@ -700,7 +715,8 @@ class StatusVideo:
     async def _loop(self) -> None:
         while True:
             try:
-                data = await asyncio.to_thread(self._draw)   # keep drawing off the audio loop
+                ow, oh = self.out_w, self.out_h
+                data = await asyncio.to_thread(lambda: self._scaled(self._draw(), ow, oh))  # off the audio loop
                 self._last_good = data
             except asyncio.CancelledError:
                 raise
@@ -710,8 +726,27 @@ class StatusVideo:
                 if data is None:
                     await asyncio.sleep(1 / self.FPS)
                     continue
-            self.source.capture_frame(rtc.VideoFrame(self.W, self.H, rtc.VideoBufferType.RGBA, data))
+            self.source.capture_frame(rtc.VideoFrame(self.out_w, self.out_h, rtc.VideoBufferType.RGBA, data))
             await asyncio.sleep(1 / self.FPS)
+
+    def _scaled(self, data: bytes, ow: int, oh: int) -> bytes:
+        """``data`` (a drawn W x H RGBA frame) fitted into ow x oh, centred on black. The same
+        drawn frame (the screen didn't change) reuses the last result."""
+        if (ow, oh) == (self.W, self.H):
+            return data
+        if data is getattr(self, "_scaled_src", None) and getattr(self, "_scaled_size", None) == (ow, oh):
+            return self._scaled_out
+        img = Image.frombytes("RGBA", (self.W, self.H), data)
+        s = min(ow / self.W, oh / self.H)
+        size = (round(self.W * s), round(self.H * s))
+        img = img.resize(size, Image.BILINEAR)
+        if size != (ow, oh):
+            canvas = Image.new("RGBA", (ow, oh), (0, 0, 0, 255))
+            canvas.paste(img, ((ow - size[0]) // 2, (oh - size[1]) // 2))
+            img = canvas
+        out = img.tobytes()
+        self._scaled_src, self._scaled_size, self._scaled_out = data, (ow, oh), out
+        return out
 
     def close(self) -> None:
         if self._task:
