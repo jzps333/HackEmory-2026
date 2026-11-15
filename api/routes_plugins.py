@@ -180,12 +180,14 @@ def search_plugins(q: str = "") -> dict:
 @router.get("/plugins/enabled")
 def enabled_plugins() -> dict:
     """The enabled plugins with instructions, permissions, phrases, qr, verified and
-    effective_tools. No install counts (no Tiger round-trip on the agent's call-start path)."""
+    effective_tools. No install counts (no Tiger round-trip on the agent's call-start path).
+    Only VERIFIED plugins: this set is shared by every caller of the demo line, so an unverified
+    plugin's instructions must never reach the agent (defence in depth with _toggle)."""
     plugins, _ = _load()
     enabled = set(plugins_store.get_enabled())
     out = []
     for p in plugins:
-        if p.id in enabled:
+        if p.id in enabled and p.verified:
             d = pi.to_public(p)
             d.pop("readme", None)
             d.pop("installs", None)
@@ -213,6 +215,11 @@ def _toggle(plugin_id: str, on: bool, request: Request, background_tasks: Backgr
     p = _find(plugin_id, plugins)
     if p is None:
         return _unknown()
+    if on and not p.verified:
+        # The demo agent is shared by every caller: anyone could otherwise switch on an unverified
+        # plugin and put its instructions in front of everyone. Verify first (admins only).
+        return _error(403, "needs_verification",
+                      "Unverified plugins can't be turned on for the shared demo agent until an admin verifies them.")
     try:
         ids, newly_on = plugins_store.change_enabled(p.id, on)
     except OSError as e:

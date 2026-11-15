@@ -29,6 +29,7 @@ TOOLS = frozenset({"camera", "speak", "screen", "memory", "safe_browser", "scam_
                    "plugin_search", "solana_pay", "parking"})
 MONEY_TOOLS = frozenset({"solana_pay", "parking"})
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
+RESERVED_IDS = frozenset({"search", "enabled"})     # API routes /plugins/search, /plugins/enabled
 KINDS = ("live",)
 RUNS_ON = ("server", "vm")
 LIMITS = {"name": 60, "summary": 200, "author": 40, "permissions": 300, "instructions": 2000}
@@ -103,6 +104,8 @@ def validate(data: Any, folder_name: str) -> list[str]:
     pid = data.get("id")
     if not isinstance(pid, str) or not ID_RE.fullmatch(pid):
         errs.append("id must be 2-40 chars of a-z, 0-9 and -")
+    elif pid in RESERVED_IDS:
+        errs.append(f"id '{pid}' is reserved")
     elif pid != folder_name:
         errs.append(f"id '{pid}' must match its folder name '{folder_name}'")
     for key, cap in LIMITS.items():

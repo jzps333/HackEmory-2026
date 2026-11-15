@@ -178,23 +178,30 @@ def test_plugins_endpoint_survives_a_broken_plugin(client, env):
 
 def test_enabled_feed_has_agent_fields(client, env):
     _add(env, "tip-jar", UNVERIFIED)
-    assert client.post("/plugins/tip-jar/enable").status_code == 200
+    r = client.post("/plugins/tip-jar/enable")                     # unverified: shared agent says no
+    assert r.status_code == 403 and r.json()["error"] == "needs_verification"
     feed = client.get("/plugins/enabled").json()["plugins"]
     by_id = {p["id"]: p for p in feed}
-    assert sorted(by_id) == sorted(STARTERS + ["tip-jar"])
+    assert sorted(by_id) == sorted(STARTERS)
     for p in feed:
         for key in ("instructions", "permissions", "phrases", "qr", "verified", "effective_tools", "name"):
             assert key in p, (p["id"], key)
-        if not p["verified"]:
-            assert not set(p["effective_tools"]) & pi.MONEY_TOOLS
-    assert by_id["tip-jar"]["verified"] is False and by_id["tip-jar"]["effective_tools"] == ["speak", "screen"]
+        assert p["verified"] is True
     assert by_id["qr-checker"]["qr"] is True and "coach my squats" in by_id["squat-coach"]["phrases"]
     assert by_id["solana-pay"]["effective_tools"] == ["speak", "screen", "solana_pay"]   # verified keeps it
 
-    # Editing a verified plugin after approval: it drops to unverified and loses its money tools.
+    # Editing a verified plugin after approval: it drops to unverified and leaves the agent's feed.
     (env / "solana-pay" / "README.md").write_text("changed after approval\n")
-    by_id = {p["id"]: p for p in client.get("/plugins/enabled").json()["plugins"]}
-    assert by_id["solana-pay"]["verified"] is False and "solana_pay" not in by_id["solana-pay"]["effective_tools"]
+    ids = {p["id"] for p in client.get("/plugins/enabled").json()["plugins"]}
+    assert "solana-pay" not in ids and "squat-coach" in ids
+
+
+def test_unverified_plugin_in_the_state_file_never_reaches_the_agent(client, env):
+    _add(env, "sneaky", UNVERIFIED.replace("tip-jar", "sneaky"))
+    plugins_store.set_enabled(STARTERS + ["sneaky"])               # even if it got in somehow
+    ids = {p["id"] for p in client.get("/plugins/enabled").json()["plugins"]}
+    assert "sneaky" not in ids and ids == set(STARTERS)
+    assert client.post("/plugins/sneaky/disable").status_code == 200   # turning it off is always fine
 
 
 def test_store_never_raises_and_defaults(env, monkeypatch, tmp_path):
@@ -215,3 +222,10 @@ def test_store_never_raises_and_defaults(env, monkeypatch, tmp_path):
     monkeypatch.setattr(tiger_store, "_connect", down)
     plugins_store.record_install("squat-coach")
     assert plugins_store.install_counts() == {"squat-coach": 1}
+
+
+def test_reserved_ids_are_rejected():
+    import yaml
+    base = yaml.safe_load("id: search\nname: n\nsummary: s\nauthor: a\nversion: 1\nkind: live\n"
+                          "runs_on: server\ntools: [speak]\npermissions: p\ninstructions: i\n")
+    assert any("reserved" in e for e in pi.validate(base, "search"))
