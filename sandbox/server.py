@@ -121,7 +121,6 @@ def run_stream(req: RunRequest, authorization: str = Header(default="")) -> Stre
                              MAX_STREAM_OUTPUT, "scan")
 
 
-@app.post("/operate/stream")
 def operate_stream(req: OperateRequest, authorization: str = Header(default="")) -> StreamingResponse:
     """Operator mode (operate.py), NOT a scan. Only https://scansafe-demo-sites.vercel.app/dogwood/...
     (anything else: 400). Same NDJSON as /run/stream: frame / nav / step lines while the browser

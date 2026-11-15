@@ -1,249 +1,115 @@
-# QR Scam Checker
+# ScanSafe Factory
 
-**Check a QR link before you open it.**
+**Tell your Chert assistant what you want it to do. Build a reusable capability, try it, and share a version others can install.**
 
-QR Scam Checker is a proposed hackathon app that investigates QR destinations in a remote browser, explains suspicious behavior, and lets users warn others through an opt-in community map.
+ScanSafe's QR checker is now the first capability produced by a small skill factory. The same catalog also builds a workout-summary capability. The remote browser, AI checks and Chert connection are reusable infrastructure; parking purchases, financial dashboards and the old standalone product are archived.
 
-> Scan a QR code before you trust it. Our AI checks the destination remotely, explains suspicious behavior, and helps warn your neighborhood.
+## What this commit implements
 
-## Project status
+- Build private capability manifests from plain-English requests using two tested templates: QR/link investigation and workout summaries.
+- Run registered tools with validated inputs. QR checking reuses the isolated browser + Jev + Gemini pipeline; workout summaries calculate duration and lifting volume locally.
+- Publish immutable releases to a shared catalog and download a ZIP containing `SKILL.md` and `manifest.json`.
+- Install a specific published version. New releases do not silently update existing installations.
+- Suggest improvements; authors review suggestions and accept them through a new private revision with an optimistic version check.
+- Web workspace with build, test, publish, install and contribution flows.
+- Signed Chert inbound-message adapter using the same durable catalog, plus an opt-in provider reply adapter.
+- LiveKit voice-agent tools for building, browsing, installing, running and publishing these capabilities during an inbound Chert call.
 
-This README describes the planned v1 architecture and demo. The scanner, backend, sandbox, AI integrations, and map are not implemented yet. API contracts and directory names below are proposals.
+This is a constrained factory, not a general code generator. Requests choose from registered templates; model-written or contributor-written text is never executed. Revised instructions change the assistant guidance, not the registered runner's Python behavior. Adding a new runner requires an ordinary reviewed code change and tests.
 
-## The problem
+## Try it locally
 
-QR codes on parking meters, restaurant tables, flyers, and delivery notices can lead to impersonation pages, credential theft, or unwanted downloads. A person scanning a code often has little context about its destination.
-
-The app decodes the QR without navigating to its URL, then checks the destination remotely before presenting a result.
-
-## The v1 experience
-
-**Scan → check in the background → review the evidence → choose what to do.**
-
-1. **Scan or paste a URL.** Decode the QR inside the app. Do not automatically open the destination. Request camera access only when scanning.
-2. **Check existing reports.** Look up the URL and domain globally. Nearby reports provide additional local context; a missing report does not establish safety.
-3. **Start a background scan.** The backend returns a scan ID immediately. The app displays progress while an isolated worker investigates the destination.
-4. **Collect evidence.** Record the redirect chain, final destination, screenshot, visible text, password and payment forms, popup attempts, and download attempts.
-5. **Analyze the findings.** Gemini interprets visual and textual evidence; Jev returns typed decisions from structured observations and model findings. Backend policy determines the displayed verdict.
-6. **Show the result.** Present the verdict, specific reasons, final hostname, screenshot, and scan time.
-7. **Let the user act.** View details, explicitly open an eligible destination, or opt in to publish an approximate location report.
-
-The result appears inside the app. FaceTime, live narration, and text messaging are outside v1.
-
-### Result language
-
-| Result | Meaning | Default action |
-| --- | --- | --- |
-| **High risk** | Strong suspicious evidence or a sufficiently reliable existing finding | Block the normal open action and explain why |
-| **Uncertain** | Conflicting or insufficient evidence | Keep a warning visible; offer details and retry |
-| **No threats detected** | The completed scan found no supported threat indicators | Offer an explicit open-link action with the destination visible |
-| **Could not complete check** | Timeout, worker error, blocked access, or unavailable analysis | Offer retry; never convert failure into a favorable verdict |
-
-“No threats detected” is not a guarantee. Sites can change, hide behavior from automated browsers, or behave differently for another visitor.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    A["Next.js app: scanner and results"] --> B["FastAPI: validation and scan jobs"]
-    B --> C["Typesense: reputation lookup"]
-    B --> D["Job queue"]
-    D --> E["Isolated browser worker"]
-    E --> F["Evidence store with expiry"]
-    F --> G["Gemini: visual interpretation"]
-    G --> H["Jev: typed decisions"]
-    H --> I["Backend verdict policy"]
-    I --> B
-    B --> A
-    A --> J["Opt-in report"]
-    J --> B
-    B --> K["Moderated community reports"]
-    K --> C
-```
-
-The app polls scan status for v1. The API remains responsive while the worker runs. Raw browser observations remain available separately from AI interpretations so the result can be traced to evidence.
-
-### Stack
-
-| Component | Responsibility |
-| --- | --- |
-| **React / Next.js** | QR scanner, pasted URL input, progress, results, and map |
-| **FastAPI / Python** | Input validation, scan lifecycle, AI orchestration, verdict policy, and reports |
-| **Vultr** | Host the API and a separately isolated scanning worker |
-| **Docker + Playwright** | Disposable browser execution, navigation evidence, and screenshots |
-| **Gemini** | Interpret screenshots and explain supported findings in plain English |
-| **Jev** | Typed classifications and scores from text and structured evidence |
-| **Typesense** | Searchable reputation records and geographic report lookup |
-| **Leaflet + OpenStreetMap** | Community map with clustered approximate-location pins |
-| **Job queue + expiring evidence storage** | Background execution, status tracking, and bounded artifact retention; implementation to be selected |
-
-## Evidence and verdict policy
-
-The browser collects observations; models interpret those observations; application code controls actions.
-
-Useful evidence includes:
-
-- Submitted and final hostnames, redirect hops, and navigation failures.
-- Visible brand claims compared with the destination domain.
-- Password, payment, or recovery-phrase requests and form destinations.
-- Download and popup attempts.
-- Screenshot and text excerpts supporting each reason.
-- Scan timestamps, completion status, and reputation provenance.
-
-A login form alone does not make a site malicious. Classification should consider several signals and preserve uncertainty.
-
-Jev receives text or structured data, including Gemini's screenshot findings. Do not send screenshots directly to Jev. Keep model confidence separate from the application's risk score.
-
-An initial experimental policy may use:
-
-| Risk score | Proposed route |
-| --- | --- |
-| At least 0.8 | High risk |
-| At least 0.5 and below 0.8 | Uncertain; request additional analysis if available |
-| Below 0.5 | Eligible for “No threats detected” only when the scan is complete and evidence is sufficient |
-
-These thresholds require validation. A model score of 0.94 must not be advertised as proven “94% scam” accuracy. Missing evidence, model failure, or incomplete execution overrides a favorable score.
-
-Page text and screenshots are untrusted input. Model instructions must treat them as evidence, never as authority to change the task. Models receive no credentials, payment tools, or permission to execute page instructions.
-
-## Browser isolation requirements
-
-Deleting a container after a scan is only one layer of isolation. Before enabling arbitrary public URL scanning:
-
-- Keep scanning workers separate from the API, database, and application secrets.
-- Run the browser as a non-root user with the Chromium sandbox enabled and an appropriate seccomp policy.
-- Do not mount the Docker socket, host directories, credentials, or user sessions into the worker.
-- Restrict outbound traffic through an enforcing network boundary. Block loopback, private, link-local, metadata, and other non-public destinations for IPv4 and IPv6.
-- Apply destination checks to redirects and every browser request, including subresources and popups; account for DNS changes between validation and connection.
-- Accept only HTTP(S) URLs. Reject unsupported QR payloads and embedded URL credentials.
-- Bound execution time, redirects, CPU, memory, response sizes, and concurrent scans.
-- Observe and cancel download attempts; never execute downloaded content or submit credentials and payments.
-- Destroy the browser environment after each job, including on failure.
-- Rate-limit submissions to prevent the service becoming an unrestricted browsing proxy.
-
-Use controlled benign and simulated malicious pages for the initial demo. Public scanning requires isolation verification first.
-
-## Reputation, map, and privacy
-
-Reputation lookup and map search serve different purposes:
-
-- **Global lookup:** has this exact URL or domain already been reported or analyzed?
-- **Nearby search:** where have people reported suspicious physical QR codes?
-
-Use exact normalized identifiers for reputation matching. Typo-tolerant search supports discovery, not automatic blocking. A domain-level report is context, not proof that every URL on that domain is malicious. Recheck stale findings.
-
-Location is optional. Ask permission only when a user chooses to report, round the position to an approximately 100 m area before upload, and explain that the pin is public. Do not publish exact coordinates or user identity.
-
-Community reports must be labeled separately from verified findings. Add deduplication, abuse controls, expiry or revalidation, and a correction/removal path before a public rollout. Scan findings alone do not automatically publish a pin.
-
-URLs can contain access tokens or personal information. Redact sensitive query values from logs and public reports, restrict access to scan artifacts, and expire screenshots and extracted content. Send AI providers only the evidence needed for analysis. The design does not promise complete anonymity or zero retention.
-
-## Proposed API
-
-| Method and route | Purpose |
-| --- | --- |
-| `POST /api/scans` | Accept a URL and return a scan ID with HTTP 202 |
-| `GET /api/scans/{scan_id}` | Return progress, completion status, or failure details |
-| `GET /api/scans/{scan_id}/result` | Return verdict, reasons, final destination, and evidence references |
-| `POST /api/reports` | Publish an explicitly approved report with approximate location |
-| `GET /api/reports/nearby` | Return reports within a bounded radius |
-
-Proposed job states: `queued`, `running`, `analyzing`, `completed`, and `failed`. A failed job includes a reason such as timeout. Keep job status separate from verdict.
-
-Result artifacts must have access controls; a scan ID alone should not grant access to another user's screenshots or private URL.
-
-## Suggested repository layout
-
-```text
-apps/web/             Next.js scanner, results, and map
-services/api/         FastAPI routes, jobs, and verdict policy
-services/worker/      Playwright collection and worker lifecycle
-packages/contracts/   Shared request, evidence, and result schemas
-fixtures/             Controlled QR destinations and sample codes
-infra/                Container and deployment configuration
-tests/                Integration, isolation, and evaluation checks
-```
-
-These directories are planned. Setup commands will be added with the implementation.
-
-## Hackathon build order
-
-1. Define shared evidence and result schemas; create controlled demo pages and QR codes.
-2. Build QR decoding, pasted URL input, and a results screen with fixture data.
-3. Implement background jobs and Playwright evidence collection.
-4. Connect Gemini and Jev; apply explicit backend verdict rules.
-5. Add Typesense reputation lookup and opt-in map reports.
-6. Verify failure handling, worker cleanup, and isolation; rehearse the demo.
-
-### Demo
-
-1. Scan a QR pointing to a controlled fake parking-payment page.
-2. Show background progress while the remote worker collects evidence.
-3. Display “High risk” with the screenshot and specific impersonation indicators.
-4. Explicitly opt in to publish an approximate Atlanta map pin.
-5. Scan a legitimate test destination and show “No threats detected.”
-6. Demonstrate a timeout returning “Could not complete check.”
-
-### Validation
-
-Measure results on a labeled set of controlled legitimate and simulated malicious pages:
-
-- False positives and missed threats, reported separately.
-- Uncertain and failed scans, without counting them as correct classifications.
-- Median and p95 completion time, plus cache-hit response time.
-- Evidence quality: each explanation should be supported by collected observations.
-- Resistance to page-based prompt injection.
-- Network blocking across redirects, subresources, and IPv4/IPv6 destinations.
-- Worker cleanup after completion, timeout, and crash.
-- Consent and coordinate rounding before any public map report.
-
-Report dataset size and limitations alongside metrics. Do not claim production phishing-detection accuracy from a small demo set.
-
-## Deferred features
-
-- FaceTime, live browser streaming, narrated calls, and SMS.
-- Real parking purchases, food orders, and autonomous checkout.
-- Solana payments; an explicitly approved devnet or mock checkout may be a later demonstration.
-- Accounts, long-running monitoring, and advanced reputation feeds.
-
-Any future payment flow needs its own trusted execution path, a visible merchant and amount, and explicit user approval. Payment credentials and wallet keys must never enter the scanning worker.
-
-
----
-
-## What's built so far (setup commit)
-
-The first working code uses a simpler layout than the proposal above. Rename it to the proposed
-layout later if the team prefers; nothing depends on folder names except imports in `api/`.
-
-| Folder | What's in it | Owner |
-|---|---|---|
-| `api/` | FastAPI: `POST /scan` (synchronous for now, mock mode until the sandbox is live), Jev typed checks, verdict policy, Gemini explanation, Solana Pay wallet check | everyone calls this |
-| `sandbox/` | Playwright scanner in a locked-down throwaway Docker container + token-protected runner for a separate Vultr VM with no keys | Person 1 |
-| `chert/` | Chert FaceTime agent (LiveKit) + iMessage follow-ups | Person 2 |
-| `data/` | Typesense map + search, Tiger Data scan log + dashboard | Person 3 |
-| `app/` | Next.js web app: scanner, results, map | Person 4 |
-| `shared/` | `scan_result` format + safe/malicious mocks everyone builds against | |
-
-See [TEAM.md](TEAM.md) for roles, checkpoints and the Devpost checklist.
+Python 3.11+ and Node 20.9+:
 
 ```bash
-cp .env.example .env        # your own keys; never commit .env
-pip install -r requirements.txt
+cp .env.example .env
+python -m pip install -r requirements.txt
 uvicorn api.main:app --reload
-python -m pytest -q
 ```
 
-## Built with
+In another terminal:
 
-- [FastAPI](https://fastapi.tiangolo.com/), [httpx](https://www.python-httpx.org/), [Pydantic](https://docs.pydantic.dev/)
-- [Playwright](https://playwright.dev/) + Docker, hosted on [Vultr](https://www.vultr.com/)
-- [Jev](https://typesafe.ai/) by TypeSafe AI, via the OpenRouter Decisions API
-- [Google Gemini API](https://ai.google.dev/)
-- [Chert](https://www.trychert.com/) (FaceTime + iMessage) and [LiveKit](https://livekit.io/)
-- [Typesense](https://typesense.org/), [Tiger Data](https://www.tigerdata.com/)
-- [Solana](https://solana.com/) devnet + Solana Pay
-- [Next.js](https://nextjs.org/), [Leaflet](https://leafletjs.com/) + OpenStreetMap
-- Built with [Cursor](https://cursor.com/); pushes reviewed by Grok Bot (GitHub Actions) and
-  [Entire](https://entire.io/) Trails; sessions captured with the Entire CLI
-- Jev client adapted from our earlier project [Relay](https://github.com/jzps333/relay)
+```bash
+cd app
+npm ci
+npm run dev
+```
+
+Open http://localhost:3000. Request **"Analyze my workouts"**, run the example input, then publish it. A different browser workspace can install the published release and run it. Suggestions appear in the author's review panel; edit the instructions and accept a suggestion to create version 2.
+
+The frontend proxies `/api/factory/*` to the server-only `FACTORY_API_URL` (default `http://127.0.0.1:8000`). No provider keys go to the browser. Mount the Python API separately for Chert webhooks.
+
+### QR capability
+
+Set `SANDBOX_URL`, `SANDBOX_TOKEN` and `JEV_API_KEY` on the backend. `GEMINI_API_KEY` is optional for explanations and second opinions. The existing worker runs on a separate host; see [sandbox/README.md](sandbox/README.md). Without this configuration, running a QR skill returns **503**, never a sample favorable verdict. No payments are supported by the active application.
+
+### Chert messages and calls
+
+Set `CHERT_WEBHOOK_SECRET` and point signed message events to `POST /chert/webhook` on the Python API. The adapter accepts the existing `message.received` event shape (`data.message.sender`, `data.message.parts`); confirm your subscription emits that shape before connecting it. Signature failures are rejected, timestamps are checked and event IDs are claimed durably before execution.
+
+Commands:
+
+```text
+BUILD Check if QR codes are scams
+BUILD Analyze my workouts
+LIBRARY
+PUBLISH <skill-id> 1
+INSTALL <skill-id> 1
+RUN <skill-id> 1 {"sessions":[{"exercise":"Walk","minutes":30}]}
+```
+
+By default the webhook returns its result as JSON without sending a message. To enable provider replies to the signed event's verified sender, set `FACTORY_SEND_REPLIES=1` and configure `CHERT_API_KEY`, `CHERT_PROJECT_ID`, and `CHERT_LINE_ID`. Delivery status is recorded with the result. Retries return the stored response; a failed delivery does not silently run the skill again. Provider account restrictions still apply. No messages or calls are sent during tests.
+
+For an inbound voice walkthrough, install `chert/requirements.txt` in addition to the root requirements, configure LiveKit/Google credentials and the existing Chert bridge, and run:
+
+```bash
+python -m chert.agent_integration dev
+```
+
+The agent registers the approved factory tools and explains each build. Installations work through the generic `run_skill` tool; bundles require this runtime and are not standalone Chert plugins. Trusted job dispatch can pass `factory_owner` to share a catalog identity; otherwise calls use a room-scoped workspace. Browser, message-sender and room workspaces are separate until an explicit account-linking flow is built. **Automatic outbound FaceTime callbacks and arbitrary program generation are not implemented in this release.** The new voice adapter and provider delivery require live integration verification.
+
+## Data and permissions
+
+SQLite (`FACTORY_DB`, default `var/factory.sqlite3`) stores manifests, owners, releases, pinned installations, suggestions and webhook deduplication results. Mount this file on persistent storage. Browser workspaces use an unguessable HttpOnly cookie; there is no recovery/account system yet. Clearing cookies loses access to drafts. Published manifests/instructions are public. Raw build prompts are not published. Session inputs are not persisted by the web runner; signed messaging results are stored for replay protection.
+
+Installation is explicit; QR capabilities disclose remote browsing/external analysis, workout capabilities require no external provider. Manifests cannot select arbitrary Python imports or shell commands. The product is a single-instance prototype; public rollout still needs quotas, retention management, account recovery, verified linking across channels and infrastructure isolation review.
+
+## API
+
+| Method | Path | Action |
+|---|---|---|
+| GET | `/factory/templates` | Supported builders and dependencies |
+| POST | `/factory/build` | `{idea}` → private version 1 |
+| GET | `/factory/workspace` | Own builds and installed versions |
+| GET | `/factory/library` | Latest published releases |
+| POST | `/factory/skills/{id}/publish` | `{version}` |
+| POST | `/factory/skills/{id}/install` | `{version}` |
+| POST | `/factory/skills/{id}/run` | `{version,input}` |
+| POST / GET | `/factory/skills/{id}/suggestions` | Propose / author review |
+| POST | `/factory/skills/{id}/revisions` | `{expected_version,instructions,suggestion_id?}` |
+| GET | `/factory/skills/{id}/versions/{v}/bundle` | Download manifest and instructions |
+
+## Verification
+
+```bash
+python -m unittest discover -s tests -v
+cd app
+npm run typecheck
+npm run build
+```
+
+Offline backend tests exercise cross-workspace access, private drafts, published installs, executable workout summaries, immutable releases, stale revisions, suggestion acceptance, download bundles, QR configuration failure, signed webhook replay and retirement of payment routes.
+
+## Repository
+
+| Path | Responsibility |
+|---|---|
+| `factory/` | Catalog, SQLite persistence, lifecycle and registered runners |
+| `api/` | API entrypoint and retained QR analysis |
+| `app/` | Factory web UI and same-origin API proxy |
+| `chert/` | Signed messaging adapter, optional replies and voice tools |
+| `sandbox/` | Retained isolated browser worker (public operator route removed) |
+| `tests/` | Active factory/runtime regression tests |
+| `archive/legacy-scansafe/` | Retired product, payments, map/data UI, old deployment instructions and tests |
+
+See [archive/README.md](archive/README.md) for what moved and how to recover it. This commit does not deploy or alter running servers.

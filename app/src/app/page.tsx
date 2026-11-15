@@ -1,181 +1,36 @@
-"use client";
-
-import { useEffect, useRef, useState } from "react";
-import Scanner from "@/components/Scanner";
-import ResultView from "@/components/ResultView";
-import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
-import { clearProfile, loadProfile, saveProfile, type Profile } from "@/lib/profile";
-import type { OnboardingData } from "@/lib/onboarding";
-import LiveCheck, { createLiveFeed, type LiveFeed } from "@/components/LiveCheck";
-import { DEMO_MODE, scanUrlLive } from "@/lib/api";
-import type { ScanResult } from "@/lib/types";
-
-type Phase = { kind: "idle" } | { kind: "checking"; url: string; feed: LiveFeed } | { kind: "result"; result: ScanResult } | { kind: "error"; url: string; msg: string };
-
-function getLocation(): Promise<[number, number] | null> {
-  return new Promise((resolve) => {
-    if (!("geolocation" in navigator)) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      // Round to ~100 m before it ever leaves the phone.
-      (p) => resolve([Math.round(p.coords.latitude * 1000) / 1000, Math.round(p.coords.longitude * 1000) / 1000]),
-      () => resolve(null),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
-    );
-  });
+'use client';
+import { useEffect, useState } from 'react';
+type Skill = { id: string; version: number; name: string; description: string; instructions: string; published: boolean; runner: string; permissions: string[]; requirements: string[]; example: Record<string, unknown> };
+type Suggestion = {id:string;version:number;text:string;status:string};
+async function api(path: string, body?: unknown) {
+  const r = await fetch('/api/factory/'+path, {method: body===undefined?'GET':'POST', headers: body===undefined?{}:{'Content-Type':'application/json'}, body:body===undefined?undefined:JSON.stringify(body)});
+  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(typeof e.detail==='string'?e.detail:`Request failed (${r.status})`); }
+  return r.json();
 }
-
-export default function ScanPage() {
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [link, setLink] = useState("");
-  const [shareLocation, setShareLocation] = useState(false);
-  // undefined = still reading this phone's saved profile; null = first visit, show onboarding.
-  const [profile, setProfile] = useState<Profile | null | undefined>(undefined);
-  const statusRef = useRef<HTMLDivElement>(null);
-  const linkRef = useRef<HTMLInputElement>(null);
-  // The scan in flight, so a new scan (or leaving the page) stops the old live stream.
-  const scanAbort = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const saved = loadProfile();
-    setProfile(saved);
-    // Location stays off unless they chose to share it during onboarding.
-    if (saved?.location) setShareLocation(true);
-    return () => scanAbort.current?.abort();
-  }, []);
-
-  function toggleLocation(on: boolean) {
-    setShareLocation(on);
-  }
-
-  async function finishOnboarding(data: OnboardingData) {
-    const saved = saveProfile(data);
-    setShareLocation(!!saved.location);
-    // Let the "You're all set" message show for a moment, then open the scanner (from the top).
-    window.setTimeout(() => {
-      setProfile(saved);
-      window.scrollTo({ top: 0 });
-    }, 1200);
-  }
-
-  function editDetails() {
-    clearProfile();
-    setProfile(null);
-    reset();
-  }
-
-  async function check(raw: string) {
-    const url = raw.trim();
-    if (!url) return;
-    scanAbort.current?.abort();
-    const ctrl = new AbortController();
-    scanAbort.current = ctrl;
-    const feed = createLiveFeed(url);
-    setPhase({ kind: "checking", url, feed });
-    window.scrollTo({ top: 0 });
-    // Focus the step text for screen readers without letting focus scroll only it into view, then show
-    // the whole checking card (title, live view and steps), which LiveCheck sizes to fit the screen.
-    requestAnimationFrame(() => {
-      const el = statusRef.current;
-      el?.focus({ preventScroll: true });
-      el?.closest("section")?.scrollIntoView({ block: "nearest" });
-    });
-    const saved = profile?.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null;
-    const loc = shareLocation ? (await getLocation()) ?? saved : null;
-    if (ctrl.signal.aborted) return;
-    try {
-      const result = await scanUrlLive(url, loc, feed.handlers, ctrl.signal);
-      if (ctrl.signal.aborted) return;
-      setPhase({ kind: "result", result });
-      // The checking screen may have scrolled the header away; start the verdict at the top.
-      window.scrollTo({ top: 0 });
-    } catch {
-      if (ctrl.signal.aborted) return;
-      setPhase({ kind: "error", url, msg: "We couldn't check this link right now. Please don't open it yet. Try again in a moment." });
-      window.scrollTo({ top: 0 });
-    }
-  }
-
-  function reset() {
-    setPhase({ kind: "idle" });
-    setLink("");
-  }
-
-  if (phase.kind === "checking") {
-    return <LiveCheck feed={phase.feed} statusRef={statusRef} />;
-  }
-
-  if (profile === undefined) return null;
-  if (profile === null) return <OnboardingFlow onComplete={finishOnboarding} />;
-
-  if (phase.kind === "result") {
-    const facetime = profile.facetimeOk && profile.phoneE164
-      ? { phone: profile.phoneE164, location: shareLocation && profile.location ? [profile.location.latitude, profile.location.longitude] as [number, number] : null }
-      : null;
-    return <ResultView result={phase.result} onDone={reset} facetime={facetime} />;
-  }
-
-  return (
-    <>
-      <h1>{profile.fullName ? `Hi ${profile.fullName.split(" ")[0]}. ` : ""}Check a QR code before you open it</h1>
-      <p>We open the link on our own server, look for scams, and tell you in plain words if it&apos;s safe.</p>
-      {DEMO_MODE && (
-        <p className="notice"><span className="demo-badge">Demo mode</span> No server is connected, so results are sample data. Paste a link starting with &quot;solana:&quot; to see a safe payment, or anything else to see a scam.</p>
-      )}
-
-      {phase.kind === "error" && (
-        <div className="notice bad" role="alert">
-          <p style={{ margin: 0 }}>{phase.msg}</p>
-          <button type="button" className="btn" style={{ marginTop: "0.75rem" }} onClick={() => check(phase.url)}>Try again</button>
-        </div>
-      )}
-
-      <Scanner
-        onResult={check}
-        onPasteInstead={() => {
-          linkRef.current?.focus();
-          linkRef.current?.scrollIntoView({ block: "center" });
-        }}
-      />
-
-      <div className="divider" aria-hidden="true">or</div>
-
-      <form onSubmit={(e) => { e.preventDefault(); void check(link); }} aria-labelledby="paste-h">
-        <h2 id="paste-h" style={{ marginTop: 0 }}>Paste a link</h2>
-        <label htmlFor="link-input">Link or QR code text</label>
-        <input
-          id="link-input"
-          ref={linkRef}
-          type="text"
-          inputMode="url"
-          enterKeyHint="go"
-          autoComplete="off"
-          autoCapitalize="off"
-          spellCheck={false}
-          placeholder="https://…"
-          value={link}
-          onChange={(e) => setLink(e.target.value)}
-          aria-describedby="link-hint"
-        />
-        <p id="link-hint" className="hint">Got a link in a text message? Paste it here and we&apos;ll check it.</p>
-        <button type="submit" className="btn btn-primary" disabled={!link.trim()}>Check this link</button>
-      </form>
-
-      <section className="card" aria-labelledby="loc-h" style={{ marginTop: "1.5rem" }}>
-        <h2 id="loc-h" className="sr-only">Location</h2>
-        <label className="toggle stacked" htmlFor="loc-toggle" style={{ marginBottom: 0 }}>
-          <span className="toggle-title">Share my rough location</span>
-          <span className="toggle-control">
-            <span className="toggle-state" aria-hidden="true">{shareLocation ? "On" : "Off"}</span>
-            <input id="loc-toggle" type="checkbox" role="switch" checked={shareLocation} onChange={(e) => toggleLocation(e.target.checked)} />
-          </span>
-          <span className="hint toggle-desc">Helps warn people nearby about scam QR codes. Rounded to about 100 meters. Off unless you turn it on.</span>
-        </label>
-      </section>
-
-      <p className="hint" style={{ marginTop: "1.5rem", textAlign: "center" }}>
-        Set up as {profile.fullName || "you"}.{" "}
-        <button type="button" className="link-button" onClick={editDetails}>Change my details</button>
-      </p>
-    </>
-  );
+export default function Factory() {
+  const [idea,setIdea]=useState('Build me a QR code scam checker');
+  const [mine,setMine]=useState<Skill[]>([]), [library,setLibrary]=useState<Skill[]>([]), [installed,setInstalled]=useState<Skill[]>([]);
+  const [active,setActive]=useState<Skill|null>(null), [input,setInput]=useState(''), [output,setOutput]=useState(''), [notice,setNotice]=useState(''), [busy,setBusy]=useState(false);
+  const [suggestion,setSuggestion]=useState(''), [suggestions,setSuggestions]=useState<Suggestion[]>([]), [instructions,setInstructions]=useState('');
+  const [tab,setTab]=useState<'workspace'|'library'|'installed'>('workspace');
+  async function refresh() {const [w,l]=await Promise.all([api('workspace'),api('library')]);setMine(w.skills);setInstalled(w.installed);setLibrary(l);}
+  useEffect(()=>{refresh().catch(e=>setNotice(e.message));},[]);
+  async function act(task:()=>Promise<void>) {setBusy(true);setNotice('');try{await task();await refresh();}catch(e){setNotice(e instanceof Error?e.message:'Request failed');}finally{setBusy(false);}}
+  function select(s:Skill){setActive(s);setInput(JSON.stringify(s.example,null,2));setOutput('');setSuggestions([]);setInstructions(s.instructions);setSuggestion('');}
+  const creator = !!active && mine.some(s=>s.id===active.id);
+  const items=tab==='workspace'?mine:tab==='library'?library:installed;
+  return <>
+    <section className="hero"><p className="eyebrow">ONE REQUEST. A REUSABLE CAPABILITY.</p><h1>What should your<br/><em>assistant do next?</em></h1><p>Build a skill, try it, then share a version others can install in Chert.</p></section>
+    <section className="builder"><label htmlFor="idea">Describe your skill</label><textarea id="idea" value={idea} maxLength={2000} onChange={e=>setIdea(e.target.value)}/><div className="row"><button disabled={busy||idea.trim().length<5} onClick={()=>act(async()=>{const s=await api('build',{idea});select(s);setTab('workspace');setNotice('Built and validated from a tested template. Your draft is private.');})}>{busy?'Working…':'Build skill ↗'}</button><span>QR / link checker · Workout summary</span></div><p className="muted">This release assembles tested capabilities. It does not generate arbitrary programs. Browser access and provider keys are required for real QR checks.</p></section>
+    <p className="notice" role="status" aria-live="polite">{notice}</p>
+    <div className="columns"><section><nav aria-label="Skill collections">{(['workspace','library','installed'] as const).map(t=><button key={t} className={tab===t?'selected':'quiet'} onClick={()=>setTab(t)} aria-pressed={tab===t}>{t==='workspace'?'My builds':t==='library'?'Shared library':'Installed'}</button>)}</nav>
+    {items.length===0?<div className="empty">{tab==='workspace'?'Your first skill starts with a request above.':'No skills here yet. Publish a build to share it.'}</div>:items.map(s=><button className="skill" key={s.id} onClick={()=>select(s)}><span className="badge">{s.published?'Published':'Private draft'} · v{s.version}</span><h2>{s.name}</h2><p>{s.description}</p><span className="muted">{s.permissions.length?s.permissions.join(' · '):'Runs locally on the server'} →</span></button>)}</section>
+    <section className="detail">{!active?<div className="empty"><h2>Meet your next skill.</h2><p>Select a build to review its instructions, test it, or publish a release.</p></div>:<>
+      <span className="badge">{active.runner} / v{active.version}</span><h2>{active.name}</h2><p>{active.description}</p><h3>How Chert uses it</h3><p>{active.instructions}</p><h3>Permissions & dependencies</h3><p>{active.permissions.join(', ')||'No external services'}</p><p className="muted">{active.requirements.join(', ')||'No provider credentials needed'}</p>
+      <div className="row">{creator&&!active.published&&<button disabled={busy} onClick={()=>{if(window.confirm('Publish these instructions and requirements to the shared library?'))act(async()=>{const s=await api(`skills/${active.id}/publish`,{version:active.version});setActive(s);setNotice('Published. Other workspaces can now install this version.');});}}>Publish v{active.version}</button>}{active.published&&<button disabled={busy} onClick={()=>act(async()=>{await api(`skills/${active.id}/install`,{version:active.version});setNotice('Installed this exact version. New releases will not silently replace it.');})}>Install v{active.version}</button>}<a className="button quiet" href={`/api/factory/skills/${active.id}/versions/${active.version}/bundle`}>Download bundle ↓</a></div>
+      <h3>Try this skill</h3><label htmlFor="input">Input (JSON)</label><textarea id="input" className="code" value={input} onChange={e=>setInput(e.target.value)}/><button disabled={busy} onClick={()=>act(async()=>{const r=await api(`skills/${active.id}/run`,{version:active.version,input:JSON.parse(input)});setOutput(JSON.stringify(r.result,null,2));})}>Run skill</button>{output&&<pre aria-live="polite">{output}</pre>}
+      {active.published&&<><h3>Suggest an improvement</h3><label htmlFor="suggestion">Proposed change</label><textarea id="suggestion" value={suggestion} maxLength={4000} onChange={e=>setSuggestion(e.target.value)}/><button className="quiet" disabled={busy||suggestion.length<10} onClick={()=>act(async()=>{await api(`skills/${active.id}/suggestions`,{version:active.version,text:suggestion});setSuggestion('');setNotice('Suggestion submitted to the skill author.');})}>Send suggestion</button></>}
+      {creator&&<><h3>Release a revision</h3><label htmlFor="instructions">Instructions (changes create a new private version)</label><textarea id="instructions" value={instructions} maxLength={6000} onChange={e=>setInstructions(e.target.value)}/><button disabled={busy} className="quiet" onClick={()=>act(async()=>{const s=await api(`skills/${active.id}/revisions`,{expected_version:active.version,instructions});select(s);setNotice('Created a private revision. Publish when ready.');})}>Create revised draft</button><button className="quiet" disabled={busy} onClick={()=>act(async()=>setSuggestions(await api(`skills/${active.id}/suggestions`)))}>Review suggestions</button>{suggestions.map(s=><article key={s.id}><p>v{s.version} · {s.status}</p><p>{s.text}</p>{s.status==='open'&&<button disabled={busy} onClick={()=>{if(window.confirm('Create a new version using the instructions in the editor and mark this suggestion accepted?'))act(async()=>{const v=await api(`skills/${active.id}/revisions`,{expected_version:active.version,instructions,suggestion_id:s.id});select(v);setNotice('Suggestion accepted into a new private version.');});}}>Accept with edited instructions</button>}</article>)}</>}
+    </>}</section></div><p className="muted">This browser’s workspace uses a private cookie. Clearing cookies loses access to its drafts. Published bundles are public. Chert sender workspaces are separate in this preview.</p>
+  </>;
 }

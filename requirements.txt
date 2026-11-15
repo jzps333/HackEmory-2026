@@ -1,23 +1,5 @@
-# Backend (api/)
 fastapi
 uvicorn
 httpx
 pydantic>=2
 python-dotenv
-
-# Data (data/): Tiger Data / Postgres
-psycopg[binary]
-
-# Payments (api/solana_pay.py, scripts/make_demo_qr.py): Solana devnet
-solders
-qrcode[pil]
-
-# Saved accounts (api/account_crypto.py): Fernet encryption of linked-account tokens at rest
-cryptography
-
-# Tests
-pytest
-
-# Chert agent (chert/): QR reading from video frames
-opencv-python-headless
-numpy

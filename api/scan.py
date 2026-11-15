@@ -10,16 +10,12 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
 from api import config, jev, signals
-from api.merchants import KNOWN_MERCHANTS
-from api.schema import JevChecks, Payment, ScanResult
+from api.schema import JevChecks, ScanResult
 
-SHARED = Path(__file__).resolve().parent.parent / "shared"
 
 
 # ---------- verdict rule ----------
@@ -139,45 +135,6 @@ def judge(sandbox: dict, checks: JevChecks, sig: signals.Signals | None = None,
     if verdict == "safe" and blocked_internal(sandbox):
         verdict, score, scam_type = "suspicious", max(score, config.SECOND_LOOK_SCORE), "other"
     return verdict, score, scam_type, sig
-
-
-# ---------- Solana Pay ----------
-
-def parse_solana_pay(qr: str) -> Payment | None:
-    """Parse 'solana:<recipient>?amount=..&label=..&message=..&reference=..'. None if not Solana Pay."""
-    if not qr.startswith("solana:"):
-        return None
-    parsed = urlparse(qr)
-    recipient = parsed.path
-    if not recipient or recipient.startswith("http"):
-        return None  # transaction-request form (solana:https://...) is not handled in the demo
-    q = {k: unquote(v[0]) for k, v in parse_qs(parsed.query).items()}
-    label = q.get("label", "")
-    return Payment(
-        recipient=recipient,
-        amount_sol=float(q.get("amount", "0") or 0),
-        label=label,
-        message=q.get("message", ""),
-        reference=q.get("reference", ""),
-        merchant_verified=KNOWN_MERCHANTS.get(label) == recipient,
-    )
-
-
-def payment_result(qr: str, payment: Payment) -> ScanResult:
-    if payment.merchant_verified:
-        verdict, score, scam_type = "safe", 0.05, "none"
-        explanation = (f"This looks safe. It's a payment of {payment.amount_sol} test SOL to "
-                       f"{payment.label}, and the wallet matches their verified wallet.")
-    else:
-        verdict, score, scam_type = "malicious", 0.95, "fake_payment_app"
-        who = payment.label or "this business"
-        explanation = (f"Don't pay this. The payment says it's for {who}, but the wallet it pays "
-                       f"is not theirs. Someone may have covered the real code with a fake one.")
-    return ScanResult(
-        scan_id=uuid.uuid4().hex[:12], url=qr, verdict=verdict, jev_score=score,
-        scam_type=scam_type, explanation=explanation, payment=payment,
-        checks=JevChecks(asks_payment_p=1.0, malicious_p=score), scanned_at=int(time.time()),
-    )
 
 
 # ---------- sandbox + Gemini ----------
@@ -346,14 +303,6 @@ def explain(sandbox: dict, verdict: str, scam_type: str,
         return fallback
 
 
-def mock_result(qr: str) -> ScanResult:
-    """No sandbox yet: return a mock so the app, Chert and data parts can build now."""
-    name = "mock_safe.json" if qr.startswith("solana:") else "mock_malicious.json"
-    data = json.loads((SHARED / name).read_text())
-    data.update(scan_id=uuid.uuid4().hex[:12], url=qr, scanned_at=int(time.time()))
-    return ScanResult(**data)
-
-
 def sandbox_result(qr: str, sandbox: dict, started: float) -> ScanResult:
     """What the sandbox saw -> ScanResult: Jev, verdict rule, Gemini. Shared by /scan and /scan/stream."""
     if not isinstance(sandbox, dict) or "type" in sandbox:
@@ -401,12 +350,22 @@ def with_location(result: ScanResult, location: list[float] | None) -> ScanResul
 
 
 def scan(qr: str, location: list[float] | None = None) -> ScanResult:
-    payment = parse_solana_pay(qr)
-    if payment:
-        result = payment_result(qr, payment)
-    elif not config.SANDBOX_URL:
-        result = mock_result(qr)
-    else:
-        started = time.time()
-        result = sandbox_result(qr, run_sandbox(qr), started)
-    return with_location(result, location)
+    from fastapi import HTTPException
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(qr)
+    except ValueError:
+        raise HTTPException(422, "Invalid HTTP(S) link")
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+        raise HTTPException(422, "QR checker accepts HTTP(S) links without embedded credentials only")
+    if not config.SANDBOX_URL:
+        raise HTTPException(503, "Configure SANDBOX_URL and SANDBOX_TOKEN for real QR checks")
+    started = time.time()
+    try:
+        evidence = run_sandbox(qr)
+    except httpx.HTTPError:
+        return failed_result(qr, started)
+    if (not isinstance(evidence, dict) or evidence.get("error")
+            or not (evidence.get("page_text") or evidence.get("page_title"))):
+        return failed_result(qr, started)
+    return with_location(sandbox_result(qr, evidence, started), location)

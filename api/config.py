@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
-# LiveKit keys live in the Chert starter folder (written by `lk app env`); /call-me needs them.
+# Optional LiveKit environment from the retained Chert bridge starter.
 load_dotenv(Path(__file__).resolve().parent.parent / "chert" / "scansafe-agent" / ".env.local",
             override=False)
 
@@ -18,7 +18,7 @@ SECOND_LOOK_SCORE = float(os.getenv("SECOND_LOOK_SCORE", "0.5"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
-SANDBOX_URL = os.getenv("SANDBOX_URL", "")      # empty = return mock results
+SANDBOX_URL = os.getenv("SANDBOX_URL", "")      # empty = QR capability unavailable
 SANDBOX_TOKEN = os.getenv("SANDBOX_TOKEN", "")
 
 # Detection extras (api/signals.py). Kill switches in case a lookup misbehaves during a demo.

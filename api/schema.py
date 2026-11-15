@@ -1,7 +1,6 @@
 """The shared scan result format. Every part of ScanSafe passes this around.
 
-Person 1 produces it, Person 2 speaks/sends it, Person 3 stores it, Person 4 displays it.
-Change it only after telling the team. JSON examples live in shared/.
+Retained for the QR capability. Historical examples are in archive/legacy-scansafe/shared/.
 """
 from __future__ import annotations
 
