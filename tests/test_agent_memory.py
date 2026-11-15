@@ -518,3 +518,12 @@ def test_session_text_allowlist_beats_lookalikes_and_names():
     assert not any(ch.isdigit() for ch in body)
     assert body.startswith("Evilcom Coach: Nice work!") and "Keep knees out" in body
     assert t.endswith(community.my_apps_url())
+
+
+def test_session_text_digits_split_by_punctuation_and_in_the_name():
+    from chert import plugins as community
+    t = community.session_text("Call 4045550199", "Call 404! 555! 0199? Nice depth (2 of 4).")
+    body = t.split(" Your history: ")[0]
+    assert not any(ch.isdigit() for ch in body) and body.startswith("Call: ")
+    ok = community.session_text("Squat coach", "Most common cue: knees out! (2 of 4). 4 cues this session.")
+    assert "(2 of 4)" in ok and "4 cues" in ok                     # few digits: kept

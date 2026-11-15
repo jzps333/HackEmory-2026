@@ -375,19 +375,20 @@ def session_data(cues: list[str], summary: str, at: int) -> dict:
 def _sms_safe(text: str) -> str:
     """Allowlist for model-written text in a text from the ScanSafe line: plain letters, digits,
     spaces and , . ! ? ' ( ) : - only (after NFKC, so look-alike characters fold or drop). A dot not
-    followed by a space becomes a space, and any run holding 7+ digits is removed, so no link,
+    followed by a space becomes a space, and 7+ digits in total removes every digit, so no link,
     domain or phone number can survive."""
     t = unicodedata.normalize("NFKC", text or "")
     t = re.sub(r"[^A-Za-z0-9 ,.!?'():\-]", " ", t)
     t = re.sub(r"[.:](?=[^\s)])", " ", t)            # "evil.com", "javascript:x" -> words
-    t = re.sub(r"\d[\d\s().,-]*", lambda m: " " if sum(c.isdigit() for c in m.group()) >= 7 else m.group(), t)
+    if sum(c.isdigit() for c in t) >= 7:              # enough digits for a phone number, however split
+        t = re.sub(r"\d", " ", t)
     return re.sub(r"\s{2,}", " ", t).strip()
 
 
 def session_text(plugin_name: str, summary: str) -> str:
     """The after-session text: "Squat coach: <summary> Your history: <url>". The only link in a
     text from the ScanSafe line is our own history page."""
-    name = re.sub(r"[^A-Za-z0-9 ]", "", unicodedata.normalize("NFKC", plugin_name or "")).strip()[:60] or "ScanSafe"
+    name = re.sub(r"[^A-Za-z ]", "", unicodedata.normalize("NFKC", plugin_name or "")).strip()[:60] or "ScanSafe"
     text = _sms_safe(clean(summary, SESSION_SUMMARY_CHARS)) or "Session saved."
     return f"{name}: {text} Your history: {my_apps_url()}"
 
