@@ -24,6 +24,9 @@ an amber card along the bottom of whatever screen is up says so, with the amount
 Linked Dogwood account: the live picture is the official Dogwood app being operated in the
 sandbox, and the line under the header says the step ("Now: Typing your plate GA 4821K")
 instead of the site (note_step). Paid shows over the app's receipt picture.
+Community plugins (chert/plugins.py) add:
+  card     - the plugin that is on (big title) and its latest line, e.g. "Squat coach" /
+             "Knees out over your toes" (set_card). Text only, clipped, never run.
 """
 from __future__ import annotations
 
@@ -53,7 +56,7 @@ REPLAY_STEP_S = 1.1          # how long each finding stays as "newest" during th
 
 COLORS = {"idle": (30, 58, 95), "checking": (32, 40, 56), "safe": (22, 128, 61),
           "suspicious": (180, 110, 10), "malicious": (185, 28, 28), "error": (90, 90, 90),
-          "meter": (30, 58, 95), "paid": (22, 128, 61)}
+          "meter": (30, 58, 95), "paid": (22, 128, 61), "card": (30, 58, 95)}
 LABELS = {"idle": "Hold the QR code up", "checking": "Checking...", "safe": "Looks safe",
           "suspicious": "Be careful", "malicious": "Don't pay this", "error": "Try again",
           "meter": "Parking meter", "paid": "Paid"}
@@ -61,6 +64,7 @@ VERDICTS = ("safe", "suspicious", "malicious")
 TEXT_W = 720 - 130 - 36       # room for step text right of the icons
 LIVE_TOP = 250                # live-screen layout: header above, sandbox browser picture below
 LIVE_RED = (220, 38, 38)
+CARD_TITLE_CHARS, CARD_BODY_CHARS = 40, 120
 WHITE, DIM, GREEN, RED, AMBER = (255, 255, 255), (165, 175, 190), (74, 222, 128), (248, 113, 113), (251, 191, 36)
 
 
@@ -147,7 +151,7 @@ def _fit(text: str, font, max_w: int) -> str:
 def _wrap(text: str, font, max_w: int, lines: int = 2) -> list[str]:
     """Word-wrap into at most ``lines`` lines; the last one gets an ellipsis if it overflows."""
     words, out, cur = text.split(" "), [], ""
-    for w in words:
+    for i, w in enumerate(words):
         trial = (cur + " " + w).strip()
         if font.getlength(trial) <= max_w or not cur:
             cur = trial
@@ -155,7 +159,7 @@ def _wrap(text: str, font, max_w: int, lines: int = 2) -> list[str]:
             out.append(cur)
             cur = w
             if len(out) == lines - 1:
-                cur = " ".join([cur] + words[words.index(w) + 1:])
+                cur = " ".join([cur] + words[i + 1:])   # by position: repeated words are fine
                 break
     out.append(cur)
     return [_fit(l, font, max_w) for l in out[:lines]]
@@ -174,6 +178,7 @@ class StatusVideo:
     meter_shot_hours: Optional[int] = None
     live_step = ""                        # Dogwood app: what the sandbox is doing ("Tapping Install")
     consent: Optional[str] = None         # "Say “yes, pay” to confirm · 0.03 SOL · 3 h · GA 4821K"
+    card: Optional[tuple[str, str]] = None   # (title, body) of a plugin card
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -252,6 +257,14 @@ class StatusVideo:
         self.live_step = ""
         self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
         self.consent = None
+        self.card = None
+
+    def set_card(self, title: str, body: str) -> None:
+        """A community plugin's card: its name big, then one short line (a coaching cue, what
+        it does). Both are plugin or model text, so they are clipped and drawn as text only."""
+        self.card = (_clip(title, CARD_TITLE_CHARS), _clip(body, CARD_BODY_CHARS))
+        self.state = "card"
+        self.live = None
 
     def set_consent(self, text: Optional[str]) -> None:
         """Show (or with None, clear) the "say yes, pay" card. ``text`` is built by us from the
@@ -472,6 +485,24 @@ class StatusVideo:
         if rest:
             d.text((x0 + 32, y0 + 96), _fit(rest, f["step"], x1 - x0 - 64), font=f["step"], fill=(40, 26, 0))
 
+    def _card(self, img: Image.Image, card: tuple[str, str]) -> None:
+        """Plugin card: a small header, the title big, the body wrapped on a lighter panel."""
+        d = ImageDraw.Draw(img)
+        f = self._f
+        title, body = card
+        d.text((48, 70), "ScanSafe", font=f["label"], fill=DIM)
+        d.text((48, 124), "Community plugin", font=f["small"], fill=DIM)
+        y = 300
+        for line in _wrap(title, f["big"], self.W - 96):
+            d.text((48, y), line, font=f["big"], fill=WHITE)
+            y += 80
+        y += 40
+        lines = _wrap(body, f["label"], self.W - 160, lines=6) if body else []
+        if lines:
+            d.rounded_rectangle((32, y, self.W - 32, y + 64 + 56 * len(lines)), 32, fill=(46, 82, 128))
+            for k, line in enumerate(lines):
+                d.text((80, y + 32 + 56 * k), line, font=f["label"], fill=WHITE)
+
     def _idle(self, img: Image.Image, now: float) -> None:
         d = ImageDraw.Draw(img)
         d.text((60, 420), "ScanSafe", font=_font(110, True), fill=WHITE)
@@ -502,6 +533,8 @@ class StatusVideo:
             m = self.meter or {}
             spin = int(now * 8) if self.shot is None and self.state == "meter" else 0
             return (self.state, m.get("hours"), m.get("amount"), m.get("label"), id(self.shot), spin)
+        if self.state == "card":
+            return ("card", self.card)
         return ("idle", self.state, int(now * 4) % 24)
 
     def _draw(self) -> bytes:
@@ -531,6 +564,9 @@ class StatusVideo:
                 self._verdict(img)
         elif self.state in ("meter", "paid"):
             self._meter_screen(img, now)
+        elif self.state == "card" and (card := self.card) is not None:   # read once
+            img = Image.new("RGB", (self.W, self.H), COLORS["card"])
+            self._card(img, card)
         else:
             img = Image.new("RGB", (self.W, self.H), COLORS.get(self.state, COLORS["idle"]))
             self._idle(img, now)
