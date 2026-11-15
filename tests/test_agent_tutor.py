@@ -83,7 +83,7 @@ def test_write_step_appends_clips_and_strips_angle_brackets(monkeypatch):
     ai, call, agent = tutor_call(monkeypatch)
 
     async def go():
-        assert "ask what they already know" in await agent.whiteboard_title(None, "Derivatives")
+        assert "write_step" in await agent.whiteboard_title(None, "Derivatives")
         out = await agent.write_step(None, "Slope = rise / run")
         assert "Step 1" in out and "following or stuck" in out and "wait" in out   # check in every step
         assert "one or two short sentences" in out
@@ -378,7 +378,7 @@ def test_draw_graph_tool(monkeypatch):
         assert "write_step first" in await agent.draw_graph(None, "x^2")
         await agent.write_step(None, "The slope of x² at x = 1 is 2")
         out = await agent.draw_graph(None, "x^2", -3, 3, 1)
-        assert "makes sense" in out and "wait" in out
+        assert "helps" in out and "wait" in out
         assert call.video.board.steps[0].graph.mark[0] == 1 and call.video.board.page.writing == (1, -2)
         bad = await agent.draw_graph(None, "__import__('os').system('rm -rf /')")
         assert "Nothing was drawn" in bad and "import" not in bad and "rm" not in bad
@@ -396,3 +396,31 @@ def test_graph_with_huge_values_is_refused_not_crashing():
             pass
     with _pt.raises(wb.GraphError):
         wb.graph("x*0 + exp(800)", -1, 1)
+
+
+# --- nothing to copy word for word, and no exact words needed from the caller --------------------
+
+def test_tutor_gives_no_lines_to_copy_and_reads_answers_by_meaning(monkeypatch):
+    import re
+    ai, call, agent = tutor_call(monkeypatch)
+    tutor = by_id(starter(), "tutor")
+
+    async def go():
+        step = await agent.write_step(None, "Slope = rise / run")
+        outs = [await agent.whiteboard_title(None, "Derivatives"), step,
+                await agent.write_note(None, "Slope is how steep it is"),
+                await agent.draw_graph(None, "x^2", mark_x=1)]
+        for text in outs + [tutor["instructions"]]:
+            assert not re.search(r'"[^"]*\?"', text)                   # no sample question to parrot
+            assert "Does that make sense" not in text
+            low = text.lower()
+            assert "say yes" not in low and "until they say" not in low   # no exact reply needed
+        assert "however they" in step                                   # their answer, by meaning
+    asyncio.run(go())
+
+
+def test_stop_is_by_meaning_and_has_no_fixed_line(monkeypatch):
+    ai = agent_mod(monkeypatch)
+    for text in (ai.SYSTEM_INSTRUCTIONS, ai.BASELINE_INSTRUCTIONS):
+        assert "I've stopped" not in text
+        assert "hold on" not in text            # a pause to ask something isn't a stop

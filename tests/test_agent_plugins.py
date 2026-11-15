@@ -408,3 +408,51 @@ def test_payment_tools_never_auto_switch(monkeypatch):
     agent, _ = plugin_agent(ai, call)
     agent.auto_switch = True
     assert agent._refusal("solana_pay") is not None and call.plugins.active is None
+
+
+# --- skills are picked by meaning, and a miss never leaves the caller in silence -----------------
+
+def test_skills_are_chosen_by_meaning_not_fixed_phrases(monkeypatch):
+    ai = agent_mod(monkeypatch)
+    plugins = starter()
+    tutor = by_id(plugins, "tutor")
+    call = make_call(ai, plugins)
+    agent, _ = plugin_agent(ai, call)
+    text = agent._scansafe_instructions
+    assert "with one of its phrases" not in text        # no exact-words trigger
+    assert "own words" in text and "plain ScanSafe" not in text
+    assert tutor["summary"] in text and "Phrases:" not in text
+
+    async def go():
+        out = await agent.use_plugin(None, "I don't understand derivatives")
+        assert call.plugins.active is None
+        assert "Tutor" in out and tutor["summary"] in out      # what each skill is for comes back
+        assert "exact name" in out and "answer them yourself" in out
+    asyncio.run(go())
+
+
+def test_turn_log_traces_a_call(monkeypatch, caplog):
+    import logging
+    ai = agent_mod(monkeypatch)
+    handlers = {}
+    session = types.SimpleNamespace(on=lambda name, fn: handlers.setdefault(name, fn))
+    now = [100.0]
+    ai.wire_turn_log(session, clock=lambda: now[0])
+    ns = types.SimpleNamespace
+    with caplog.at_level(logging.INFO, logger="scansafe.agent"):
+        now[0] = 104.2
+        handlers["user_input_transcribed"](ns(transcript="i don't get derivatives", is_final=False))
+        handlers["user_input_transcribed"](ns(transcript="i don't get derivatives at all", is_final=True))
+        handlers["agent_state_changed"](ns(old_state="listening", new_state="thinking"))
+        handlers["function_tools_executed"](ns(function_calls=[ns(name="use_plugin")]))
+        handlers["conversation_item_added"](ns(item=ns(role="assistant", interrupted=True,
+                                                       text_content="Sure, let's")))
+        handlers["error"](ns(error=RuntimeError("x"), source=None))
+    lines = [r.getMessage() for r in caplog.records]
+    assert any("+4.2s caller said 6 words" in m for m in lines)
+    assert not any("derivatives" in m for m in lines)            # the words themselves stay out
+    assert sum("caller said" in m for m in lines) == 1           # only final transcripts
+    assert any("agent listening -> thinking" in m for m in lines)
+    assert any("tools: use_plugin" in m for m in lines)
+    assert any("agent reply (cut off): 11 chars" in m for m in lines)
+    assert any("error: RuntimeError" in m for m in lines)
