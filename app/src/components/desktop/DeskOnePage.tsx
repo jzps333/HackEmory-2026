@@ -9,7 +9,16 @@ import { Icon } from "@/components/onboarding/Icon";
 import SplitText from "@/components/reactbits/SplitText/SplitText";
 import StarBorder from "@/components/reactbits/StarBorder/StarBorder";
 import ScrollReveal from "@/components/reactbits/ScrollReveal/ScrollReveal";
-import SpotlightCard from "@/components/reactbits/SpotlightCard/SpotlightCard";
+import TextType from "@/components/reactbits/TextType/TextType";
+import ScrollFloat from "@/components/reactbits/ScrollFloat/ScrollFloat";
+import CurvedLoop from "@/components/reactbits/CurvedLoop/CurvedLoop";
+import ScrollStack, { ScrollStackItem } from "@/components/reactbits/ScrollStack/ScrollStack";
+import TiltedCard from "@/components/reactbits/TiltedCard/TiltedCard";
+import GlareHover from "@/components/reactbits/GlareHover/GlareHover";
+import GlitchText from "@/components/reactbits/GlitchText/GlitchText";
+import Magnet from "@/components/reactbits/Magnet/Magnet";
+import FadeContent from "@/components/reactbits/FadeContent/FadeContent";
+import LogoLoop from "@/components/reactbits/LogoLoop/LogoLoop";
 import Radar from "@/components/reactbits/Radar/Radar";
 import { GridScan } from "@/components/reactbits/GridScan/GridScan";
 import { DEMO_MODE, scanUrlLive } from "@/lib/api";
@@ -24,7 +33,6 @@ import s from "./onepage.module.css";
 const LIME = 0x0ae448;
 const LIGHT_LIME = 0xabff84;
 const BLACK = 0x000000;
-const LIME_GLOW = "rgba(10, 228, 68, 0.28)";
 const FACETIME_HREF = "facetime:+16504444331";
 const FACETIME_NUMBER = "+1 (650) 444-4331";
 
@@ -37,6 +45,7 @@ type Phase =
   | { kind: "error"; url: string; msg: string };
 
 const PLACES = ["Parking meters", "Restaurant menus", "Flyers and posters", "Payment requests"];
+const PLACES_TYPED = ["parking meters.", "restaurant menus.", "flyers and posters.", "payment requests."];
 
 const STEPS = [
   { title: "Paste the link", body: "Got a strange link in an email or a text? Paste it at the top. Nothing opens on your computer." },
@@ -112,6 +121,10 @@ export default function DeskOnePage() {
           <h1 id="desk-title" className={s.title} aria-label="Check a link before you open it.">
             <SplitText text="Check a link before you open it." tag="span" textAlign="left" splitType="words, chars" trigger="load" />
           </h1>
+          <div className={s.typing}>
+            <span className="sr-only">Scam codes hide on parking meters, restaurant menus, flyers and payment requests.</span>
+            <TextType prefix="Scam codes hide on " prefixColor="#ffffff" text={PLACES_TYPED} loop cursorColor="#0ae448" typingSpeed={60} pauseDuration={1600} />
+          </div>
           <p className={s.sub}>We open it on our own locked-down computer, check it for scams, and tell you in plain words.</p>
           {DEMO_MODE && <p className="notice"><span className="demo-badge">Demo mode</span> No server is connected, so results are sample data.</p>}
           {phase.kind === "error" && (
@@ -131,41 +144,42 @@ export default function DeskOnePage() {
         <Section labelledBy="problem-h" bg={<VantaScene className={s.fill} effect="waves" options={{ color: 0x03170b }} />}>
           <div className={s.panel}>
             <p className={s.kicker}>The problem</p>
-            <h2 id="problem-h" className={s.h2}>Fake QR codes are easy to make and hard to spot.</h2>
+            <div id="problem-h"><ScrollFloat containerClassName={s.h2} textClassName={s.floatText} stagger={0.02}>Fake QR codes are easy to make and hard to spot.</ScrollFloat></div>
             <ScrollReveal textClassName={s.reveal}>
               Scammers stick their own codes over real ones, or send them as payment requests. It’s called quishing. One
               scan can open a fake page that asks for your card number or password, and older adults are a favorite target.
             </ScrollReveal>
-            <ul className={s.chips} aria-label="Where fake QR codes show up">{PLACES.map((p) => <li key={p} className={s.chip}>{p}</li>)}</ul>
+            <ul className="sr-only" aria-label="Where fake QR codes show up">{PLACES.map((p) => <li key={p}>{p}</li>)}</ul>
+          </div>
+          <div className={s.curve} aria-hidden="true">
+            <CurvedLoop marqueeText={PLACES.join(" ✦ ") + " ✦ "} color="#0ae448" separator="" />
           </div>
         </Section>
 
         <Section labelledBy="how-h" bg={<VantaScene className={s.fill} effect="dots" options={{ color: LIME, color2: LIGHT_LIME, backgroundColor: BLACK }} />}>
           <p className={s.kicker}>How it works</p>
-          <h2 id="how-h" className={s.h2}>Four steps. Your computer never opens the link.</h2>
-          <Reveal>
-            <ol className={s.steps}>
-              {STEPS.map((st, i) => (
-                <li key={st.title} className={s.step}>
-                  <span className={s.stepNum} aria-hidden="true">{i + 1}</span>
-                  <h3 className={s.h3}>{st.title}</h3>
-                  <p>{st.body}</p>
-                </li>
-              ))}
-            </ol>
-          </Reveal>
+          <div id="how-h"><ScrollFloat containerClassName={s.h2} textClassName={s.floatText} stagger={0.02}>Four steps. Your computer never opens the link.</ScrollFloat></div>
+          <ScrollStack useWindowScroll smoothScroll={false} className={s.stack} itemDistance={80} itemStackDistance={24}>
+            {STEPS.map((st, i) => (
+              <ScrollStackItem key={st.title} itemClassName={s.stackCard}>
+                <span className={s.stepNum} aria-hidden="true">{i + 1}</span>
+                <h3 className={s.stackTitle}>{st.title}</h3>
+                <p>{st.body}</p>
+              </ScrollStackItem>
+            ))}
+          </ScrollStack>
         </Section>
 
         <Section id="map" labelledBy="map-h" className={s.interactive} bg={<Radar color="#0ae448" backgroundColor="#000000" />}>
           <p className={s.kicker}>Scam map</p>
-          <h2 id="map-h" className={s.h2}>Scam QR codes reported near you.</h2>
+          <div id="map-h"><ScrollFloat containerClassName={s.h2} textClassName={s.floatText} stagger={0.02}>Scam QR codes reported near you.</ScrollFloat></div>
           <p className={s.lead}>Red pins are codes people reported. Click the map to explore it, or search by website or scam type.</p>
           <MapSection />
         </Section>
 
         <Section id="stats" labelledBy="stats-h" className={s.interactive} bg={<GridScan linesColor="#3a3a3a" scanColor="#0ae448" />}>
           <p className={s.kicker}>Live numbers</p>
-          <h2 id="stats-h" className={s.h2}>What people checked with ScanSafe.</h2>
+          <div id="stats-h"><ScrollFloat containerClassName={s.h2} textClassName={s.floatText} stagger={0.02}>What people checked with ScanSafe.</ScrollFloat></div>
           <Reveal><DeskStatTiles /></Reveal>
           {/* The existing dashboard: its own title, intro and tiles are replaced by the ones above. */}
           <div className={s.dashboard}><DashboardClient /></div>
@@ -173,17 +187,19 @@ export default function DeskOnePage() {
 
         <Section id="about" labelledBy="features-h" bg={<VantaScene className={s.fill} effect="globe" options={{ color: LIME, color2: 0xffffff, backgroundColor: BLACK }} />}>
           <p className={s.kicker}>What you get</p>
-          <h2 id="features-h" className={s.h2}>Made to be simple, built to be safe.</h2>
+          <div id="features-h"><ScrollFloat containerClassName={s.h2} textClassName={s.floatText} stagger={0.02}>Made to be simple, built to be safe.</ScrollFloat></div>
           <Reveal>
             <ul className={s.features}>
               {FEATURES.map((f) => (
                 <li key={f.title}>
-                  <SpotlightCard className={s.feature} spotlightColor={LIME_GLOW}>
-                    <span className={s.featureIcon} aria-hidden="true"><Icon name={f.icon} size={22} /></span>
-                    <h3 className={s.h3}>{f.title}</h3>
-                    <p>{f.body}</p>
-                    <p className={s.by}>{f.by}</p>
-                  </SpotlightCard>
+                  <TiltedCard containerHeight="300px" imageHeight="300px" imageWidth="100%" showTooltip={false} rotateAmplitude={10} scaleOnHover={1.04}>
+                    <GlareHover className={s.feature} width="100%" height="100%" background="rgba(0,0,0,0.78)" borderColor="#1f1f1f" borderRadius="20px" glareColor="#0ae448" glareOpacity={0.35}>
+                      <span className={s.featureIcon} aria-hidden="true"><Icon name={f.icon} size={22} /></span>
+                      <h3 className={s.h3}>{f.title}</h3>
+                      <p>{f.body}</p>
+                      <p className={s.by}>{f.by}</p>
+                    </GlareHover>
+                  </TiltedCard>
                 </li>
               ))}
             </ul>
@@ -193,27 +209,32 @@ export default function DeskOnePage() {
         <Section labelledBy="privacy-h" bg={<VantaScene className={s.fill} effect="rings" options={{ color: LIME, backgroundColor: BLACK }} />}>
           <div className={s.panel}>
             <h2 id="privacy-h" className={s.h2}><Icon name="lock" size={28} /> Private by default</h2>
+            <FadeContent stagger={0.15} effect="develop">
             <ul className={s.checks}>
               <li>Your profile is saved <strong>only on your phone</strong>.</li>
               <li>Your location is <strong>rounded to about 100 meters</strong>, and only sent when you check a code.</li>
               <li>We <strong>never ask for passwords or card numbers</strong>.</li>
             </ul>
+            </FadeContent>
           </div>
         </Section>
 
         <Section labelledBy="closing-h" className={s.closing} bg={<VantaScene className={s.fill} effect="birds" options={{ backgroundColor: BLACK, color1: LIME, color2: LIGHT_LIME }} />}>
-          <h2 id="closing-h" className={s.closingTitle}>Not sure about a link?</h2>
+          <div role="heading" aria-level={2} id="closing-h" className={s.closingTitle} aria-label="Not sure about a link?"><GlitchText color="#ffffff" shadowColors={["#0ae448", "#c0262d"]} fontSize="clamp(2.8rem, 6vw, 5rem)" fontWeight={800}>Not sure about a link?</GlitchText></div>
           <p className={s.lead}>Check it first. It only takes a few seconds.</p>
           <div className={s.ctaRow}>
-            <StarBorder as="a" href="#top" color="#0ae448" className={s.cta}>Check a link</StarBorder>
-            <a href={FACETIME_HREF} className={s.ctaGhost} aria-label={`FaceTime ScanSafe at ${FACETIME_NUMBER}`}>
-              <Icon name="phone" size={20} /> FaceTime {FACETIME_NUMBER}
-            </a>
+            <Magnet><StarBorder as="a" href="#top" color="#0ae448" className={s.cta}>Check a link</StarBorder></Magnet>
+            <Magnet>
+              <a href={FACETIME_HREF} className={s.ctaGhost} aria-label={`FaceTime ScanSafe at ${FACETIME_NUMBER}`}>
+                <Icon name="phone" size={20} /> FaceTime {FACETIME_NUMBER}
+              </a>
+            </Magnet>
           </div>
         </Section>
 
         <footer className={s.footer}>
-          <ul className={s.chips} aria-label="Built with">{BUILT_WITH.map((t) => <li key={t} className={s.chip}>{t}</li>)}</ul>
+          <p className={s.kicker}>Built with</p>
+          <LogoLoop logos={BUILT_WITH.map((t) => ({ node: <span className={s.chip}>{t}</span>, title: t }))} speed={60} gap={12} logoHeight={44} pauseOnHover fadeOut fadeOutColor="#000000" />
           <p>Made at EmoryHacks 2026 · Atlanta · <a href="https://github.com/jzps333/HackEmory-2026" target="_blank" rel="noopener noreferrer">View the code on GitHub<span className="sr-only"> (opens in a new tab)</span></a></p>
           <p className={s.note}>Every business in our demo, like Dogwood Lot &amp; Meter Co., is made up. Payments use Solana devnet test money only.</p>
         </footer>

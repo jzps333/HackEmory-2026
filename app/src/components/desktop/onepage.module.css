@@ -14,6 +14,7 @@
   color: #abff84; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.04em;
 }
 .title { font-size: clamp(3rem, 6vw, 5.2rem); line-height: 1.02; letter-spacing: -0.035em; margin: 0 0 1.25rem; color: #fff; max-width: 900px; }
+.typing { font-size: clamp(1.4rem, 2.4vw, 2rem); font-weight: 700; color: #0ae448; min-height: 2.6rem; margin: 0 0 1rem; }
 .sub { font-size: 1.3rem; color: #d0d0d0; max-width: 600px; margin-bottom: 2rem; }
 
 .form { display: flex; gap: 0.75rem; align-items: stretch; max-width: 720px; }
@@ -73,12 +74,21 @@
 .checks li { padding: 1rem 1.25rem; border: 1px solid #1f1f1f; border-left: 4px solid #0ae448; border-radius: 12px; background: rgb(0 0 0 / 70%); }
 
 .closing .inner { text-align: center; }
-.closingTitle { font-size: clamp(2.8rem, 6vw, 5rem) !important; line-height: 1.02 !important; letter-spacing: -0.035em; margin: 0 0 1rem !important; color: #fff; }
-.closing .lead { margin: 0 auto; }
+.closingTitle { font-weight: 800; font-size: clamp(2.8rem, 6vw, 5rem) !important; line-height: 1.02 !important; letter-spacing: -0.035em; margin: 0 0 1rem !important; color: #fff; }
+.closing .lead { margin: 0 auto; display: inline-block; padding: 0.4rem 1rem; border-radius: 999px; background: rgb(0 0 0 / 70%); color: #fff; }
 .ctaRow { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 2rem; }
 .cta { font-weight: 700; font-size: 1.1rem; text-decoration: none; }
 .ctaGhost { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.5rem; border: 1px solid #3a3a3a; border-radius: 12px; color: #fff; text-decoration: none; font-weight: 700; background: rgb(0 0 0 / 60%); }
 .ctaGhost:hover { border-color: #0ae448; color: #abff84; }
+
+/* Problem: the curved scrolling banner sits under the panel. */
+.curve { margin-top: 2rem; pointer-events: auto; }
+
+/* How it works: react-bits ScrollStack cards stack up as the page scrolls. */
+.stack { margin-top: 1.5rem; pointer-events: auto; }
+.stackCard { height: auto !important; min-height: 15rem; background: rgb(8 8 8 / 92%) !important; border: 1px solid #1f1f1f; }
+.stackCard p { color: #c8c8c8; font-size: 1.15rem; max-width: 640px; margin: 0; }
+.stackTitle { font-size: 1.8rem; margin: 1rem 0 0.5rem; color: #fff; }
 
 .flow { max-width: 760px; margin: 0 auto 4rem; padding: 6rem 2rem 0; }
 
@@ -92,3 +102,6 @@
   .form { flex-direction: column; }
   .panel { padding: 2rem; }
 }
+
+/* react-bits ScrollFloat defaults to up to 10rem; keep section titles at heading size. */
+.floatText { font-size: clamp(2.2rem, 4vw, 3.4rem) !important; line-height: 1.1 !important; text-align: left !important; }

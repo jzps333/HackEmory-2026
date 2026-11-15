@@ -6,6 +6,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import "lenis/dist/lenis.css";
 import PillNav from "@/components/reactbits/PillNav/PillNav";
+import ClickSpark from "@/components/reactbits/ClickSpark/ClickSpark";
 import { Icon } from "@/components/onboarding/Icon";
 import { sectionFor } from "@/lib/view";
 import { usePrefersReducedMotion } from "./motion";
@@ -85,7 +86,9 @@ export default function DesktopShell({ children }: { children: ReactNode }) {
           ariaLabel="Main"
         />
       </header>
-      <div className="desk-body">{children}</div>
+      <ClickSpark sparkColor={["#0ae448", "#abff84"]} disabled={reduced}>
+        <div className="desk-body">{children}</div>
+      </ClickSpark>
     </>
   );
 }
