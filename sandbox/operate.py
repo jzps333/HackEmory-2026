@@ -423,6 +423,15 @@ def pm_type_value_ok(value: object, zone: str | None, plate: str | None) -> bool
 PM_PRICE_RE = re.compile(r"\$\s?\d{1,4}(?:[.,]\d{2})?")
 PM_PAYMENT_TEXT = re.compile(r"payment method|add (a )?(credit |debit )?card|card number|apple pay"
                              r"|google pay|paypal|billing", re.I)
+# Informational, not a payment step: the signed-in zone screen lists "Accepted payment methods"
+# (card brand logos). Removed from the page text before any payment / saved-card check.
+PM_INFO_TEXT = re.compile(r"accepted payment methods?|payment methods? accepted", re.I)
+
+
+def pm_scrub(text: object) -> str:
+    return PM_INFO_TEXT.sub(" ", str(text or ""))
+
+
 PM_REVIEW_TEXT = re.compile(r"\b(total|subtotal|review|summary|parking fee|transaction fee"
                             r"|service fee|convenience fee|parking cost)\b", re.I)
 PM_AUTH_PATH = re.compile(r"guest-registration|login|log-in|signin|sign-in|signup|sign-up|register"
@@ -488,7 +497,7 @@ def pm_screen(facts: object, robot: bool = False) -> str:
     if not isinstance(facts, dict):
         return "unknown"
     inputs = [f for f in facts.get("inputs") or [] if isinstance(f, dict)]
-    text = str(facts.get("text") or "")
+    text = pm_scrub(facts.get("text"))
     has_price = bool(PM_PRICE_RE.search(text))
     if pm_has_card_fields(facts) or PM_PAYMENT_TEXT.search(text):
         return "payment"
@@ -692,7 +701,8 @@ def pm_session_script(items: list) -> str:
 
 # --- the payment fence (fix B) ---------------------------------------------------------------------
 
-PM_SAVED_CARD_TEXT = re.compile(r"\b(visa|mastercard|master card|amex|american express|discover)\b"
+# A SAVED card shows masked digits; a brand name alone (e.g. the accepted-cards logos) isn't one.
+PM_SAVED_CARD_TEXT = re.compile(r"\b(visa|mastercard|master card|amex|american express|discover)\b[^\n$]{0,16}?\d{4}\b"
                                 r"|ending in \d{4}|[•*]{2,}\s?\d{4}", re.I)
 PM_FORWARD_OK = re.compile(r"^(continue|next)$", re.I)
 
@@ -702,7 +712,7 @@ def pm_price_visible(facts: object) -> bool:
     else is clicked (no forward button, no vehicle or plate)."""
     if not isinstance(facts, dict):
         return False
-    text = str(facts.get("text") or "")
+    text = pm_scrub(facts.get("text"))
     return bool(PM_PRICE_RE.search(text) or PM_PAYMENT_TEXT.search(text)
                 or PM_SAVED_CARD_TEXT.search(text) or pm_has_card_fields(facts))
 

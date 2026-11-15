@@ -873,3 +873,24 @@ def test_parkmobile_call_job_and_agent(monkeypatch):
     monkeypatch.setattr(ai.voice_pay.VoicePay, "enabled", staticmethod(lambda: True))
     ai.agent_for(None, None, JOB)
     assert seen == [pm.INSTRUCTIONS]                                  # no payment tools on real sites
+
+
+def test_signed_in_zone_screen_with_accepted_cards_is_not_a_payment_step():
+    """Real signed-in zone-details screen (2026-11-14): an 'Accepted payment methods' box with
+    card-brand logos sits above Park here. It is information, not a payment step or a saved card."""
+    zone = facts(path="/v2/parking/zone-details",
+                 text="Parking location\n91987\nAtlanta, GA - Off St Operator\nSurface lot • Park Tavern\n"
+                      "Accepted payment methods\nVISA\nPark here",
+                 zone_details=True)
+    assert op.pm_screen(zone) == "zone_details"
+    assert not op.pm_price_visible(zone)
+
+
+def test_saved_card_needs_masked_digits_but_real_payment_screens_still_stop():
+    assert not op.pm_price_visible(facts(text="We accept Visa, Mastercard and Discover"))
+    assert op.pm_price_visible(facts(text="Visa ending in 4242"))
+    assert op.pm_price_visible(facts(text="Visa •••• 4242"))
+    assert op.pm_price_visible(facts(text="Mastercard 4242"))
+    assert op.pm_price_visible(facts(text="Total $4.35"))
+    assert op.pm_price_visible(facts(text="Accepted payment methods\nAdd a card"))     # still a payment step
+    assert op.pm_screen(facts(text="Accepted payment methods\nPayment method\nAdd card")) == "payment"
