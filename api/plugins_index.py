@@ -30,7 +30,7 @@ TOOLS = frozenset({"camera", "speak", "screen", "memory", "safe_browser", "scam_
 MONEY_TOOLS = frozenset({"solana_pay", "parking", "research"})   # verified plugins only (research
                                                                  # places calls and texts on its own)
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
-RESERVED_IDS = frozenset({"search", "enabled"})     # API routes /plugins/search, /plugins/enabled
+RESERVED_IDS = frozenset({"search", "enabled", "baseline"})     # API routes /plugins/search, /plugins/enabled
 KINDS = ("live",)
 RUNS_ON = ("server", "vm")
 LIMITS = {"name": 60, "summary": 200, "author": 40, "permissions": 300, "instructions": 2000}

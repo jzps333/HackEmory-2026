@@ -192,10 +192,15 @@ def enabled_plugins() -> dict:
             d.pop("readme", None)
             d.pop("installs", None)
             out.append(d)
-    return {"plugins": out}
+    return {"plugins": out, "baseline": plugins_store.get_baseline()}
 
 
 # --- one plugin --------------------------------------------------------------------------------
+
+@router.get("/plugins/baseline")
+def get_baseline() -> dict:
+    return {"baseline": plugins_store.get_baseline()}
+
 
 @router.get("/plugins/{plugin_id}")
 def get_plugin(plugin_id: str):
@@ -229,6 +234,25 @@ def _toggle(plugin_id: str, on: bool, request: Request, background_tasks: Backgr
         background_tasks.add_task(plugins_store.record_install, p.id)   # Tiger off the request path
     valid = {q.id for q in plugins}
     return {"enabled": [i for i in ids if i in valid]}
+
+
+@router.post("/plugins/baseline")
+async def set_baseline(request: Request):
+    """Demo switch: calls use plain Chert (no skills) while on. Same origin rule as the toggles."""
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if origin and origin not in session.allowed_origins():
+        return _error(403, "origin_not_allowed", "This site can't change the demo agent.")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict) or not isinstance(body.get("on"), bool):
+        return _error(400, "bad_request", 'Send {"on": true} or {"on": false}.')
+    try:
+        return {"baseline": plugins_store.set_baseline(body["on"])}
+    except OSError as e:
+        log.warning("plugins: couldn't save baseline (%s)", type(e).__name__)
+        return _error(503, "state_unavailable", "Couldn't save that change. Please try again.")
 
 
 @router.post("/plugins/{plugin_id}/enable")

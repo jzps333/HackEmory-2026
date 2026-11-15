@@ -229,3 +229,14 @@ def test_reserved_ids_are_rejected():
     base = yaml.safe_load("id: search\nname: n\nsummary: s\nauthor: a\nversion: 1\nkind: live\n"
                           "runs_on: server\ntools: [speak]\npermissions: p\ninstructions: i\n")
     assert any("reserved" in e for e in pi.validate(base, "search"))
+
+
+def test_baseline_switch_round_trip(client, env):
+    assert client.get("/plugins/baseline").json() == {"baseline": False}
+    assert client.get("/plugins/enabled").json()["baseline"] is False
+    assert client.post("/plugins/baseline", json={"on": True}).json() == {"baseline": True}
+    assert client.get("/plugins/enabled").json()["baseline"] is True
+    assert client.post("/plugins/baseline", json={"on": "yes"}).status_code == 400
+    assert client.post("/plugins/baseline", json={"on": False},
+                       headers={"Origin": "https://evil.example"}).status_code == 403
+    assert client.post("/plugins/baseline", json={"on": False}).json() == {"baseline": False}

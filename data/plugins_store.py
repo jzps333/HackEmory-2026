@@ -90,6 +90,37 @@ def change_enabled(plugin_id: str, on: bool) -> tuple[list[str], bool]:
         return sorted(ids), newly_on
 
 
+# --- baseline mode (demo: Chert out of the box, no skills) -------------------------------------
+
+def _baseline_file() -> Path:
+    return Path(PLUGINS_STATE_FILE).with_name("baseline.json")
+
+
+def get_baseline() -> bool:
+    """True: calls use plain Chert with no skills (the demo's "before"). Missing file: False."""
+    try:
+        return json.loads(_baseline_file().read_text()) is True
+    except (OSError, ValueError):
+        return False
+
+
+def set_baseline(on: bool) -> bool:
+    path = _baseline_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".baseline-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(bool(on), f)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return bool(on)
+
+
 # --- install counts ----------------------------------------------------------------------------
 
 def _tiger_ok() -> bool:
