@@ -1,0 +1,13 @@
+id: squat-coach
+name: "Squat coach"
+summary: "Watches your squats on FaceTime and calls out form cues, with the latest cue shown on your screen."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["coach my squats", "squat coach", "check my form"]
+  qr: false
+tools: [camera, speak, screen, memory]
+permissions: "This plugin watches your camera while you squat and shows form cues on the video. Video isn't saved."
+instructions: "Ask the caller to prop the phone up so their whole body is in view, side-on if possible. Watch them squat. After each rep give one short cue: depth (hips to knee height), knees out over toes, chest up, or slow down. Call coach_cue with the same short cue so it shows on screen. Be encouraging. Don't claim exact rep counts or measurements; you only see about one frame per second."

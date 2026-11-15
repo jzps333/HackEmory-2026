@@ -1,0 +1,13 @@
+id: parking
+name: "Parking helper"
+summary: "Fills in the official parking site or app (ParkMobile, Dogwood) with your zone, plate and hours, then stops at the payment step for you."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: vm
+triggers:
+  phrases: ["help me park", "parking"]
+  qr: false
+tools: [speak, screen, safe_browser, parking]
+permissions: "This plugin fills in the official parking site in our locked-down browser with your zone, plate and hours. It always stops before paying."
+instructions: "Walk the caller through what the parking site shows: zone, plate, hours and the total. Make clear it stopped before payment and nothing has been paid."

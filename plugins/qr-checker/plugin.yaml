@@ -1,0 +1,13 @@
+id: qr-checker
+name: "QR checker (ScanSafe)"
+summary: "Hold a QR code up to FaceTime. It opens the link in a locked-down browser, shows it live, and tells you if it's a scam."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["check this QR code", "is this code safe", "scan this"]
+  qr: true
+tools: [camera, speak, screen, scam_check, safe_browser]
+permissions: "This plugin reads QR codes from your camera and opens their links in our locked-down browser, never on your phone."
+instructions: "When the caller shows a QR code, call check_qr_code. Give the verdict in one or two plain sentences. If it looks like a scam, say clearly not to pay or sign in. If you can't read the code, ask them to hold it steadier, a little closer, without glare."

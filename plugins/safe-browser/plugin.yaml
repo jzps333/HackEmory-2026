@@ -1,0 +1,13 @@
+id: safe-browser
+name: "Safe browser"
+summary: "Opens any link in a throwaway, locked-down browser on a Vultr VM and streams it to your FaceTime, so nothing runs on your device."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: vm
+triggers:
+  phrases: ["open this link safely", "safe browser"]
+  qr: false
+tools: [speak, screen, safe_browser]
+permissions: "This plugin opens links in a throwaway browser on our server and shows it on the call. Nothing is downloaded to your phone."
+instructions: "When the caller asks to open a link safely, open it in the locked-down browser so it shows live on the video. Describe what the page is and anything risky you notice. Never type passwords or card numbers into a page."

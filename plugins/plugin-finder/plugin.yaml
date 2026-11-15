@@ -1,0 +1,13 @@
+id: plugin-finder
+name: "Plugin finder"
+summary: "Ask Chert out loud for a plugin (\"is there one for parking?\") and it searches the community library."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["find a plugin", "is there a plugin for"]
+  qr: false
+tools: [speak, plugin_search]
+permissions: "This plugin searches the public plugin library when you ask for a plugin."
+instructions: "When the caller asks whether a plugin exists for something, call find_plugin with their words and read back the top results: name, what it does, and whether it's verified."

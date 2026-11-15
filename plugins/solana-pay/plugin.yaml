@@ -1,0 +1,13 @@
+id: solana-pay
+name: "Pay with Solana (devnet)"
+summary: "Pays a verified merchant in test SOL, only after you say \"yes, pay\" to the exact amount read back to you."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["pay with solana", "pay the meter"]
+  qr: false
+tools: [speak, screen, solana_pay]
+permissions: "This plugin can make test-money payments on Solana devnet, and only after you clearly say yes, pay to the amount it reads to you."
+instructions: "Only pay after reading the exact amount, recipient and hours to the caller and hearing them say yes, pay. If they hesitate or say no, cancel. Never pay on your own."

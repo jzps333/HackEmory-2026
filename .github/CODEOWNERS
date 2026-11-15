@@ -1,0 +1,3 @@
+# Only admins can verify community plugins or change CI.
+/plugins/verified.json @jzps333
+/.github/ @jzps333

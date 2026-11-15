@@ -1,0 +1,30 @@
+name: Plugin check
+on:
+  pull_request:
+    paths: ["plugins/**"]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "PyYAML>=6" httpx
+      - name: Validate every plugin
+        run: python -m api.plugins_index --check
+      - name: AI safety review
+        if: ${{ env.GEMINI_API_KEY != '' }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python plugins/review.py
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

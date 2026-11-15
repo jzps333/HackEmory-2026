@@ -21,3 +21,6 @@ pytest
 # Chert agent (chert/): QR reading from video frames
 opencv-python-headless
 numpy
+
+# Community plugins (api/plugins_index.py)
+PyYAML>=6
