@@ -196,7 +196,12 @@ def _report_html(job: dict) -> str:
         title = str(src.get("title") or "").strip()
         if url:
             label = title or (urlsplit(url).hostname or url)
-            items.append(f'<li><a href="{e(url, quote=True)}" rel="noopener noreferrer">{e(label)}</a></li>')
+            study = ""
+            if src.get("kind") == "paper":
+                meta = str(src.get("meta") or "").strip()
+                study = ('<br><span class="study">Study</span> '
+                         f'<span class="meta">{e(meta)}</span>' if meta else '<br><span class="study">Study</span>')
+            items.append(f'<li><a href="{e(url, quote=True)}" rel="noopener noreferrer">{e(label)}</a>{study}</li>')
         elif title:
             items.append(f"<li>{e(title)}</li>")      # not a web link: shown, never linked
     if items:
@@ -229,12 +234,14 @@ p {{ margin: 0 0 10px; color: #e4e4e7; overflow-wrap: anywhere; }}
 ul, ol {{ margin: 0; padding-left: 22px; }}
 li {{ margin: 6px 0; color: #e4e4e7; overflow-wrap: anywhere; }}
 a {{ color: #7cc4ff; }}
+.study {{ display: inline-block; font-size: 12px; font-weight: 700; color: #000; background: #0ae448; border-radius: 6px; padding: 1px 6px; margin-top: 4px; }}
+.meta {{ color: #a1a1aa; font-size: 14px; }}
 .note {{ color: #71717a; font-size: 14px; margin-top: 22px; }}
 </style></head>
 <body><main>
 <div class="brand">Toolstone · <span>Research agent</span></div>
 {body}
-<p class="note">Researched by Gemini with Google Search. Check important facts before acting on them.</p>
+<p class="note">Researched by Gemini with published studies (OpenAlex) and Google Search. Check important facts before acting on them.</p>
 </main></body></html>"""
     headers = {**PAGE_HEADERS, "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex"}
     return HTMLResponse(doc, status_code=status, headers=headers)
