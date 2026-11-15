@@ -43,7 +43,17 @@
 .stepNum { display: inline-grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #0ae448; color: #000; font-weight: 800; }
 
 /* Map: MapClient's own title and intro are replaced by the section heading; its pin list stays for screen readers only. */
-.mapArea { margin-top: 1.5rem; }
+.modeSwitch { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 1.25rem; }
+.modeSwitch button {
+  padding: 0.6rem 1.2rem; border-radius: 999px; border: 1px solid #2c2c2c; background: rgb(0 0 0 / 70%);
+  color: #e6e6e6; font: inherit; font-weight: 700; cursor: pointer;
+}
+.modeSwitch button[aria-pressed="true"] { background: #0ae448; border-color: #0ae448; color: #000; }
+.modeNote { color: #c8c8c8; font-size: 0.95rem; }
+/* Heatmap view: the pins step aside so the glow reads clearly. */
+.heatMode :global(.leaflet-marker-pane), .heatMode :global(.leaflet-shadow-pane) { display: none; }
+
+.mapArea { margin-top: 1rem; }
 .mapArea > h1, .mapArea > h1 + p { display: none; }
 .mapArea :global(.map-wrap) { position: relative; height: 68vh; min-height: 460px; border: 1px solid #2c2c2c; border-radius: 20px; overflow: hidden; }
 .mapArea :global(.map-wrap) > * { height: 100%; }

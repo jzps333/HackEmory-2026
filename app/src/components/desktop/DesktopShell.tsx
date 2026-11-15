@@ -59,7 +59,7 @@ export default function DesktopShell({ children }: { children: ReactNode }) {
     if (target === "top") return;
     const t = window.setTimeout(() => {
       const lenis = lenisRef.current?.lenis;
-      if (lenis) lenis.scrollTo(`#${target}`);
+      if (lenis) lenis.scrollTo(`#${target}`, { immediate: true });
       else document.getElementById(target)?.scrollIntoView();
     }, 400);
     return () => window.clearTimeout(t);
