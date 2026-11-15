@@ -124,7 +124,10 @@ async def runner_pair(request: Request):
     name = body.get("name")
     if name is not None and not isinstance(name, str):
         return _error(400, "bad_name", "name must be text.")
-    token, runner_id = await run_in_threadpool(store.pair, _owner(phone), name)
+    try:
+        token, runner_id = await run_in_threadpool(store.pair, _owner(phone), name)
+    except store.PairingUnavailable:
+        return _error(503, "pairing_unavailable", "Couldn't save the pairing right now. Try again in a minute.")
     return JSONResponse({"runner_token": token, "runner_id": runner_id}, headers=NO_STORE)
 
 

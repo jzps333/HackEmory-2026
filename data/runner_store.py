@@ -151,6 +151,10 @@ def clean_name(name: Any) -> str:
     return text or "My computer"
 
 
+class PairingUnavailable(RuntimeError):
+    """Tiger is configured but can't take the pairing right now: refuse rather than pair in memory."""
+
+
 def pair(owner: str, name: Any) -> tuple[str, str]:
     """A new runner for this person, replacing any older one (its token stops working and its
     unfinished jobs fail with `runner_replaced`). Returns (runner_token, runner_id); the token
@@ -158,6 +162,10 @@ def pair(owner: str, name: Any) -> tuple[str, str]:
     token = secrets.token_urlsafe(32)
     runner = {"runner_id": secrets.token_hex(6), "token_hash": token_hash(token), "owner": owner,
               "name": clean_name(name), "created_at": now(), "last_seen": None, "seen_written": 0.0}
+    if tiger_store.is_configured() and not _tiger_ok():
+        # Fail closed: while the durable store is down, a re-pair could only live in memory and the
+        # replaced token would work again after a restart.
+        raise PairingUnavailable("the runner store is unavailable; try pairing again shortly")
     if _tiger_ok():
         try:
             with _conn() as conn:
@@ -167,8 +175,9 @@ def pair(owner: str, name: Any) -> tuple[str, str]:
                     "runner_id = EXCLUDED.runner_id, token_hash = EXCLUDED.token_hash, name = EXCLUDED.name, "
                     "created_at = EXCLUDED.created_at, last_seen = NULL",
                     (owner, runner["runner_id"], runner["token_hash"], runner["name"], runner["created_at"]))
-        except Exception as e:  # noqa: BLE001 - memory still pairs it for this process
+        except Exception as e:  # noqa: BLE001
             _tiger_failed("write", e)
+            raise PairingUnavailable("couldn't save the pairing; try again shortly") from e
     with _lock:
         old = _by_owner.get(owner)
         if old is not None:

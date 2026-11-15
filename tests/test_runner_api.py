@@ -453,11 +453,13 @@ def test_pairing_goes_to_tiger_and_survives_a_restart(client, monkeypatch, clock
     assert connect(client, new) == {"job": None}
 
 
-def test_tiger_down_falls_back_to_memory(client, monkeypatch):
+def test_tiger_down_refuses_pairing_but_paired_runners_keep_working(client, monkeypatch):
+    token, _ = pair(client)                                  # paired while the store is fine
     monkeypatch.setenv("TIGER_DATABASE_URL", "postgres://fake")
     monkeypatch.setattr(tiger_store, "_connect", FakeTiger(down=True).connect)
-    token, _ = pair(client)
-    assert connect(client, token) == {"job": None}
+    r = client.post("/runner/pair", headers=person(), json={"name": "Mac"})
+    assert r.status_code == 503 and r.json()["error"] == "pairing_unavailable"   # fails closed
+    assert connect(client, token) == {"job": None}           # the existing runner keeps polling
     assert client.get("/runner/status", headers=person()).json()["connected"] is True
 
 
@@ -498,3 +500,19 @@ def test_demo_permit_form_page(client):
     assert "noindex" in r.headers["x-robots-tag"] and '<meta name="robots" content="noindex' in page
     assert r.headers["x-content-type-options"] == "nosniff" and r.headers["referrer-policy"] == "no-referrer"
     assert demo_forms.permit_page().body.decode() == page
+
+
+def test_pairing_fails_closed_when_tiger_is_down(monkeypatch):
+    from data import runner_store as store
+    monkeypatch.setattr(store.tiger_store, "is_configured", lambda: True)
+
+    def boom():
+        raise RuntimeError("db down")
+    monkeypatch.setattr(store.tiger_store, "_connect", boom)
+    store.reset() if hasattr(store, "reset") else None
+    import pytest as _pt
+    with _pt.raises(store.PairingUnavailable):
+        store.pair("owner-x", "Mac")
+    assert store.runner_for_owner("owner-x") is None
+    with _pt.raises(store.PairingUnavailable):          # still down (retry window): refuses
+        store.pair("owner-x", "Mac")
