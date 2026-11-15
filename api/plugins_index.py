@@ -26,9 +26,10 @@ import yaml
 
 PLUGINS_DIR = Path(os.getenv("PLUGINS_DIR") or Path(__file__).resolve().parent.parent / "plugins")
 TOOLS = frozenset({"camera", "speak", "screen", "memory", "safe_browser", "scam_check",
-                   "plugin_search", "solana_pay", "parking", "flashcards", "research"})
-MONEY_TOOLS = frozenset({"solana_pay", "parking", "research"})   # verified plugins only (research
-                                                                 # places calls and texts on its own)
+                   "plugin_search", "solana_pay", "parking", "flashcards", "research", "computer"})
+MONEY_TOOLS = frozenset({"solana_pay", "parking", "research", "computer"})   # verified plugins only
+                                    # (research places calls and texts on its own; computer runs
+                                    # jobs on the caller's own computer through the helper app)
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
 RESERVED_IDS = frozenset({"search", "enabled", "baseline"})     # API routes /plugins/search, /plugins/enabled
 KINDS = ("live",)

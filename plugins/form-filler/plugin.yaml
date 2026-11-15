@@ -1,0 +1,13 @@
+id: form-filler
+name: "Form filler"
+summary: "Fills out web forms on your own computer from the info saved there, while you watch on FaceTime. It never submits until you say \"yes, submit\"."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["fill out this form", "fill out the form", "fill this in"]
+  qr: false
+tools: [speak, screen, computer]
+permissions: "This plugin opens the form in a browser on your computer and fills it from the info saved on your computer. It never submits unless you say \"yes, submit\"."
+instructions: "Fill out a web form for the caller on their own computer. If it isn't clear which form they mean, ask. By default it's the form open in their Chrome: call fill_form with no link. If they ask for the parking permit form, call fill_form with https://api.scansafe.nyc/demo/forms/permit. They can watch it fill in on your video. When it's done, read back briefly which fields you filled and which you couldn't, by name only, never the values. Then ask: \"Should I submit it? Say yes, submit.\" Call submit_form only after they say yes, submit. If they say no, it stays filled in and nothing is sent. Passwords, card numbers and Social Security numbers are never filled: never ask for them."

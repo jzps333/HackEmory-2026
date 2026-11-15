@@ -68,10 +68,11 @@ def _negated(word: str) -> bool:
     return word in NEGATIONS or word.endswith("n't")
 
 
-def consent_ok(utterance: Any) -> bool:
+def consent_ok(utterance: Any, verb: str = "pay") -> bool:
     """True only for a short, clear yes to paying: "yes, pay", "yeah pay it", "yep, go ahead and
     pay", "confirm, pay". Never for "pay", "yes", "no pay", "yes, don't pay", "yes pay. wait",
-    "yes, how much will I pay?" or a long sentence that merely contains both words."""
+    "yes, how much will I pay?" or a long sentence that merely contains both words. ``verb``: the
+    same rule for another action ("submit", "redeploy": the helper app, chert/runner.py)."""
     if not isinstance(utterance, str) or "?" in utterance or len(utterance) > 200:
         return False
     words = _words(utterance)
@@ -79,7 +80,7 @@ def consent_ok(utterance: Any) -> bool:
         return False
     if any(_negated(w) for w in words):
         return False
-    return "pay" in words and any(w in AFFIRM for w in words)
+    return verb in words and any(w in AFFIRM for w in words)
 
 
 def declines(utterance: Any) -> bool:
@@ -150,7 +151,7 @@ def readback_words(text: str) -> int:
 
 
 def consent_check(heard: Heard, opened_at: float, readback: str, now: float,
-                  window_s: float = CONSENT_WINDOW_S) -> str:
+                  window_s: float = CONSENT_WINDOW_S, verb: str = "pay") -> str:
     """"ok", or why not: "not_read" (readback not spoken yet), "talked_over" (the caller spoke
     during it), "no_answer" (no transcript after it, or too old), "no_consent" (it isn't a clear
     yes, pay)."""
@@ -165,7 +166,7 @@ def consent_check(heard: Heard, opened_at: float, readback: str, now: float,
         end = opened_at + n * FALLBACK_READBACK_S_PER_WORD
     if heard.seq == 0 or heard.at <= end or heard.at - end > window_s or now - heard.at > window_s:
         return "no_answer"
-    return "ok" if consent_ok(heard.text) else "no_consent"
+    return "ok" if consent_ok(heard.text, verb) else "no_consent"
 
 
 # --- one call's payment intent -------------------------------------------------------------------

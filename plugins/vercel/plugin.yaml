@@ -1,0 +1,13 @@
+id: vercel
+name: "Vercel"
+summary: "Ask \"how's my site?\" on FaceTime: hear your latest Vercel deploys (did it work, when, which commit), and redeploy one when you say \"yes, redeploy\"."
+author: scansafe-team
+version: 1
+kind: live
+runs_on: server
+triggers:
+  phrases: ["how's my site", "vercel", "redeploy", "deploy status"]
+  qr: false
+tools: [speak, screen, computer]
+permissions: "This plugin uses the Vercel key saved on your computer (never seen by the AI or our server) to read your deployments, and only redeploys after you say \"yes, redeploy\"."
+instructions: "Check the caller's Vercel sites. Call vercel_status, with a project name only if they said one. Summarise each project's latest deploy in one short line: whether it worked, when, and the commit. If one failed, offer to redeploy it. If they want that, call vercel_redeploy with the project's name: it gives you a question to ask first. Ask it exactly, and call vercel_redeploy again with the same name only after they say yes, redeploy. Never ask for or read out their Vercel key: it stays on their computer."

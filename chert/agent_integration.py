@@ -41,7 +41,7 @@ from livekit import rtc
 from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunContext, cli,
                             function_tool, room_io)
 
-from chert import imessage, meter_pay, parkmobile, research, voice_pay
+from chert import imessage, meter_pay, parkmobile, research, runner, voice_pay
 from chert import plugins as community
 from chert.qr_reader import read_qr
 from chert.scansafe_tools import (CodeDebouncer, dogwood_app_session, operate_stream,
@@ -287,6 +287,7 @@ class ScanSafeCall:
     baseline = False                                        # "Chert out of the box": no QR checks
     research_id: Optional[str] = None                       # research results calls only
     research: Optional[dict] = None                         # that job, cleaned (None: unavailable)
+    computer: Optional["runner.CallComputer"] = None        # helper app: a form / redeploy awaiting yes
 
     def __init__(self, session: AgentSession, room: rtc.Room) -> None:
         self.session = session
@@ -312,6 +313,7 @@ class ScanSafeCall:
         self.ignore_codes = set()
         self.plugins = community.PluginSession([])   # none: today's agent (entrypoint loads them)
         self.plugin_memory = community.CallMemory()
+        self.computer = runner.CallComputer()
 
     async def converse(self, instructions: str) -> None:
         """Let the model speak in its own words (greetings, small talk). Fixed facts (verdicts,
@@ -344,6 +346,9 @@ class ScanSafeCall:
             self.meter_flow.stop()  # no more polling, live views or meter speech
         if self.voice_pay is not None:
             self.voice_pay.cancel_now()   # a payment waiting for "yes, pay" is cancelled too
+        computer = getattr(self, "computer", None)
+        if isinstance(computer, runner.CallComputer):
+            computer.clear()              # so is a form waiting for "yes, submit" / a redeploy
         for task in self._inflight.values():
             task.cancel()          # its stream thread sees the new generation and hangs up
         self._inflight.clear()
@@ -574,10 +579,23 @@ def memory_of(call: Optional[ScanSafeCall]) -> "community.CallMemory":
     return m
 
 
+def computer_of(call: Optional[ScanSafeCall]) -> "runner.CallComputer":
+    """The call's helper app state (chert/runner.py), made on first use."""
+    c = getattr(call, "computer", None)
+    if not isinstance(c, runner.CallComputer):
+        c = runner.CallComputer()
+        if call is not None:
+            call.computer = c
+    return c
+
+
 NO_PHONE = ("I don't have the caller's phone number on this call, so I can't save anything or look "
             "anything up for them. Kindly tell them that, and carry on without saving.")
 NO_PHONE_RESEARCH = ("I don't have the caller's phone number on this call, so I can't research for them "
                      "or call them back. Kindly tell them that.")
+NO_PHONE_COMPUTER = ("I don't have the caller's phone number on this call, so I can't reach their computer. "
+                     "Kindly tell them that.")
+COMPUTER_BUSY = "Their computer is still working on the last thing. Ask the caller to wait a moment."
 MEMORY_SHUTDOWN_S = 5.0    # the call-end save + text never holds shutdown longer than this
 TEXT_TIMEOUT_S = 8.0       # finish_session's text (in the background)
 SHUTDOWN_TEXT_TIMEOUT_S = 2.0   # per Chert request at call end
@@ -1145,6 +1163,254 @@ class PluginAgent(ScanSafeAgent):
             return ("There's no past research of theirs that matches. Tell them kindly, and offer to "
                     "research it now.")
         return research.search_reply(found, time.time())
+
+    # --- the caller's own computer (Toolstone helper app, chert/runner.py; verified only) --------
+    # Form filler and Vercel run on the caller's computer: we create a job on our relay, watch it
+    # (its browser plays live on our video) and get back labels / deploy states, never values or
+    # keys. Submitting and redeploying wait for the caller's own "yes, submit" / "yes, redeploy".
+
+    def _computer_gate(self, prefer: str) -> tuple[Optional[str], Optional[dict], Optional[str]]:
+        """(line to say instead, plugin, phone): the line is None when the plugin that is on lists
+        "computer" (verified only) and this call told us the caller's phone. ``prefer``: the plugin
+        to suggest turning on ("form-filler", "vercel")."""
+        s = self._plugins()
+        p = s.active
+        if p is None or not s.allows("computer") or not p["verified"]:
+            fit = [x for x in s.plugins if "computer" in x["effective_tools"]]
+            want = next((x for x in fit if x["id"] == prefer), fit[0] if fit else None)
+            line = (f"{p['name']} is on, and it can't do that." if p is not None
+                    else "No community plugin is on that can do that.")
+            if want is not None and (p is None or want["id"] != p["id"]):
+                return line + f' If the caller wants it, call use_plugin with "{want["name"]}" first.', None, None
+            return line + " Kindly tell the caller you can't do that right now.", None, None
+        phone = known_phone(self.call)
+        if not phone:
+            return NO_PHONE_COMPUTER, None, None
+        return None, p, phone
+
+    def _now(self) -> float:
+        heard = getattr(self.call, "heard", None)
+        return heard.clock() if heard is not None else time.monotonic()
+
+    async def watch_job(self, p: dict, job_id: str, cap_s: float) -> dict:
+        """Watch one helper app job: a live view on our video ("Your computer · <plugin>"), its
+        frames and latest progress note, until it is done or failed, ``cap_s`` passes or the caller
+        says stop. runner.watch's outcome plus "key" and "gen" (for _computer_done)."""
+        call = self.call
+        gen, key, video = call.generation, f"runner:{job_id}", call.video
+        video.begin_live(key, f"Your computer · {p['name']}")
+
+        def showing() -> bool:
+            return gen == call.generation and video.state == "checking" and video.code == key
+
+        async def on_frame(jpeg: bytes) -> None:
+            if showing():   # decoded off the audio loop, as the sandbox frames are
+                await asyncio.to_thread(lambda: showing() and video.set_live_frame(jpeg))
+
+        def on_note(text: str) -> None:
+            if showing():
+                video.note_step(text)
+        async with runner.client() as cl:
+            out = await runner.watch(job_id, cap_s=cap_s, interval=runner.POLL_S, on_frame=on_frame,
+                                     on_note=on_note, should_stop=lambda: gen != call.generation, cl=cl)
+        out.update(key=key, gen=gen, job_id=job_id)
+        return out
+
+    def _computer_done(self, p: dict, out: dict, step: str, card: str) -> None:
+        """After a job: keep its last live picture with a tick and ``step``; with no picture (or a
+        failure), the plugin card with ``card``. Nothing once the caller said stop."""
+        call = self.call
+        if out.get("status") == "stopped" or out.get("gen") != call.generation:
+            return
+        v = call.video
+        if out.get("status") == "done" and v.state == "checking" and v.code == out.get("key") and v.live is not None:
+            v.end_live(step)
+        else:
+            v.set_card(p["name"], card)
+
+    async def _run_job(self, p: dict, phone: str, kind: str, args: dict, cap_s: float) -> tuple[Optional[str], dict]:
+        """(line to say instead, outcome): create and watch one job, one at a time per call."""
+        comp = computer_of(self.call)
+        if comp.busy:
+            return COMPUTER_BUSY, {}
+        comp.busy = True
+        try:
+            job_id, code = await runner.create_job(phone, kind, args)
+            if job_id is None:
+                self.call.video.set_card(p["name"], "Your computer isn't connected"
+                                         if code in ("no_runner", "runner_offline") else "Couldn't reach your computer")
+                return runner.error_line(code), {}
+            out = await self.watch_job(p, job_id, cap_s)
+        finally:
+            comp.busy = False
+        if out["status"] != "done":
+            self._computer_done(p, out, "", "Couldn't finish on your computer")
+            return runner.failure_line(out["status"], out["error"]), out
+        return None, out
+
+    def _open_consent(self, verb: str, readback: str, ttl_s: float, banner: str, **data) -> "runner.Consent":
+        """Wait for the caller's "yes, <verb>" after ``readback``; ``banner`` on our video meanwhile.
+        Both go when it expires (unless something newer replaced them)."""
+        comp, video = computer_of(self.call), self.call.video
+        c = comp.open(verb, readback, self._now(), ttl_s, **data)
+        video.set_consent(banner)
+        shown = video.consent
+
+        def expire() -> None:
+            if comp.pending.get(verb) is c:
+                comp.drop(verb)
+                if video.consent == shown:
+                    video.set_consent(None)
+        try:
+            asyncio.get_running_loop().call_later(ttl_s, expire)
+        except RuntimeError:   # no loop (tests): the consent still expires by its own clock
+            pass
+        return c
+
+    async def _consented(self, verb: str) -> tuple[Optional[str], Optional["runner.Consent"]]:
+        """(line to say instead, consent): the line is None when the caller's own "yes, <verb>" came
+        right after the read-back. Single use: the consent is gone once it passes."""
+        comp, call = computer_of(self.call), self.call
+        c = comp.live(verb, self._now())
+        if c is None:
+            return None, None
+        why = await runner.consent(call.heard, c)
+        if comp.pending.get(verb) is not c:          # stop, or a new one, while we waited
+            return "That isn't waiting anymore, so nothing was sent. Ask the caller what they'd like.", None
+        if why != "ok":
+            log.info("computer: no %s consent yet (%s); nothing sent", verb, why)
+            if why == "declined":
+                comp.drop(verb)
+                call.video.set_consent(None)
+            elif why == "talked_over":
+                c.reopen(self._now())
+            return runner.consent_refusal(why, c), None
+        comp.drop(verb)
+        call.video.set_consent(None)
+        return None, c
+
+    @function_tool
+    async def fill_form(self, context: RunContext, url: str = "") -> str:
+        """Fill out a web form for the caller on their own computer (the Toolstone helper app), from
+        the info saved there, while they watch it on your video. It never submits. url: the form's
+        web link, or leave it empty for the form open in their Chrome."""
+        refused, p, phone = self._computer_gate("form-filler")
+        if refused:
+            return refused
+        link = runner.form_url(url)
+        if link is None:
+            return ("That isn't a web link I can open. Ask the caller which form they mean, or leave the "
+                    "link empty for the form open in their Chrome.")
+        comp = computer_of(self.call)
+        if not comp.busy and comp.drop("submit") is not None:
+            self.call.video.set_consent(None)        # a new form: the old one isn't sent
+        say, out = await self._run_job(p, phone, "form_fill", {"url": link, "profile": "default"},
+                                       runner.FILL_CAP_S)
+        if say:
+            return say
+        s = runner.fill_summary(out["result"])
+        can_submit = bool(s["filled"]) and s["submit_found"]
+        n, m = len(s["filled"]), len(s["missing"])
+        self._computer_done(p, out, f"Filled {n} field{'s' if n != 1 else ''}"
+                            + (" · say “yes, submit” to send" if can_submit else ""),
+                            f"Filled {n} field{'s' if n != 1 else ''}" + (f", {m} not filled" if m else ""))
+        if can_submit:
+            self._open_consent("submit", runner.SUBMIT_READBACK, runner.SUBMIT_TTL_S,
+                               f"Say “yes, submit” to send · {p['name']} · {n} filled", fill_job=out["job_id"])
+        return runner.fill_line(s, can_submit)
+
+    @function_tool
+    async def submit_form(self, context: RunContext) -> str:
+        """Submit the form you just filled on the caller's computer. Call this ONLY right after the
+        caller answered "Should I submit it? Say yes, submit." by saying "yes, submit". Never
+        call it otherwise."""
+        refused, p, phone = self._computer_gate("form-filler")
+        if refused:
+            return refused
+        if computer_of(self.call).busy:
+            return COMPUTER_BUSY
+        say, c = await self._consented("submit")
+        if say:
+            return say
+        if c is None:
+            return ("There's no filled form waiting to be sent. If the caller wants a form filled, call "
+                    "fill_form first.")
+        say, out = await self._run_job(p, phone, "form_submit", {"fill_job": c.data["fill_job"]},
+                                       runner.OTHER_CAP_S)
+        if say:
+            return say + (" Nothing was sent: the form is still filled in on their computer, and they can "
+                          "press Submit there themselves.")
+        line = runner.submit_line(out["result"])
+        sent = out["result"].get("submitted") is True
+        self._computer_done(p, out, "Sent" if sent else "Not sent", "Form sent" if sent else "The form wasn't sent")
+        return line
+
+    @function_tool
+    async def vercel_status(self, context: RunContext, project: str = "") -> str:
+        """Check the caller's Vercel sites from their own computer (the key stays there): each
+        project's latest deploy, whether it worked, when and the commit. project: a project name,
+        only if the caller said one."""
+        refused, p, phone = self._computer_gate("vercel")
+        if refused:
+            return refused
+        name = runner.project_name(project)
+        if name is None:
+            return "That doesn't sound like a project name. Ask the caller which project, or check them all."
+        say, out = await self._run_job(p, phone, "vercel_status", {"project": name} if name else {},
+                                       runner.OTHER_CAP_S)
+        if say:
+            return say
+        projects = runner.projects_of(out["result"])
+        self._computer_done(p, out, runner.status_card(projects), runner.status_card(projects))
+        return runner.status_line(projects, time.time())
+
+    @function_tool
+    async def vercel_redeploy(self, context: RunContext, project: str) -> str:
+        """Redeploy one of the caller's Vercel projects (its latest production deploy). The first
+        call gives you a question to ask them; call it again with the same project ONLY after they
+        answer "yes, redeploy". project: the project's name."""
+        refused, p, phone = self._computer_gate("vercel")
+        if refused:
+            return refused
+        name = runner.project_name(project)
+        if not name:
+            return "Ask the caller which project to redeploy, by its name, then call vercel_redeploy with it."
+        comp = computer_of(self.call)
+        if comp.busy:
+            return COMPUTER_BUSY
+        waiting = comp.live("redeploy", self._now())
+        if waiting is None or waiting.data.get("project") != name:
+            c = self._open_consent("redeploy", runner.redeploy_readback(name), runner.REDEPLOY_TTL_S,
+                                   f"Say “yes, redeploy” · to redeploy {name}", project=name)
+            return (f"Before redeploying, ask the caller exactly: \"{c.readback}\" Then wait. Only if they "
+                    "answer \"yes, redeploy\", call vercel_redeploy again with the same project name. If "
+                    "they say no, don't.")
+        say, c = await self._consented("redeploy")
+        if say:
+            return say
+        if c is None:
+            return "Ask the caller which project to redeploy, then call vercel_redeploy with it."
+        say, out = await self._run_job(p, phone, "vercel_redeploy", {"project": c.data["project"]},
+                                       runner.OTHER_CAP_S)
+        if say:
+            return say + " Nothing was redeployed."
+        self._computer_done(p, out, f"Redeploying {name}", f"Redeploying {name}")
+        return runner.redeploy_line(name, out["result"])
+
+    @function_tool
+    async def list_connections(self, context: RunContext) -> str:
+        """Say which services have a key saved on the caller's computer (names only, like
+        "vercel"). Use it when they ask what's connected."""
+        refused, p, phone = self._computer_gate("vercel")
+        if refused:
+            return refused
+        say, out = await self._run_job(p, phone, "connections_list", {}, runner.OTHER_CAP_S)
+        if say:
+            return say
+        names = runner.connections_of(out["result"])
+        card = ("Saved on your computer: " + ", ".join(names)) if names else "No keys saved yet"
+        self._computer_done(p, out, card, card)
+        return runner.connections_line(names)
 
     async def refresh_plugins(self) -> bool:
         """chert dev keeps a warm room long before anyone calls: once FaceTime is up, read the
