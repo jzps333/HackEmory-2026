@@ -61,7 +61,7 @@ class FakeGemini:
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         assert request.headers["x-goog-api-key"] == "test-gemini-key"
-        assert "gemini-2.5-flash:generateContent" in str(request.url)
+        assert "gemini-3.5-flash:generateContent" in str(request.url)
         body = json.loads(request.content)
         prompt = body["contents"][0]["parts"][0]["text"]
         with self._lock:
@@ -616,3 +616,32 @@ def test_build_report_limits():
     with pytest.raises(ValueError):
         research.build_report({"summary": "S", "sections": [{"title": "", "body": "x"}]}, srcs)
     assert research.clean("**Bold** `code`\n# Head\x07er", 100) == "Bold code\nHead er"
+
+
+def test_grounding_quota_falls_back_to_wikipedia(monkeypatch):
+    import httpx
+    from api import research as r
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append(request.url.host)
+        if request.url.host == "en.wikipedia.org":
+            return httpx.Response(200, json={"query": {"pages": {"1": {
+                "index": 1, "title": "Day trading", "fullurl": "https://en.wikipedia.org/wiki/Day_trading",
+                "extract": "Day trading is buying and selling within a day."}}}})
+        body = request.read().decode()
+        if '"google_search"' in body:
+            return httpx.Response(429, json={"error": {"message": "quota"}})
+        return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "Answer from excerpts."}]}}]})
+    monkeypatch.setattr(r, "_transport", httpx.MockTransport(handler))
+    monkeypatch.setattr(r.config, "GEMINI_API_KEY", "k")
+    text, sources = r.gemini_search("What is day trading?", "trading", 10)
+    assert text == "Answer from excerpts."
+    assert sources == [{"title": "Day trading", "url": "https://en.wikipedia.org/wiki/Day_trading"}]
+    assert "en.wikipedia.org" in calls
+
+
+def test_topic_in_texts_cannot_carry_links_or_numbers():
+    from api import research as r
+    t = r._topic_for_text({"topic": "stocks, see evil.com/x or call 404 555 0199 now"})
+    assert "evil.com" not in t and "/" not in t and not any(ch.isdigit() for ch in t)
