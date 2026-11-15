@@ -207,6 +207,7 @@ class StatusVideo:
     live_tag = ""                         # helper app: LIVE tag text instead of "on our computer"
     live_done = False                     # helper app: job over, a tick instead of the spinner
     board: Optional[whiteboard.Whiteboard] = None   # Tutor: the lesson's notes page
+    wait: Optional[whiteboard.NextStepTimer] = None  # Tutor: "Next step in ~3s" while it thinks
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -317,6 +318,27 @@ class StatusVideo:
     def _show_board(self) -> None:
         self.state = "whiteboard"
         self.live = None
+        self.board_wait_stop()                       # something new on the board: the wait is over
+
+    def _timer(self) -> whiteboard.NextStepTimer:
+        if self.wait is None:
+            self.wait = whiteboard.NextStepTimer()
+        return self.wait
+
+    def board_wait_start(self, now: Optional[float] = None) -> None:
+        """The caller finished talking on the whiteboard: count down to the tutor's reply."""
+        if self.state == "whiteboard":
+            self._timer().start(time.monotonic() if now is None else now)
+
+    def board_wait_stop(self, now: Optional[float] = None) -> None:
+        """The reply came (it's talking, or writing): the timer learns how long that took."""
+        if self.wait is not None:
+            self.wait.stop(time.monotonic() if now is None else now)
+
+    def board_wait_cancel(self) -> None:
+        """The caller started talking again: no countdown."""
+        if self.wait is not None:
+            self.wait.cancel()
 
     def board_title(self, title: str) -> str:
         """A fresh page with ``title`` on it (no steps). Returns the title as shown."""
@@ -654,7 +676,9 @@ class StatusVideo:
             return ("card", self.card)
         if self.state == "whiteboard":
             board = self.board
-            return ("whiteboard", id(board), board.key(now) if board is not None else None)
+            wait = self.wait
+            return ("whiteboard", id(board), board.key(now) if board is not None else None,
+                    wait.key(now) if wait is not None else None)
         return ("idle", self.state, int(now * 4) % 24, self.plain)
 
     def _draw(self) -> bytes:
@@ -691,6 +715,9 @@ class StatusVideo:
             self._card(img, card)
         elif self.state == "whiteboard" and (board := self.board) is not None:   # read once
             img = board.frame(now)                   # a fresh copy: the consent card may go on it
+            wait = self.wait.label(now) if self.wait is not None else None
+            if wait is not None:
+                whiteboard.draw_wait(img, wait[0], wait[1], now)
         else:
             img = Image.new("RGB", (self.W, self.H), COLORS.get(self.state, COLORS["idle"]))
             self._idle(img, now)

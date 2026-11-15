@@ -1230,3 +1230,72 @@ def _build(p: Page) -> tuple[Image.Image, Image.Image, Optional[tuple]]:
         done = img.copy()
         _paste_ink(done, ink, 1.0)
     return img, done, ink
+
+
+# --- "Next step in ~3s": the wait between the caller's turn and the tutor's reply ---------------
+
+class NextStepTimer:
+    """How long until the tutor's next reply, so a quiet moment on the call never looks broken.
+    The estimate starts at DEFAULT_S and learns from how long this call's replies really took."""
+    DEFAULT_S, MIN_S, MAX_S = 3.0, 1.5, 12.0
+    SLOW_S, GIVE_UP_S = 20.0, 45.0     # past SLOW_S: say so; past GIVE_UP_S: show nothing
+
+    def __init__(self) -> None:
+        self.est = self.DEFAULT_S
+        self.since: Optional[float] = None
+
+    def start(self, now: float) -> None:
+        self.since = now
+
+    def stop(self, now: float) -> None:
+        """The reply came: learn how long it took."""
+        if self.since is not None:
+            took = now - self.since
+            if 0.3 <= took <= 30.0:
+                self.est = max(self.MIN_S, min(self.MAX_S, 0.5 * self.est + 0.5 * took))
+        self.since = None
+
+    def cancel(self) -> None:
+        self.since = None
+
+    def label(self, now: float) -> Optional[tuple[str, float]]:
+        """(text, progress 0..1) while waiting, else None."""
+        if self.since is None:
+            return None
+        waited = now - self.since
+        if waited >= self.GIVE_UP_S:
+            return None
+        if waited >= self.SLOW_S:
+            return ("Taking longer than usual. Try asking again.", 1.0)
+        left = math.ceil(self.est - waited - 1e-9)
+        if left >= 1:
+            return (f"Next step in ~{left}s", max(0.0, min(1.0, waited / self.est)))
+        return ("Almost there…", 1.0)
+
+    def key(self, now: float) -> Optional[int]:
+        """Changes 4 times a second while waiting (the bar moves), None otherwise."""
+        if self.label(now) is None:
+            return None
+        return int((now - self.since) * 4)
+
+
+def draw_wait(img: Image.Image, text: str, progress: float, now: float) -> None:
+    """The countdown chip over the page's hint: three bouncing dots, the text and a bar."""
+    d = ImageDraw.Draw(img)
+    f = font(30, bold=True)
+    tw = f.getlength(text)
+    dots_w = 54
+    cw = tw + dots_w + 64
+    x0, x1 = W / 2 - cw / 2, W / 2 + cw / 2
+    y0, y1 = H - 90, H - 20
+    d.rounded_rectangle((x0, y0, x1, y1), 26, fill=WHITE, outline=ACCENT, width=3)
+    cy = y0 + 30
+    for i in range(3):                                   # dots bounce one after another
+        lift = 6 * max(0.0, math.sin(now * 6 - i * 0.9))
+        cx = x0 + 32 + i * 18
+        d.ellipse((cx - 6, cy - 6 - lift, cx + 6, cy + 6 - lift), fill=ACCENT)
+    d.text((x0 + 32 + dots_w, cy), text, font=f, fill=INK, anchor="lm")
+    bx0, bx1, by = x0 + 26, x1 - 26, y1 - 16
+    d.rounded_rectangle((bx0, by - 4, bx1, by + 4), 4, fill=GRID)
+    if progress > 0:
+        d.rounded_rectangle((bx0, by - 4, bx0 + max(8, (bx1 - bx0) * progress), by + 4), 4, fill=ACCENT)

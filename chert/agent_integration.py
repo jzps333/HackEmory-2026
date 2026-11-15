@@ -1984,6 +1984,30 @@ class BoardNudge:
         self.ask(BOARD_NUDGE)
 
 
+def wire_next_timer(session, call) -> None:
+    """The whiteboard's "Next step in ~3s" chip: it starts when the caller stops talking (while
+    the tutor isn't already talking) and stops when the tutor talks or writes, so a quiet moment
+    never looks like a broken call."""
+    agent_talking = [False]
+
+    def _user(ev) -> None:
+        video = getattr(call, "video", None)
+        if video is None:
+            return
+        new = getattr(ev, "new_state", None)
+        if new == "speaking":
+            video.board_wait_cancel()
+        elif new == "listening" and getattr(ev, "old_state", None) == "speaking" and not agent_talking[0]:
+            video.board_wait_start()
+
+    def _agent(ev) -> None:
+        agent_talking[0] = getattr(ev, "new_state", None) == "speaking"
+        if agent_talking[0] and getattr(call, "video", None) is not None:
+            call.video.board_wait_stop()
+    session.on("user_state_changed", _user)
+    session.on("agent_state_changed", _agent)
+
+
 def wire_board_nudge(session, call) -> BoardNudge:
     def ask(text: str) -> None:
         try:
@@ -2245,6 +2269,7 @@ async def entrypoint(ctx: JobContext) -> None:
     wire_transcripts(session, call.heard)     # before start, so the first words are kept too
     wire_turn_log(session)
     wire_board_nudge(session, call)
+    wire_next_timer(session, call)
     call.watcher.start()                      # before connect, so no track event is missed
 
     def _participant(p: rtc.RemoteParticipant) -> None:

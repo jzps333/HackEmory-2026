@@ -489,3 +489,69 @@ def test_board_nudge_waits_for_a_write_that_is_on_its_way(monkeypatch):
     nudge.on_tools(["write_step"])            # the step lands within the wait
     pending[0][1]()
     assert asked == []
+
+
+# --- "Next step in ~3s": a quiet moment never looks broken -----------------------------------
+
+def test_next_step_timer_counts_down_and_learns():
+    t = wb.NextStepTimer()
+    assert t.key(0.0) is None and t.label(0.0) is None
+    t.start(10.0)
+    assert t.label(10.0) == ("Next step in ~3s", 0.0)
+    assert t.label(11.2)[0] == "Next step in ~2s"
+    assert t.label(12.5)[0] == "Next step in ~1s"
+    assert t.label(13.5) == ("Almost there…", 1.0)
+    assert "longer than usual" in t.label(31.0)[0]
+    assert t.label(60.0) is None                       # gave up: nothing misleading on screen
+    assert t.key(10.0) != t.key(10.5)                  # the frame changes as it counts
+    t.stop(15.0)                                       # that reply took 5 s: the estimate learns
+    assert t.key(15.0) is None and t.est == 4.0
+    t.start(20.0)
+    t.cancel()
+    assert t.label(20.5) is None
+    t.start(0.0)
+    t.stop(200.0)                                      # nonsense timing: ignored
+    assert t.est == 4.0
+
+
+def test_whiteboard_shows_the_wait_chip(monkeypatch):
+    ai, call, agent = tutor_call(monkeypatch)
+    asyncio.run(agent.whiteboard_title(None, "Derivatives"))
+    asyncio.run(agent.write_step(None, "A derivative is a slope"))
+    v = call.video
+    now = time.monotonic() + 10                        # the step finished writing
+    key, plain = v._frame_key(now), v._render(now)
+    v.board_wait_start(now)
+    assert v._frame_key(now) != key and v._render(now) != plain
+    assert v._frame_key(now + 0.5) != v._frame_key(now)
+    asyncio.run(agent.write_step(None, "Integrals add up slices"))   # the next step is here
+    assert v.wait.since is None
+
+
+def test_wait_timer_follows_the_conversation(monkeypatch):
+    import types as _t
+    ai, call, agent = tutor_call(monkeypatch)
+    handlers = {}
+    session = _t.SimpleNamespace(on=lambda name, fn: handlers.setdefault(name, fn))
+    ai.wire_next_timer(session, call)
+    ns = _t.SimpleNamespace
+    user = handlers["user_state_changed"]
+    agent_state = handlers["agent_state_changed"]
+
+    def waiting():
+        return call.video.wait is not None and call.video.wait.since is not None
+    user(ns(old_state="listening", new_state="speaking"))
+    user(ns(old_state="speaking", new_state="listening"))
+    assert not waiting()                               # no whiteboard yet: nothing to show
+    asyncio.run(agent.whiteboard_title(None, "Derivatives"))
+    user(ns(old_state="listening", new_state="speaking"))
+    user(ns(old_state="speaking", new_state="listening"))
+    assert waiting()                                   # they stopped talking: the countdown runs
+    user(ns(old_state="listening", new_state="speaking"))
+    assert not waiting()                               # they started again: off
+    user(ns(old_state="speaking", new_state="listening"))
+    agent_state(ns(old_state="listening", new_state="speaking"))
+    assert not waiting()                               # it's talking: off
+    user(ns(old_state="listening", new_state="speaking"))
+    user(ns(old_state="speaking", new_state="listening"))
+    assert not waiting()                               # it was already talking: no countdown
