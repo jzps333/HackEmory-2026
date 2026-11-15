@@ -380,6 +380,7 @@ class FormRunner:
         frames.stream_for(TAIL_SECONDS)
 
         self.sessions[job_id] = FormSession(page, url, form_index, profile)
+        self.sessions[job_id].mask = list(frames.mask)
         try:
             title = page.title()
         except Exception:
@@ -401,6 +402,8 @@ class FormRunner:
             self.sessions.pop(fill_job, None)
             raise JobError("form_closed")
         frames = Frames(page, reporter)
+        # Submit and confirmation frames: black out every field (not only the ones we filled).
+        frames.mask = list(getattr(s, "mask", [])) + [page.locator("input, select, textarea")]
         try:
             before = page.inner_text("body", timeout=3000)
         except Exception:
