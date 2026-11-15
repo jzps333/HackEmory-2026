@@ -83,10 +83,13 @@ def piece(name: str, a: float, b: float, secs: float, out: Path, label: str) -> 
     return out
 
 
-def scroll(png: Path, secs: float, out: Path, w: int = PW, h: int = PH, top: float = 0.0) -> Path:
-    """Scroll down a tall screenshot (from ``top`` of its height to the bottom) in a w x h window."""
+def scroll(png: Path, secs: float, out: Path, w: int = PW, h: int = PH, top: float = 0.0,
+           end: float = 1.0, column: tuple[int, int] | None = None) -> Path:
+    """Scroll a tall screenshot from ``top`` to ``end`` (fractions of the scrollable height) in a
+    w x h window; ``column`` (x, width) crops to the page's content column first."""
+    pre = f"crop={column[1]}:ih:{column[0]}:0," if column else ""
     ff("-loop", "1", "-i", png, "-t", f"{secs}",
-       "-vf", f"scale={w}:-2,crop={w}:{h}:0:'(ih-{h})*({top}+(1-{top})*min(t/{secs},1))',fps={FPS},setsar=1",
+       "-vf", f"{pre}scale={w}:-2,crop={w}:{h}:0:'(ih-{h})*({top}+({end}-{top})*min(t/{secs},1))',fps={FPS},setsar=1",
        *enc(), out)
     return out
 
@@ -163,12 +166,14 @@ def intro() -> Path:                                   # 0-11
 
 def row() -> Path:                                     # 11-43
     p1 = piece("01-tutor-off", 36.0, 80.0, ROW_S, TMP / "p1.mp4", "Tutor · out of the box")
-    p2 = piece("02-tutor-on", 36.0, 110.0, ROW_S, TMP / "p2.mp4", "Tutor · with skill (recording)")
+    p2 = piece("02-tutor-on", 38.0, 100.0, ROW_S, TMP / "p2.mp4", "Tutor · with skill")
     p3 = piece("03-research-off", 30.0, 50.0, ROW_S, TMP / "p3.mp4", "Research · out of the box")
     r1 = piece("04a-research-on", 30.0, 43.0, 11.0, TMP / "p4a.mp4", "Research · asks")
-    r2 = scroll(SCREENS / "research-report.png", 9.0, TMP / "p4b.mp4", top=0.0)
-    r3 = piece("04c-research-callback", 20.0, 60.0, ROW_S - 20.0, TMP / "p4c.mp4", "Research · calls back")
-    p4 = concat([r1, r2, r3], TMP / "p4.mp4")
+    col = (570, 777)                                   # the report's content column in the screenshot
+    r2a = scroll(SCREENS / "research-report.png", 3.0, TMP / "p4b1.mp4", top=0.0, end=0.02, column=col)
+    r2b = scroll(SCREENS / "research-report.png", 6.0, TMP / "p4b2.mp4", top=0.80, end=1.0, column=col)
+    r3 = piece("04c-research-callback", 25.0, 104.0, ROW_S - 20.0, TMP / "p4c.mp4", "Research · calls back")
+    p4 = concat([r1, r2a, r2b, r3], TMP / "p4.mp4")
     base = TMP / "row-base.mp4"
     ff("-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:d={ROW_S}:r={FPS}",
        "-i", p1, "-i", p2, "-i", p3, "-i", p4,
@@ -181,10 +186,10 @@ def row() -> Path:                                     # 11-43
     phases = [
         (0, 11, ["Asks: teach me what a derivative is", "Handwrites each step on your screen (2x)",
                  "Asks it to research Adderall and dopamine", "Starts the research, then hangs up by itself"]),
-        (11, 20, ["“I can’t write or display equations on this call.”", "Checks in after every step",
+        (11, 20, ["“I can’t write or display equations on this call.”", "Checks in, then draws the graph when you ask",
                   "“I don’t have the ability to look things up online.”",
                   "4 min later: a report citing published studies"]),
-        (20, ROW_S, ["Just talks", "Draws the graph when you ask", "Can’t research",
+        (20, ROW_S, ["Just talks", "Step 3: for x², the derivative is 2x", "Can’t research",
                      "Then calls you back to walk you through it"]),
     ]
     ovs = [(row_overlay(labels, caps, TMP / f"row-{i}.png"), a, b) for i, (a, b, caps) in enumerate(phases)]
@@ -200,8 +205,9 @@ def scansafe() -> Path:                                # 43-63
     else:
         dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of",
                                     "default=nw=1:nk=1", str(src)], capture_output=True, text=True).stdout)
-        a = max(0.0, dur - 45.0)
-        ff("-ss", f"{a}", "-i", src, "-vf", f"setpts=PTS/{(dur - a) / secs:.4f},fps={FPS},scale=608:1080,setsar=1",
+        a, b = 30.0, min(dur, 62.0)                # live sandbox view -> checklist -> "Don't pay this"
+        ff("-ss", f"{a}", "-t", f"{b - a}", "-i", src,
+           "-vf", f"setpts=PTS/{(b - a) / secs:.4f},fps={FPS},scale=608:1080,setsar=1",
            "-t", f"{secs}", "-an", *enc(), phone)
     base = TMP / "s3-base.mp4"
     ff("-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:d={secs}:r={FPS}", "-i", phone,
