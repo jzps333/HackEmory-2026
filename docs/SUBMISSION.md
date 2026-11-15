@@ -1,7 +1,6 @@
 # Toolstone: submission kit (EmoryHacks 2026)
 
-Final lineup. Chert pitch: **Research, Tutor, Vercel** (plus the FaceTime briefing if it ships).
-Security track: **ScanSafe**. Everything below is live unless marked **[if ready]**.
+Final lineup. Chert pitch: **Tutor, Research, Vercel**. Security track: **ScanSafe**. Everything below is live.
 
 ## 1. Before recording (checklist)
 
@@ -32,7 +31,6 @@ Chert has: FaceTime. A live tutor whiteboard, research that calls you back, your
 | 1:10 | "Research the best beginner NASDAQ strategies" → it hangs up by itself | "Research works on its own, then calls me back." |
 | 1:20 | Text arrives with the report link; incoming FaceTime walks through sections with cards | "A cited report on my phone, and a walkthrough I can steer." |
 | 1:45 | "How's my site?" — deploys read from Vercel via the helper on my Mac | "Vercel runs through a helper on my own computer. My key never leaves it; the AI never sees it. Redeploy only after I say 'yes, redeploy'." |
-| 2:05 | **[if ready]** Claude Code finishes a task → FaceTime briefing | "Any coding agent can FaceTime me a walkthrough of what it built, through Toolstone's MCP server." |
 | 2:15 | Community plugins: Verified / Needs verification, GitHub `plugins/` | "Every skill is a recipe in a public repo. Unverified skills can't touch money, research or your computer, and editing a skill un-verifies it." |
 | 2:30 | Security cut: scam QR on FaceTime | "ScanSafe opens strangers' links in a throwaway Vultr VM and stops scams before you pay." |
 | 2:40 | End card | "Toolstone. Skills for Chert." |
@@ -68,7 +66,6 @@ like a QR code from a stranger, you don't know what it does until it runs.
     coach, Study buddy, Plugin finder.
 - **Community plugins page**, a clone of the Chert console built with Chert's permission: search
   (Typesense), enable, submit, and a switch between Chert out of the box and Chert with skills.
-- **[if ready] MCP server:** Claude Code or Cursor can FaceTime you a briefing when they finish a task.
 
 **How we built it.** FastAPI backend and a LiveKit + Gemini Live agent on a Vultr server, bridged to
 FaceTime by Chert; our own 720x1280 video renderer for the whiteboard, cards and live views. A second
