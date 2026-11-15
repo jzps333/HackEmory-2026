@@ -538,8 +538,16 @@ def _speakable(s: object, limit: int) -> str:
 def pm_price_text(text: object) -> str | None:
     """The first line of the page with a dollar amount, plain and clipped (e.g. 'Total $4.35').
     Lines with an @ (an email address) are never used."""
-    for line in str(text or "").splitlines():
-        if PM_PRICE_RE.search(line) and "@" not in line:
+    lines = [x.strip() for x in str(text or "").splitlines() if x.strip() and "@" not in x]
+    # Prefer the total (real Confirm parking screen: "Parking cost" / "$1.00" ... "Total" / "$1.55").
+    for i, line in enumerate(lines):
+        if re.match(r"^total\b", line, re.I):
+            m = PM_PRICE_RE.search(line) or next((PM_PRICE_RE.search(x) for x in lines[i + 1:i + 3]
+                                                  if PM_PRICE_RE.search(x)), None)
+            if m:
+                return _speakable(f"Total {m.group(0)}", 80) or None
+    for line in lines:
+        if PM_PRICE_RE.search(line):
             return _speakable(line, 80) or None
     return None
 

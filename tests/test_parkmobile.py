@@ -223,7 +223,8 @@ def test_zone_info_and_price_text():
                                                     "operator": "Atlanta, GA - Off St Operator"}
     assert op.pm_zone_info(ZONE_LINES, None)["zone"] == "91987"
     assert op.pm_zone_info(ZONE_LINES, "8610")["zone_name"] is None
-    assert op.pm_price_text("Review\nTotal: $4.35 <b>\"incl. fees\"</b>\nPay") == "Total: $4.35 b incl. fees /b"
+    assert op.pm_price_text("Review\nTotal: $4.35 <b>\"incl. fees\"</b>\nPay") == "Total $4.35"
+    assert op.pm_price_text("Fee <b>\"incl.\"</b> $1.00") == "Fee b incl. /b $1.00"     # still made plain
     assert op.pm_price_text("no price here") is None
     assert len(op.pm_price_text("Total $1.00 " + "x" * 300)) <= 80
 
@@ -436,7 +437,7 @@ def test_signed_in_run_reaches_the_price_then_clicks_nothing(monkeypatch, tmp_pa
     page = FakePage(CHECKOUT)
     out, lines, launched = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
     assert out["status"] == "ready_to_pay" and out["paid"] is False and out["session"] == "loaded"
-    assert out["price_text"] == "Parking $4.00" and out["stopped_at"] == op.PM_STOPPED_AT["review"]
+    assert out["price_text"] == "Total $4.35" and out["stopped_at"] == op.PM_STOPPED_AT["review"]
     # duration, saved car, Continue; then the price showed and NOTHING else was clicked
     assert page.clicked == ["P 91987 Atlanta, GA - Off St Operator", "Park here", "2 hours",
                             "DEMO123 Honda Civic", "Continue"]
@@ -546,7 +547,7 @@ def test_code_screen_stops_with_needs_verification(monkeypatch, tmp_path):
 def test_review_screen_is_ready_to_pay_and_nothing_is_clicked(monkeypatch, tmp_path):
     page = FakePage(REVIEW)
     out, _, _ = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
-    assert out["status"] == "ready_to_pay" and out["price_text"] == "Parking $4.00"
+    assert out["status"] == "ready_to_pay" and out["price_text"] == "Total $4.35"
     assert out["stopped_at"] == op.PM_STOPPED_AT["review"] and out["refused"] == []
     assert page.clicked[-1] == "Park here"                         # no car, Continue or Pay after
     assert not out["plate_set"] and not out["duration_set"]
@@ -943,3 +944,10 @@ def test_duration_preview_is_the_only_price_screen_that_doesnt_stop():
     assert op.pm_must_stop(with_card)
     elsewhere = facts(path="/v2/parking/duration/extra", text="Total $1.55")
     assert op.pm_must_stop(elsewhere)
+
+
+def test_price_text_prefers_the_total_line():
+    text = "Confirm parking\n91987\nParking cost\n$1.00\nTransaction fee\n$0.55\nTotal\n$1.55\nStart parking"
+    assert op.pm_price_text(text) == "Total $1.55"
+    assert op.pm_price_text("Total $4.35") == "Total $4.35"
+    assert op.pm_price_text("Parking cost\n$1.00") == "$1.00"

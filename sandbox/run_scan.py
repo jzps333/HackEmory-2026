@@ -47,7 +47,7 @@ from operate import SEL as OP_SEL
 from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_MASK_EMAIL_JS, PM_SEL, PM_STATE_PATH, PM_STOPPED_AT,
                      check_parkmobile_request, clean_zone, parkmobile_request_allowed,
                      pm_area_from_url, pm_clean_url, pm_click_refused, pm_duration_patterns,
-                     pm_filter_state, pm_forward_ok, pm_must_stop, pm_minutes, pm_price_text, pm_price_visible,
+                     pm_filter_state, pm_forward_ok, pm_must_stop, PM_DURATION_PATH, pm_minutes, pm_price_text, pm_price_visible,
                      pm_redact_urls, pm_request_blocked, pm_result_selector, pm_screen,
                      pm_session_items, pm_session_script, pm_status, pm_step_text,
                      pm_type_refused, pm_type_value_ok, pm_zone_info)
@@ -1604,6 +1604,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                         screen = "price"
                     break
                 acted = False
+                url_before = page.url
                 try:
                     if not out["duration_set"] and _pm_set_duration(page, mins, refused, fence_quick):
                         out["duration_set"] = acted = True
@@ -1630,8 +1631,13 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                                 if fenced():
                                     break
                                 continue                          # vehicle saved: look again
+                    on_duration = urlparse(page.url).path.rstrip("/") == PM_DURATION_PATH
+                    if on_duration and not out["duration_set"] and not acted:
+                        acted = True        # the hours couldn't be picked: go on with the default
                     if acted or (out["duration_set"] and out["plate_set"]):
                         page.wait_for_timeout(500)
+                        if page.url != url_before:
+                            continue        # that tap already moved on (e.g. vehicle -> hours): look first
                         if fenced():
                             break
                         _pm_continue(page, refused)
