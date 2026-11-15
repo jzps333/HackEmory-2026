@@ -16,7 +16,7 @@ from data import plugins_store, typesense_store
 REPO_PLUGINS = Path(__file__).resolve().parent.parent / "plugins"
 OFF_BY_DEFAULT = ["form-filler"]      # in the library, verified, but not switched on by default
 STARTERS = ["parking", "plugin-finder", "qr-checker", "research", "safe-browser", "solana-pay",
-            "squat-coach", "study-buddy", "vercel"]
+            "squat-coach", "study-buddy", "tutor", "vercel"]
 
 UNVERIFIED = """id: tip-jar
 name: Tip jar

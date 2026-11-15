@@ -43,6 +43,7 @@ from livekit.agents import (Agent, AgentServer, AgentSession, JobContext, RunCon
 
 from chert import imessage, meter_pay, parkmobile, research, runner, voice_pay
 from chert import plugins as community
+from chert import whiteboard
 from chert.qr_reader import read_qr
 from chert.scansafe_tools import (CodeDebouncer, dogwood_app_session, operate_stream,
                                   parkmobile_stream, sandbox_configured, scan_url_stream,
@@ -338,8 +339,9 @@ class ScanSafeCall:
                 log.info("speech ended early: %s", e)
 
     def stop(self) -> bool:
-        """Caller said stop: drop any check in progress, go quiet, clear the screen.
-        Returns True if a check was running."""
+        """Caller said stop: drop any check in progress, go quiet, clear the screen. Tutor's notes
+        page stays up (nothing is running there, and "wait, why?" mid-lesson is often taken for
+        stop). Returns True if a check was running."""
         self.generation += 1
         busy = bool(self._inflight) or self.video.state == "checking"
         if self.meter_flow is not None:
@@ -352,7 +354,8 @@ class ScanSafeCall:
         for task in self._inflight.values():
             task.cancel()          # its stream thread sees the new generation and hangs up
         self._inflight.clear()
-        self.video.reset()
+        if self.video.state != "whiteboard":
+            self.video.reset()
         try:
             self.session.interrupt()
         except Exception:          # nothing playing, or the session is closing
@@ -808,7 +811,8 @@ class MeterPayAgent(ScanSafeAgent):
 
 class PluginAgent(ScanSafeAgent):
     """Ordinary calls with community plugins enabled (chert/plugins.py): ScanSafeAgent plus
-    use_plugin, coach_cue and find_plugin. All tools are registered once at call start (no
+    use_plugin, coach_cue, find_plugin, Tutor's whiteboard tools (whiteboard_title, write_step,
+    write_note, clear_whiteboard) and the rest. All tools are registered once at call start (no
     mid-call tool swaps); use_plugin only changes the instructions, and each tool checks that the
     plugin that is on lists it. Calls without plugins get the plain ScanSafeAgent, as before."""
 
@@ -831,7 +835,7 @@ class PluginAgent(ScanSafeAgent):
         if community.normalize(name) in community.OFF_WORDS:
             s.activate(None)
             await self._apply()
-            if self.call is not None and self.call.video.state == "card":
+            if self.call is not None and self.call.video.state in ("card", "whiteboard"):
                 self.call.video.reset()
             return "No skill is on now. Carry on as Chert."
         p = s.find(name)
@@ -886,6 +890,91 @@ class PluginAgent(ScanSafeAgent):
         if "memory" in s.active["effective_tools"]:
             memory_of(self.call).add_cue(s.active, cue)   # for the session record at the end
         return "The cue is on screen. Say it to the caller in a few words."
+
+    # --- Tutor's whiteboard: lesson notes written step by step on the video --------------------
+    # The text is the model's: chert/whiteboard.py cleans it (no control characters or angle
+    # brackets, clipped) and only ever draws it. Our replies never echo it back.
+
+    def _board(self) -> tuple[Optional[str], Optional[dict]]:
+        """(line to say instead, plugin): the line is None when the plugin that is on lists
+        "whiteboard"."""
+        refused = self._refusal("whiteboard")
+        if refused:
+            return refused, None
+        p = self._plugins().active
+        if p is None:
+            return ("No community plugin is on. If the caller wants to learn something, call "
+                    "use_plugin first."), None
+        return None, p
+
+    def _note_for_session(self, p: dict, line: str) -> None:
+        """Keep the lesson's lines for finish_session (saved only if the caller asks for it)."""
+        if "memory" in p["effective_tools"]:
+            memory_of(self.call).add_cue(p, line)
+
+    @function_tool
+    async def whiteboard_title(self, context: RunContext, title: str) -> str:
+        """Start a fresh notes page on the caller's screen with a title: the topic, in a few words
+        (like "Derivatives"). It clears the page. Use it at the start of a lesson, once you know
+        what they want to learn."""
+        refused, _p = self._board()
+        if refused:
+            return refused
+        if not whiteboard.clean(title, whiteboard.TITLE_CHARS):
+            return "Give the page a short title: the topic, in a few words."
+        if self.call is not None:
+            self.call.video.board_title(title)
+        return ("The page is up with that title. If you haven't yet, ask what they already know "
+                "about it and skip that. Then write the first new step with write_step.")
+
+    @function_tool
+    async def write_step(self, context: RunContext, text: str) -> str:
+        """Write the next step of the lesson on the caller's screen, numbered: one idea in one
+        short line (under 140 characters). Write math in plain text with Unicode, like x², √x, ∫,
+        π, ≤, → or ((x+h)²−x²)/h. Call it BEFORE you explain that step out loud, one step at a
+        time, never several in a row."""
+        refused, p = self._board()
+        if refused:
+            return refused
+        line = whiteboard.clean(text, whiteboard.STEP_CHARS)
+        if not line:
+            return "Write the step as one short line, then explain it."
+        n = self.call.video.board_step(line) if self.call is not None else None
+        self._note_for_session(p, f"Step {n}: {line}" if n else line)
+        step = f"Step {n}" if n else "The step"
+        return (f"{step} is being written on their screen now. Explain it out loud in a sentence or "
+                "two, in plain words (don't read it out word for word). Then ask: Does that step "
+                "make sense? and wait for their answer. Don't write the next step until they say yes.")
+
+    @function_tool
+    async def write_note(self, context: RunContext, text: str) -> str:
+        """Add a side note to the newest step on the caller's screen (a sticky note under it),
+        when they didn't get that step or asked why: the WHY, or the idea said a different way, in
+        one short line (under 160 characters)."""
+        refused, p = self._board()
+        if refused:
+            return refused
+        line = whiteboard.clean(text, whiteboard.NOTE_CHARS)
+        if not line:
+            return "Write the note as one short line."
+        n = None
+        if self.call is not None:
+            n = self.call.video.board_note(line)
+            if n is None:
+                return "There's no step on their screen yet. Write one with write_step first."
+        self._note_for_session(p, f"Note on step {n}: {line}" if n else f"Note: {line}")
+        return ("The note is on their screen under the step. Say it in your own words if you haven't "
+                "yet, then ask if the step makes sense now. Once they say yes, go on with write_step.")
+
+    @function_tool
+    async def clear_whiteboard(self, context: RunContext) -> str:
+        """Wipe the steps off the caller's screen (the title stays), when they want to start over."""
+        refused, _p = self._board()
+        if refused:
+            return refused
+        if self.call is not None:
+            self.call.video.board_clear()
+        return "The page is clear; the title stays. Start again with write_step, one step at a time."
 
     # --- memory + flashcards (the API keeps them per plugin, per caller) -----------------------
 
@@ -1422,7 +1511,7 @@ class PluginAgent(ScanSafeAgent):
             return False
         log.info("plugins: enabled set changed: %s", [p["id"] for p in s.plugins])
         await self._apply()
-        if s.active is None and self.call is not None and self.call.video.state == "card":
+        if s.active is None and self.call is not None and self.call.video.state in ("card", "whiteboard"):
             self.call.video.reset()
         return True
 

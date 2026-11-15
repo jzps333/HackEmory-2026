@@ -37,6 +37,7 @@ instructions: What the agent does while this plugin is active, in plain words.
 | `safe_browser` | opens a link in the locked-down VM, live on the call | yes |
 | `scam_check` | ScanSafe scam verdict for a link | yes |
 | `plugin_search` | searches this library by voice | yes |
+| `whiteboard` | writes lesson notes step by step on the video, with side notes (Tutor) | yes |
 | `solana_pay` | test-money payment after a spoken "yes, pay" | no, verified only |
 | `parking` | fills in a parking site up to the pay step | no, verified only |
 

@@ -38,7 +38,8 @@ log = logging.getLogger("scansafe.plugins")
 
 # The same allowlist as api/plugins_index.py (not imported: the agent box needn't have PyYAML).
 TOOLS = frozenset({"camera", "speak", "screen", "memory", "flashcards", "safe_browser",
-                   "scam_check", "plugin_search", "solana_pay", "parking", "research", "computer"})
+                   "scam_check", "plugin_search", "solana_pay", "parking", "research", "computer",
+                   "whiteboard"})
 MONEY_TOOLS = frozenset({"solana_pay", "parking", "research", "computer"})
 # Money tools that only start from the ScanSafe app (scanning a parking code); research runs on a call.
 APP_ONLY_TOOLS = frozenset({"solana_pay", "parking"})
@@ -49,6 +50,7 @@ FUNCTIONS = {"scam_check": ("check_qr_code",), "screen": ("show_website", "coach
              "plugin_search": ("find_plugin",),
              "memory": ("remember", "recall", "finish_session"),
              "flashcards": ("add_card", "next_card", "grade_card"),
+             "whiteboard": ("whiteboard_title", "write_step", "write_note", "clear_whiteboard"),
              "research": ("start_research", "search_research"),
              "computer": ("fill_form", "submit_form", "vercel_status", "vercel_redeploy",
                           "list_connections")}
