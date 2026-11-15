@@ -17,6 +17,10 @@ const TOOL_LABELS: Record<string, string> = {
   plugin_search: "Plugin search",
   solana_pay: "Solana pay",
   parking: "Parking",
+  flashcards: "Flashcards",
+  research: "Research",
+  computer: "Your computer",
+  whiteboard: "Whiteboard",
 };
 
 export default function PluginDetail({ id }: { id: string }) {
