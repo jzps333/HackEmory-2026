@@ -1,0 +1,15 @@
+.tiles {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem;
+}
+.tile {
+  height: 100%;
+  border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 0.75rem;
+}
+.num { display: block; min-height: 64px; font-size: 56px; font-weight: 800; line-height: 1.1; }
+.label { color: var(--muted); font-size: 1rem; }
+
+@media (max-width: 960px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -1,0 +1,102 @@
+/* Desktop site: the shared site tokens redefined for black + lime (GSAP's #0ae448 / #abff84),
+   so the existing components (LiveCheck, ResultView, MapClient, DashboardClient) recolor themselves. */
+.desk {
+  --ink: #ffffff;
+  --muted: #b8b8b8;
+  --quiet: #8c8c8c;
+  --blue: #abff84;
+  --purple: #0ae448;
+  --border: #2c2c2c;
+  --wash: #0a0a0a;
+  --gradient: linear-gradient(105deg, #abff84 0%, #0ae448 100%);
+  --gradient-btn: linear-gradient(105deg, #abff84 0%, #0ae448 100%);
+  --gradient-mark: linear-gradient(145deg, #abff84, #0ae448);
+  --page: #000000;
+  --surface: #0b0b0b;
+  --line: #232323;
+  --control-border: #6e6e6e;
+  --tint: #07170c;
+  --tint-line: #154a24;
+  --focus: #abff84;
+  --safe-bg: #07170c;
+  --safe-fg: #abff84;
+  --safe-strong: #0ae448;
+  --warn-bg: #141414;
+  --warn-fg: #ffffff;
+  --warn-strong: #ffffff;
+  --warn-line: #8c8c8c;
+  --bad-bg: #2a0a0d;
+  --bad-fg: #ffb4b8;
+  --bad-strong: #c0262d;
+  --chart-other: #3a3a3a;
+  --shadow-sm: none;
+  --shadow: none;
+  --shadow-btn: 0 0 24px rgb(10 228 68 / 25%);
+  /* The aliases in globals.css resolve at :root, so they are re-declared here. */
+  --bg: var(--page);
+  --fg: var(--ink);
+  --brand: var(--purple);
+  --card: var(--surface);
+
+  --font: var(--font-body), system-ui, sans-serif;
+  font-family: var(--font);
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--ink);
+  color-scheme: dark;
+}
+
+/* The root layout's phone header and narrow column are for the phone site. */
+html:has(.desk), body:has(.desk) { background: #000; color: #fff; }
+body:has(.desk) .site-header { display: none; }
+main:has(> .desk) { max-width: none; padding: 0; }
+
+/* Lime buttons need dark text. */
+.desk .btn-primary, .desk .btn-primary:hover,
+.desk .btn-safe, .desk .btn-safe:hover { color: #000; }
+.desk .btn-safe:hover { background: #abff84; border-color: #abff84; }
+
+.desk-header {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  display: flex; justify-content: center;
+  padding: 1rem 2rem;
+  pointer-events: none;
+}
+.desk-header > * { pointer-events: auto; }
+
+/* Sections are full width; each one centers its own content. */
+.desk-body { padding: 0; }
+.desk [id] { scroll-margin-top: 0; }
+
+.desk-page-title { margin-top: 2rem; }
+
+/* LiveCheck (shared component) sets its own light palette on its card; recolor it here. */
+.desk section[aria-labelledby="live-h"] {
+  --ink: #ffffff; --muted: #b8b8b8; --purple: #0ae448; --blue: #abff84; --line: #2c2c2c;
+  --grad: linear-gradient(105deg, #abff84 0%, #0ae448 100%);
+  background: #0b0b0b; box-shadow: 0 0 60px rgb(10 228 68 / 10%);
+}
+.desk section[aria-labelledby="live-h"] > div:first-of-type { border-color: #2c2c2c; background: #111; box-shadow: 0 0 40px rgb(10 228 68 / 15%); }
+.desk section[aria-labelledby="live-h"] > div:first-of-type > div { background: #111; }
+
+/* Leaflet: dark map tiles (pins live in another pane, so they stay red). */
+.desk .leaflet-container { background: #000; }
+.desk .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) grayscale(1) brightness(0.85) contrast(0.95); }
+.desk .leaflet-popup-content-wrapper, .desk .leaflet-popup-tip { background: #0b0b0b; color: #fff; border: 1px solid #2c2c2c; }
+.desk .leaflet-control-attribution { background: rgb(0 0 0 / 70%) !important; color: #8c8c8c; }
+.desk .leaflet-control-attribution a { color: #abff84; }
+
+/* Type: Hubot Sans Expanded for headlines, Mona Sans for text, Departure Mono for labels and numbers. */
+.desk :is(h1, h2, h3, [role="heading"], .scroll-float-text, .glitch, .split-parent) {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.desk :is(input, button, textarea, select) { font-family: inherit; }
+.desk :is(.pill-nav, .counter, .text-type, .logoloop, .tile .lbl, .chart-axis, .legend, .demo-badge, .hint, label),
+.desk [class*="kicker"], .desk [class*="eyebrow"], .desk [class*="chip"], .desk [class*="stepNum"], .desk [class*="__by"],
+.desk [class*="typing"], .desk [class*="label"], .desk [class*="num"], .desk footer {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+}
+.desk svg text { font-family: var(--font-mono), ui-monospace, monospace; }
