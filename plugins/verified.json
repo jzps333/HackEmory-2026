@@ -1,26 +1,26 @@
 {
   "parking": {
-    "sha256": "da3421dc573b1d3b0a77f9f41ed56937c1a2562f10d224553012ba1b9fa1ef93",
+    "sha256": "8b12f8cd790959ec7a2d61a2c68f75263e2514247a54947a1040195c570a9e20",
     "by": "jzps333"
   },
   "plugin-finder": {
-    "sha256": "c4e101920d5f4f2a4b12d7c53dba87855050c8f5c83f71e17bac6b07c09bd3ce",
+    "sha256": "b42fcb554ddd792bebcaaa05f9beb5e0a8f5401d54772438e7ddeda661853dc8",
     "by": "jzps333"
   },
   "qr-checker": {
-    "sha256": "bba6f75deaba1ef2e8fc5565715fa3f2f0c41a70f4c3322a26ddd1d78c7972bd",
+    "sha256": "151ba89b1fe7b90231ddb0b3ac341d6b3602b2d81b278e1ba4431161b8eebb9b",
     "by": "jzps333"
   },
   "safe-browser": {
-    "sha256": "6fdcd39161d59a8b0d5a8801041b28eb8b4b03e7bfbabb7a99c5919308e49fd7",
+    "sha256": "cc2e361dd121c263d8604677aabfafe5d9c538c40f72b33566931a22c02422ee",
     "by": "jzps333"
   },
   "solana-pay": {
-    "sha256": "4e12e201a79eade39183358c6ed12b1d6db470747e8a1780b72141921cfa16b6",
+    "sha256": "b69a3eb934839187523b90a71120a48d9653ed49af1b47c08d67f0ca2523056e",
     "by": "jzps333"
   },
   "squat-coach": {
-    "sha256": "0e7accfd71511f0c487dbea49eb6d0abccd73cc5c5d5ca0261acfa79a083b91e",
+    "sha256": "251f2d548814a8b91050a45427c6c4e6a458a3ef8d261b4beadab588dd32cefb",
     "by": "jzps333"
   }
 }

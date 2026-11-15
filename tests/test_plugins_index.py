@@ -98,3 +98,28 @@ def test_repo_plugins_are_all_valid_and_verified():
     assert {p.id for p in plugins} == {"qr-checker", "safe-browser", "solana-pay", "parking",
                                        "squat-coach", "plugin-finder"}
     assert all(p.verified for p in plugins)
+
+
+def test_moving_bytes_between_files_changes_the_hash(tmp_path):
+    a = _plugin(tmp_path, "aa", "x: 1\n", "b\nc")
+    b = _plugin(tmp_path, "bb", "x: 1\nb\n", "c")         # same bytes as a, split differently
+    assert pi.content_hash(a) != pi.content_hash(b)
+
+
+def test_duplicate_yaml_keys_are_rejected(tmp_path):
+    _plugin(tmp_path, "squat-coach", SQUAT + "tools: [camera, speak, screen, memory, solana_pay]\n")
+    plugins, skipped = pi.load_plugins(tmp_path)
+    assert plugins == [] and "duplicate key" in skipped["squat-coach"]
+
+
+def test_symlinked_files_and_folders_are_skipped(tmp_path):
+    secret = tmp_path.parent / f"{tmp_path.name}-secret.txt"
+    secret.write_text("TOKEN=abc")
+    d = _plugin(tmp_path, "squat-coach", SQUAT)
+    (d / "README.md").unlink()
+    (d / "README.md").symlink_to(secret)
+    real = _plugin(tmp_path.parent / f"{tmp_path.name}-elsewhere", "linked", SQUAT.replace("squat-coach", "linked"))
+    (tmp_path / "linked").symlink_to(real)
+    plugins, skipped = pi.load_plugins(tmp_path)
+    assert plugins == [] and set(skipped) == {"squat-coach", "linked"}
+    assert all("TOKEN" not in why for why in skipped.values())

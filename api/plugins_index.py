@@ -56,10 +56,39 @@ class Plugin:
 
 
 def content_hash(folder: Path) -> str:
-    """sha256 of plugin.yaml bytes + b"\\n" + README.md bytes (README may be missing)."""
-    y = (folder / "plugin.yaml").read_bytes()
-    r = (folder / "README.md").read_bytes() if (folder / "README.md").is_file() else b""
-    return hashlib.sha256(y + b"\n" + r).hexdigest()
+    """sha256 over plugin.yaml and README.md (README may be missing), each prefixed with its name
+    and length."""
+    h = hashlib.sha256()
+    for name in ("plugin.yaml", "README.md"):     # name + length prefix: bytes can't move between files
+        f = folder / name
+        data = f.read_bytes() if f.is_file() else b""
+        h.update(name.encode() + b"\0" + len(data).to_bytes(8, "big") + data)
+    return h.hexdigest()
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """safe_load that rejects duplicate keys, so the `tools:` a reviewer reads is the one used."""
+
+
+def _no_duplicates(loader: yaml.SafeLoader, node: yaml.MappingNode, deep: bool = False) -> dict:
+    seen = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in seen:
+            raise yaml.constructor.ConstructorError(None, None, f"duplicate key '{key}'", key_node.start_mark)
+        seen.add(key)
+    return loader.construct_mapping(node, deep)
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates)
+
+
+def _safe_file(root: Path, f: Path) -> bool:
+    """A regular file inside root and not a symlink (a symlink could expose server files)."""
+    try:
+        return f.is_file() and not f.is_symlink() and f.resolve().is_relative_to(root.resolve())
+    except OSError:
+        return False
 
 
 def _text(v: Any) -> bool:
@@ -125,14 +154,17 @@ def load_plugins(root: Path | None = None) -> tuple[list[Plugin], dict[str, str]
     if not root.is_dir():
         return plugins, skipped
     for d in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
-        y = d / "plugin.yaml"
+        y, readme = d / "plugin.yaml", d / "README.md"
         try:
-            if not y.is_file():
-                raise ValueError("no plugin.yaml")
-            if y.stat().st_size > MAX_FILE_BYTES or ((d / "README.md").is_file()
-                                                      and (d / "README.md").stat().st_size > MAX_FILE_BYTES):
+            if d.is_symlink():
+                raise ValueError("plugin folders can't be symlinks")
+            if not _safe_file(root, y):
+                raise ValueError("no plugin.yaml (or it is a symlink)")
+            if (readme.exists() or readme.is_symlink()) and not _safe_file(root, readme):
+                raise ValueError("README.md can't be a symlink")
+            if y.stat().st_size > MAX_FILE_BYTES or (readme.exists() and readme.stat().st_size > MAX_FILE_BYTES):
                 raise ValueError("plugin files are too large")
-            data = yaml.safe_load(y.read_text(encoding="utf-8"))
+            data = yaml.load(y.read_text(encoding="utf-8"), Loader=_UniqueKeyLoader)  # SafeLoader subclass
         except (OSError, ValueError, yaml.YAMLError) as e:
             skipped[d.name] = f"couldn't read plugin.yaml: {str(e).splitlines()[0][:160]}"
             continue
@@ -149,7 +181,7 @@ def load_plugins(root: Path | None = None) -> tuple[list[Plugin], dict[str, str]
             runs_on=data["runs_on"], phrases=[p.strip() for p in trig.get("phrases") or []],
             qr=bool(trig.get("qr", False)), tools=list(data["tools"]),
             permissions=data["permissions"].strip(), instructions=data["instructions"].strip(),
-            readme=(d / "README.md").read_text(encoding="utf-8") if (d / "README.md").is_file() else "",
+            readme=readme.read_text(encoding="utf-8") if readme.exists() else "",
             sha256=digest,
             verified=isinstance(entry, dict) and entry.get("sha256") == digest))
     return plugins, skipped
