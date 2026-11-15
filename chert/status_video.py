@@ -46,6 +46,8 @@ import numpy as np
 from livekit import rtc
 from PIL import Image, ImageDraw, ImageFont
 
+from chert import whiteboard
+
 FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
 
 # (label while running, label when done) and roughly when the sandbox reaches that step
@@ -187,6 +189,7 @@ class StatusVideo:
     live_title = ""                       # helper app: "Your computer · Form filler" (begin_live)
     live_tag = ""                         # helper app: LIVE tag text instead of "on our computer"
     live_done = False                     # helper app: job over, a tick instead of the spinner
+    board: Optional[whiteboard.Whiteboard] = None   # Tutor: the lesson's notes page
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -282,6 +285,7 @@ class StatusVideo:
         self.meter, self.meter_shot, self.meter_shot_hours = None, None, None
         self.consent = None
         self.card = None
+        self.board = None
 
     def set_card(self, title: str, body: str) -> None:
         """A community plugin's card: its name big, then one short line (a coaching cue, what
@@ -289,6 +293,42 @@ class StatusVideo:
         self.card = (_clip(title, CARD_TITLE_CHARS), _clip(body, CARD_BODY_CHARS))
         self.state = "card"
         self.live = None
+
+    # --- Tutor's whiteboard (chert/whiteboard.py cleans and clips all of its text) -------------
+
+    def _show_board(self) -> None:
+        self.state = "whiteboard"
+        self.live = None
+
+    def board_title(self, title: str) -> str:
+        """A fresh page with ``title`` on it (no steps). Returns the title as shown."""
+        self.board = whiteboard.Whiteboard(title)
+        self._show_board()
+        return self.board.title
+
+    def board_step(self, text: str) -> Optional[int]:
+        """Append a numbered step; it writes itself. Its number, or None for empty text."""
+        if self.board is None:
+            self.board = whiteboard.Whiteboard()
+        n = self.board.add_step(text)
+        if n is not None:
+            self._show_board()
+        return n
+
+    def board_note(self, text: str) -> Optional[int]:
+        """A sticky note on the newest step. That step's number, or None when there's no step."""
+        n = self.board.add_note(text) if self.board is not None else None
+        if n is not None:
+            self._show_board()
+        return n
+
+    def board_clear(self) -> None:
+        """Wipe the steps; the title stays."""
+        if self.board is None:
+            self.board = whiteboard.Whiteboard()
+        else:
+            self.board.clear()
+        self._show_board()
 
     def set_consent(self, text: Optional[str]) -> None:
         """Show (or with None, clear) the "say yes, pay" card. ``text`` is built by us from the
@@ -586,6 +626,9 @@ class StatusVideo:
             return (self.state, m.get("hours"), m.get("amount"), m.get("label"), id(self.shot), spin)
         if self.state == "card":
             return ("card", self.card)
+        if self.state == "whiteboard":
+            board = self.board
+            return ("whiteboard", id(board), board.key(now) if board is not None else None)
         return ("idle", self.state, int(now * 4) % 24, self.plain)
 
     def _draw(self) -> bytes:
@@ -620,6 +663,8 @@ class StatusVideo:
         elif self.state == "card" and (card := self.card) is not None:   # read once
             img = Image.new("RGB", (self.W, self.H), COLORS["card"])
             self._card(img, card)
+        elif self.state == "whiteboard" and (board := self.board) is not None:   # read once
+            img = board.frame(now)                   # a fresh copy: the consent card may go on it
         else:
             img = Image.new("RGB", (self.W, self.H), COLORS.get(self.state, COLORS["idle"]))
             self._idle(img, now)
