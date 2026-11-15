@@ -32,8 +32,8 @@ log = logging.getLogger("scansafe.plugins")
 
 # The same allowlist as api/plugins_index.py (not imported: the agent box needn't have PyYAML).
 TOOLS = frozenset({"camera", "speak", "screen", "memory", "flashcards", "safe_browser",
-                   "scam_check", "plugin_search", "solana_pay", "parking"})
-MONEY_TOOLS = frozenset({"solana_pay", "parking"})
+                   "scam_check", "plugin_search", "solana_pay", "parking", "research"})
+MONEY_TOOLS = frozenset({"solana_pay", "parking", "research"})
 # With plugins loaded but none on, the agent is plain ScanSafe: QR checks and the page picture.
 BASE_TOOLS = frozenset({"camera", "speak", "screen", "scam_check", "safe_browser"})
 # Which of our agent functions each tool unlocks (named for the model while a plugin is on).

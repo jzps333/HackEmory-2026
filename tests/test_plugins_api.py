@@ -14,7 +14,7 @@ from api import routes_plugins
 from data import plugins_store, typesense_store
 
 REPO_PLUGINS = Path(__file__).resolve().parent.parent / "plugins"
-STARTERS = ["parking", "plugin-finder", "qr-checker", "safe-browser", "solana-pay", "squat-coach", "study-buddy"]
+STARTERS = ["parking", "plugin-finder", "qr-checker", "research", "safe-browser", "solana-pay", "squat-coach", "study-buddy"]
 
 UNVERIFIED = """id: tip-jar
 name: Tip jar
