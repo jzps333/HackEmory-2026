@@ -141,21 +141,26 @@ def caption_overlay(text: str, path: Path, sub: str = "") -> Path:
     return path
 
 
-def with_overlays(base: Path, overlays: list[tuple[Path, float, float]], out: Path) -> Path:
+def with_overlays(base: Path, overlays: list[tuple[Path, float, float]], out: Path, slide: bool = True) -> Path:
+    """Overlay full-frame PNGs over time windows; with ``slide`` each one rises into place."""
     args, chain, last = ["-i", base], [], "0:v"
     for i, (png, a, b) in enumerate(overlays, 1):
         args += ["-i", png]
         tag = f"o{i}"
-        chain.append(f"[{last}][{i}:v]overlay=0:0:enable='between(t,{a},{b})'[{tag}]")
+        y = f"'max(0,({a}+0.35-t)*260)'" if slide else "0"
+        chain.append(f"[{last}][{i}:v]overlay=0:{y}:enable='between(t,{a},{b})'[{tag}]")
         last = tag
     ff(*args, "-filter_complex", ";".join(chain), "-map", f"[{last}]", *enc(), out)
     return out
 
 
 def still(png: Path, secs: float, out: Path) -> Path:
-    ff("-loop", "1", "-i", png, "-t", f"{secs}",
-       "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}:0:0,fps={FPS},setsar=1",
-       *enc(), out)
+    """A slow push-in on a screenshot or card (drawn at 2x so the zoom stays smooth), faded in."""
+    frames = int(round(secs * FPS))
+    ff("-i", png, "-vf",
+       f"scale={2 * W}:{2 * H}:force_original_aspect_ratio=increase,crop={2 * W}:{2 * H}:0:0,"
+       f"zoompan=z='1+0.05*on/{frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS},"
+       f"fade=t=in:st=0:d=0.25,setsar=1", "-frames:v", str(frames), *enc(), out)
     return out
 
 
@@ -187,6 +192,11 @@ def call_ended(secs: float, out: Path) -> Path:
     return out
 
 
+def rise(i: int) -> str:
+    """The i-th phone rises into place, one after another."""
+    return f"'{PY}+max(0,({0.12 * i}+0.45-t)*2200)'"
+
+
 def row() -> Path:                                     # 11-43
     give_up = 14.0                                     # the no-skill phones end the call here
     p1 = concat([piece("01-tutor-off", 40.0, 70.0, give_up, TMP / "p1a.mp4", "Tutor · out of the box"),
@@ -204,8 +214,9 @@ def row() -> Path:                                     # 11-43
     ff("-f", "lavfi", "-i", f"color=c=0x0b0b0d:s={W}x{H}:d={ROW_S}:r={FPS}",
        "-i", p1, "-i", p2, "-i", p3, "-i", p4,
        "-filter_complex",
-       ";".join([f"[0:v][1:v]overlay={PX0}:{PY}[a]", f"[a][2:v]overlay={PX0 + 480}:{PY}[b]",
-                 f"[b][3:v]overlay={PX0 + 960}:{PY}[c]", f"[c][4:v]overlay={PX0 + 1440}:{PY}:shortest=1[v]"]),
+       ";".join([f"[0:v][1:v]overlay={PX0}:{rise(0)}[a]", f"[a][2:v]overlay={PX0 + 480}:{rise(1)}[b]",
+                 f"[b][3:v]overlay={PX0 + 960}:{rise(2)}[c]",
+                 f"[c][4:v]overlay={PX0 + 1440}:{rise(3)}:shortest=1[v]"]),
        "-map", "[v]", "-t", f"{ROW_S}", *enc(), base)
     labels = [("TUTOR \u00b7 NO SKILL", False), ("TUTOR \u00b7 WITH SKILL", True),
               ("RESEARCH \u00b7 NO SKILL", False), ("RESEARCH \u00b7 WITH SKILL", True)]
@@ -228,7 +239,7 @@ def row() -> Path:                                     # 11-43
     for i, (x, y) in enumerate(zip(cuts, cuts[1:])):
         caps = [next(c for (ca, cb, c) in pan if ca <= x < cb) for pan in panels]
         ovs.append((row_overlay(labels, caps, TMP / f"row-{i}.png"), x, y))
-    return with_overlays(base, ovs, TMP / "s2.mp4")
+    return with_overlays(base, ovs, TMP / "s2.mp4", slide=False)
 
 
 def scansafe() -> Path:                                # 43-55
@@ -270,7 +281,7 @@ def open_source() -> Path:                             # 63-82
                                             "searchable with Typesense"), 0, 5)], TMP / "s4-b2.mp4")
     c = still(CARDS / "hood-typesense.png", 3.0, TMP / "s4-c.mp4")
     e = still(SCREENS / "github-verified.png", 5.0, TMP / "s4-e.mp4")
-    e2 = with_overlays(e, [(caption_overlay("Verified by SHA-256 fingerprint", TMP / "cap-s4e.png",
+    e2 = with_overlays(e, [(caption_overlay("Verified by a fingerprint of its exact text (SHA-256)", TMP / "cap-s4e.png",
                                             "edit it and it’s unverified · unverified skills can’t touch money, research or your computer"),
                             0, 5)], TMP / "s4-e2.mp4")
     return concat([a2, b2, c, e2], TMP / "s4.mp4")
