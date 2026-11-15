@@ -22,7 +22,8 @@ BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 REG = "/System/Library/Fonts/Supplemental/Arial.ttf"
 
 # Voice-over pieces (seconds in voiceover_final.m4a) and where each starts in the video.
-VO_PARTS = [(0.0, 10.5, 0.3), (10.5, 28.8, 11.3), (28.8, 38.2, 43.3), (38.2, 56.2, 63.3), (56.2, 76.6, 82.3)]
+VO_PARTS = [(0.0, 10.5, 0.3), (10.5, 28.8, 11.3), (28.8, 38.2, 43.3), (38.2, 56.2, 55.3),
+            (56.2, 60.1, 74.3), (60.1, 76.6, 88.3)]
 
 # Four-phone row (11.0-43.0 in the video): panel, label, clip, [start, end] seconds in the clip, captions.
 ROW_S = 32.0
@@ -164,10 +165,30 @@ def intro() -> Path:                                   # 0-11
     return concat([a, bb], TMP / "s1.mp4")
 
 
+def call_ended(secs: float, out: Path) -> Path:
+    """The no-skill phone after the person gives up: the call is over."""
+    img = Image.new("RGB", (PW, PH), (20, 20, 24))
+    d = ImageDraw.Draw(img)
+    cx, cy = PW // 2, 300
+    d.ellipse((cx - 70, cy - 70, cx + 70, cy + 70), fill=(220, 38, 38))
+    d.rounded_rectangle((cx - 44, cy - 12, cx + 44, cy + 12), 12, fill=WHITE)      # handset, face down
+    d.rounded_rectangle((cx - 50, cy - 4, cx - 26, cy + 26), 8, fill=WHITE)
+    d.rounded_rectangle((cx + 26, cy - 4, cx + 50, cy + 26), 8, fill=WHITE)
+    d.text((cx, 440), "Call ended", font=font(BOLD, 48), fill=WHITE, anchor="mm")
+    d.text((cx, 500), "It couldn\u2019t help", font=font(REG, 32), fill=GREY, anchor="mm")
+    png = out.with_suffix(".png")
+    img.save(png)
+    ff("-loop", "1", "-i", png, "-t", f"{secs}", "-vf", f"fps={FPS},setsar=1", *enc(), out)
+    return out
+
+
 def row() -> Path:                                     # 11-43
-    p1 = piece("01-tutor-off", 36.0, 80.0, ROW_S, TMP / "p1.mp4", "Tutor · out of the box")
+    give_up = 14.0                                     # the no-skill phones end the call here
+    p1 = concat([piece("01-tutor-off", 40.0, 70.0, give_up, TMP / "p1a.mp4", "Tutor · out of the box"),
+                 call_ended(ROW_S - give_up, TMP / "p1b.mp4")], TMP / "p1.mp4")
     p2 = piece("02-tutor-on", 38.0, 100.0, ROW_S, TMP / "p2.mp4", "Tutor · with skill")
-    p3 = piece("03-research-off", 30.0, 50.0, ROW_S, TMP / "p3.mp4", "Research · out of the box")
+    p3 = concat([piece("03-research-off", 30.0, 48.0, give_up, TMP / "p3a.mp4", "Research · out of the box"),
+                 call_ended(ROW_S - give_up, TMP / "p3b.mp4")], TMP / "p3.mp4")
     r1 = piece("04a-research-on", 30.0, 43.0, 11.0, TMP / "p4a.mp4", "Research · asks")
     col = (570, 777)                                   # the report's content column in the screenshot
     r2a = scroll(SCREENS / "research-report.png", 3.0, TMP / "p4b1.mp4", top=0.0, end=0.02, column=col)
@@ -181,23 +202,32 @@ def row() -> Path:                                     # 11-43
        ";".join([f"[0:v][1:v]overlay={PX0}:{PY}[a]", f"[a][2:v]overlay={PX0 + 480}:{PY}[b]",
                  f"[b][3:v]overlay={PX0 + 960}:{PY}[c]", f"[c][4:v]overlay={PX0 + 1440}:{PY}:shortest=1[v]"]),
        "-map", "[v]", "-t", f"{ROW_S}", *enc(), base)
-    labels = [("TUTOR · NO SKILL", False), ("TUTOR · WITH SKILL", True),
-              ("RESEARCH · NO SKILL", False), ("RESEARCH · WITH SKILL", True)]
-    phases = [
-        (0, 11, ["Asks: teach me what a derivative is", "Handwrites each step on your screen (2x)",
-                 "Asks it to research Adderall and dopamine", "Starts the research, then hangs up by itself"]),
-        (11, 20, ["“I can’t write or display equations on this call.”", "Checks in, then draws the graph when you ask",
-                  "“I don’t have the ability to look things up online.”",
-                  "4 min later: a report citing published studies"]),
-        (20, ROW_S, ["Just talks", "Step 3: for x², the derivative is 2x", "Can’t research",
-                     "Then calls you back to walk you through it"]),
+    labels = [("TUTOR \u00b7 NO SKILL", False), ("TUTOR \u00b7 WITH SKILL", True),
+              ("RESEARCH \u00b7 NO SKILL", False), ("RESEARCH \u00b7 WITH SKILL", True)]
+    panels = [
+        [(0, 6, "Asks: teach me what a derivative is"),
+         (6, give_up, "\u201cI can\u2019t write or display equations on this call.\u201d"),
+         (give_up, ROW_S, "Nothing more it can do: you hang up")],
+        [(0, 11, "Handwrites each step on your screen (2x)"),
+         (11, 20, "Checks in, then draws the graph when you ask"),
+         (20, ROW_S, "Step 3: for x\u00b2, the derivative is 2x")],
+        [(0, 6, "Asks it to research Adderall and dopamine"),
+         (6, give_up, "\u201cI don\u2019t have the ability to look things up online.\u201d"),
+         (give_up, ROW_S, "Nothing more it can do: you hang up")],
+        [(0, 11, "Starts the research, then hangs up by itself"),
+         (11, 20, "5 min later: a report citing 30 published studies"),
+         (20, ROW_S, "Then calls you back to walk you through it")],
     ]
-    ovs = [(row_overlay(labels, caps, TMP / f"row-{i}.png"), a, b) for i, (a, b, caps) in enumerate(phases)]
+    cuts = sorted({t for pan in panels for (x, y, _) in pan for t in (x, y)})
+    ovs = []
+    for i, (x, y) in enumerate(zip(cuts, cuts[1:])):
+        caps = [next(c for (ca, cb, c) in pan if ca <= x < cb) for pan in panels]
+        ovs.append((row_overlay(labels, caps, TMP / f"row-{i}.png"), x, y))
     return with_overlays(base, ovs, TMP / "s2.mp4")
 
 
-def scansafe() -> Path:                                # 43-63
-    secs = 20.0
+def scansafe() -> Path:                                # 43-55
+    secs = 12.0
     src = clip("05-scansafe")
     phone = TMP / "s3-phone.mp4"
     if src is None:
@@ -241,20 +271,92 @@ def open_source() -> Path:                             # 63-82
     return concat([a2, b2, c, e2], TMP / "s4.mp4")
 
 
-def hood() -> Path:                                    # 82-100.3, then the end card
-    order = [("hood-tiger", 3.9), ("hood-gemini", 3.5), ("hood-vultr", 2.0), ("hood-coder", 2.0),
-             ("hood-solana", 4.0), ("solana-tx", 2.6)]
+MONO = "/System/Library/Fonts/Menlo.ttc"
+FLOW = ["FaceTime call \u00b7 Chert", "Agent on Vultr \u00b7 Gemini Live", "Research skill \u00b7 verified on GitHub",
+        "Gemini + Google + OpenAlex studies", "Tiger Data \u00b7 every step, every report",
+        "Typesense \u00b7 search past reports", "Text + FaceTime call back"]
+
+
+def tiger() -> Path:                                   # 74-88: how the Research skill works, from Tiger
+    import datetime
+    import json
+    job = json.loads((RAW / "tiger-job.json").read_text())
+    steps = [p for p in job["progress"] if "call back" not in p["note"].lower()]
+    keep, searched = [], 0
+    for p in steps:                                    # every round, a couple of searches each, the report
+        n = p["note"]
+        if n.startswith("Searched:"):
+            searched += 1
+            if searched % 5 != 1:
+                continue
+        elif n.startswith("Searched"):
+            continue
+        keep.append(p)
+    secs, fps = 14.0, 15
+    reveal = 10.5                                      # all lines are in by then
+    fr = TMP / "tiger"
+    fr.mkdir(exist_ok=True)
+    f_small, f_title, f_mono, f_monob = font(BOLD, 28), font(BOLD, 58), ImageFont.truetype(MONO, 25), \
+        ImageFont.truetype(MONO, 25, index=1)
+    f_flow, f_cap = font(BOLD, 28), font(REG, 30)
+    first_search = next(i for i, p in enumerate(keep) if p["note"].startswith("Searched"))
+    for k in range(int(secs * fps)):
+        t = k / fps
+        shown = min(len(keep), int(t / reveal * len(keep)) + 1)
+        img = Image.new("RGB", (W, H), BG)
+        d = ImageDraw.Draw(img)
+        d.text((60, 52), "UNDER THE HOOD \u00b7 HOW THE RESEARCH SKILL WORKS", font=f_small, fill=GREEN)
+        d.text((60, 92), "Every step is written to Tiger Data, live", font=f_title, fill=WHITE)
+        x0, y0, x1, y1 = 60, 190, 1200, 990
+        d.rounded_rectangle((x0, y0, x1, y1), 18, fill=(17, 17, 19), outline=(39, 39, 42), width=2)
+        d.text((x0 + 24, y0 + 18), f"tiger data \u00b7 research_jobs \u00b7 job {job['job_id']}", font=f_monob,
+               fill=GREEN)
+        d.text((x0 + 24, y0 + 58), "> SELECT at, note FROM research_jobs, jsonb_array_elements(progress)",
+               font=f_mono, fill=GREY)
+        y = y0 + 110
+        for p in keep[:shown]:
+            at = datetime.datetime.fromtimestamp(p["at"], datetime.timezone.utc).strftime("%H:%M:%S")
+            note = p["note"] if len(p["note"]) <= 60 else p["note"][:58] + "\u2026"
+            color = GREEN if p["note"].startswith(("Report ready", "That covers", "Writing the report")) else WHITE
+            d.text((x0 + 24, y), at, font=f_mono, fill=GREY)
+            d.text((x0 + 170, y), note, font=f_mono, fill=color)
+            y += 40
+        lit = 3 + (1 if shown > first_search else 0) + (1 if shown >= 1 else 0)
+        if shown == len(keep):
+            lit = len(FLOW)
+        bx0, bx1, by, bh, gap = 1260, 1860, 190, 92, 22
+        for i, name in enumerate(FLOW):
+            on = i < lit if i != 4 else shown >= 1
+            if i == 3:
+                on = shown > first_search
+            top = by + i * (bh + gap)
+            d.rounded_rectangle((bx0, top, bx1, top + bh), 16, fill=((10, 60, 28) if on else (24, 24, 28)),
+                                outline=(GREEN if on else (60, 60, 68)), width=3)
+            d.text(((bx0 + bx1) // 2, top + bh // 2), name, font=f_flow, fill=(WHITE if on else GREY), anchor="mm")
+            if i < len(FLOW) - 1:
+                d.line(((bx0 + bx1) // 2, top + bh, (bx0 + bx1) // 2, top + bh + gap), fill=(60, 60, 68), width=3)
+        d.text((W // 2, 1040), "Real log of the Adderall research above \u00b7 4 rounds \u00b7 20 searches \u00b7 "
+                               "216 sources \u00b7 report in 5 minutes (sped up)", font=f_cap, fill=GREY, anchor="mm")
+        img.save(fr / f"f{k:04d}.png")
+    out = TMP / "s5a.mp4"
+    ff("-framerate", str(fps), "-i", fr / "f%04d.png", "-vf", f"fps={FPS},setsar=1", *enc(), out)
+    return out
+
+
+def hood() -> Path:                                    # 88-102.1, then the end card
+    order = [("hood-gemini", 3.5), ("hood-vultr", 2.0), ("hood-coder", 2.0), ("hood-solana", 4.0),
+             ("solana-tx", 2.6)]
     parts = []
     for name, secs in order:
         png = CARDS / f"{name}.png" if (CARDS / f"{name}.png").exists() else SCREENS / f"{name}.png"
         parts.append(still(png, secs, TMP / f"s5-{name}.mp4"))
-    parts.append(still(CARDS / "end.png", 5.7, TMP / "s5-end.mp4"))
+    parts.append(still(CARDS / "end.png", 6.0, TMP / "s5-end.mp4"))
     return concat(parts, TMP / "s5.mp4")
 
 
 def main() -> None:
     TMP.mkdir(parents=True, exist_ok=True)
-    video = concat([intro(), row(), scansafe(), open_source(), hood()], TMP / "video.mp4")
+    video = concat([intro(), row(), scansafe(), open_source(), tiger(), hood()], TMP / "video.mp4")
     inputs, chains, labels = ["-i", video], [], []
     for i, (a, b, at) in enumerate(VO_PARTS):
         inputs += ["-i", VO]
