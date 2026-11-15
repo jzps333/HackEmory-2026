@@ -259,7 +259,7 @@ def test_coach_cue_needs_screen_and_clips(monkeypatch):
     asyncio.run(go())
 
 
-def test_find_plugin_needs_plugin_search_and_reads_top_three(monkeypatch):
+def test_find_plugin_works_without_the_finder_on_and_reads_top_three(monkeypatch):
     ai = agent_mod(monkeypatch)
     plugins = starter()
     asked = []
@@ -276,13 +276,13 @@ def test_find_plugin_needs_plugin_search_and_reads_top_three(monkeypatch):
     agent, _ = plugin_agent(ai, call)
 
     async def go():
-        refused = await agent.find_plugin(None, "parking")
-        assert "Plugin finder" in refused and not asked     # must switch to the finder first
-        await agent.use_plugin(None, "plugin finder")
+        # Skill suggestions: with plugins loaded, find_plugin works with no plugin on, or any on.
         out = await agent.find_plugin(None, "parking")
-        assert asked == [("/plugins/search", "parking")]
+        assert asked == [("/plugins/search", "parking")] and call.plugins.active is None
         names = [p["name"] for p in plugins]
         assert sum(n in out for n in names) == 3 and "verified" in out
+        await agent.use_plugin(None, "squat coach")
+        assert "verified" in await agent.find_plugin(None, "parking") and len(asked) == 2
     asyncio.run(go())
 
 

@@ -179,6 +179,7 @@ class StatusVideo:
     live_step = ""                        # Dogwood app: what the sandbox is doing ("Tapping Install")
     consent: Optional[str] = None         # "Say “yes, pay” to confirm · 0.03 SOL · 3 h · GA 4821K"
     card: Optional[tuple[str, str]] = None   # (title, body) of a plugin card
+    plain = False                         # baseline ("Chert out of the box"): no ScanSafe idle screen
 
     def __init__(self) -> None:
         self.state = "idle"
@@ -505,6 +506,14 @@ class StatusVideo:
 
     def _idle(self, img: Image.Image, now: float) -> None:
         d = ImageDraw.Draw(img)
+        if self.plain and self.state == "idle":
+            # Baseline: a plain assistant screen, no ScanSafe name and no QR prompt. It breathes,
+            # so the picture keeps changing.
+            d.text((64, 420), "Assistant", font=_font(96, True), fill=WHITE)
+            r = 90 + int(12 * math.sin((int(now * 4) % 24) / 24 * 2 * math.pi))
+            cx, cy = self.W // 2, 860
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=WHITE, width=10)
+            return
         d.text((60, 420), "ScanSafe", font=_font(110, True), fill=WHITE)
         label = LABELS.get(self.state, "")
         d.text((64, 580), label, font=self._f["label"], fill=WHITE)
@@ -535,7 +544,7 @@ class StatusVideo:
             return (self.state, m.get("hours"), m.get("amount"), m.get("label"), id(self.shot), spin)
         if self.state == "card":
             return ("card", self.card)
-        return ("idle", self.state, int(now * 4) % 24)
+        return ("idle", self.state, int(now * 4) % 24, self.plain)
 
     def _draw(self) -> bytes:
         now = time.monotonic()
