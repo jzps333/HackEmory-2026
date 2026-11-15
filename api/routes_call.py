@@ -353,9 +353,13 @@ def _chert_headers(idempotency_key: Optional[str] = None) -> dict:
     return h
 
 
-def _take_rate_slot() -> float:
-    """Claim the call slot; returns the previous claim time so a call that never got placed can
-    give the slot back (a failed attempt must not block the retry for 30 s)."""
+class NotPlaced(HTTPException):
+    """A call-me failure where we KNOW no call was placed (before the Chert request, or Chert
+    answered 4xx): only these give the 30 s call slot back."""
+
+
+def _take_rate_slot() -> tuple[float, float]:
+    """Claim the call slot: (previous claim, this claim)."""
     global _last_call_at
     with _rate_lock:
         now = time.monotonic()
@@ -363,13 +367,15 @@ def _take_rate_slot() -> float:
         if _last_call_at and wait > 0:
             raise HTTPException(status_code=429, detail=f"one call at a time: try again in {int(wait) + 1} s")
         prev, _last_call_at = _last_call_at, now
-        return prev
+        return prev, now
 
 
-def _give_back_rate_slot(prev: float) -> None:
+def _give_back_rate_slot(prev: float, mine: float) -> None:
+    """Only while the slot is still ours (another request may have claimed it since)."""
     global _last_call_at
     with _rate_lock:
-        _last_call_at = prev
+        if _last_call_at == mine:
+            _last_call_at = prev
 
 
 URL_REFUSED = ("only web links (http/https) or a verified parking meter payment code can be "
@@ -479,7 +485,7 @@ async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict
                 break
             await asyncio.sleep(0.4)
         if not agent_identity:
-            raise HTTPException(status_code=504, detail="the ScanSafe agent didn't get ready in time")
+            raise NotPlaced(status_code=504, detail="the ScanSafe agent didn't get ready in time")
 
         bridge_identity = f"chert-bridge-out-{uuid.uuid4().hex[:10]}"
         body = {
@@ -498,9 +504,10 @@ async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict
         if not 200 <= r.status_code < 300:
             log.warning("chert create call failed: HTTP %s %s", r.status_code, r.text[:300])
             if r.status_code == 409 and "line_busy" in r.text:
-                raise HTTPException(status_code=409, detail="The line is still on another call. "
-                                                            "Try again in a few seconds.")
-            raise HTTPException(status_code=502, detail=f"Chert refused the call (HTTP {r.status_code}): {r.text[:200]}")
+                raise NotPlaced(status_code=409, detail="The line is still on another call. "
+                                                        "Try again in a few seconds.")
+            refused = NotPlaced if 400 <= r.status_code < 500 else HTTPException
+            raise refused(status_code=502, detail=f"Chert refused the call (HTTP {r.status_code}): {r.text[:200]}")
         data = r.json().get("data", r.json())
         call_id = data.get("id")
         if not call_id:
@@ -542,15 +549,15 @@ async def call_me(req: CallRequest, request: Request) -> dict:
         req = req.model_copy(update={"phone": signed_in})
     url, phone = await asyncio.to_thread(validate, req, bool(signed_in))
     extra = await asyncio.to_thread(meter_job, url, req.scan_id) if url.startswith("solana:") else None
-    prev = _take_rate_slot()
+    prev, mine = _take_rate_slot()
     verified = {"phone_verified": bool(signed_in)}   # the agent's ParkMobile session needs this
     try:
         if extra is None:
             return await place_call(url, phone, extra=verified)
         _remember_scan_owner(extra["scan_id"], phone)
         out = await place_call(url, phone, extra={**extra, **verified})
-    except HTTPException:
-        _give_back_rate_slot(prev)               # nothing was placed: the retry may go right away
+    except NotPlaced:
+        _give_back_rate_slot(prev, mine)         # nothing was placed: the retry may go right away
         raise
     return {**out, "scan_id": extra["scan_id"]}
 

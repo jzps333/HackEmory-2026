@@ -375,3 +375,17 @@ def test_busy_line_waits_in_line_and_never_blocks_the_retry(env, monkeypatch):
     seen["busy"] = False
     r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})   # no 30 s wait
     assert r.status_code == 200 and r.json()["call_id"] == "call-9"
+
+
+
+def test_slot_only_comes_back_when_nothing_was_placed(env, monkeypatch):
+    monkeypatch.setattr(lk, "LiveKitAPI", FakeLK)
+    monkeypatch.setattr(routes_call.asyncio, "sleep", lambda *_: _real_sleep(0))
+    routes_call._last_call_at = 0.0
+    _chert(monkeypatch, lambda req: httpx.Response(503, text="upstream timeout"))   # may have been placed
+    assert client.post("/call-me", json={"url": "https://example.com", "phone": PHONE}).status_code == 502
+    r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})
+    assert r.status_code == 429                                  # slot kept: no duplicate call
+    routes_call._last_call_at = 5.0                              # someone else claimed it since
+    routes_call._give_back_rate_slot(1.0, 4.0)
+    assert routes_call._last_call_at == 5.0                      # not ours: left alone
