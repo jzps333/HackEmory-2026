@@ -112,7 +112,8 @@ def test_places_call_in_order(fakes):
     assert kinds == ["create_room", "dispatch", "metadata"]     # dial happens between dispatch and metadata
     _, agent, room, md = FakeLK.calls[1]
     assert agent == "scansafe-agent" and room.startswith("scansafe-out-")
-    assert json.loads(md) == {"scansafe_outbound": True, "scan_url": "https://example.com", "phone": PHONE}
+    assert json.loads(md) == {"scansafe_outbound": True, "scan_url": "https://example.com", "phone": PHONE,
+                              "phone_verified": False}
     assert json.loads(FakeLK.calls[2][2]) == {"chert_call_id": "call-123"}
     req = fakes["req"]
     body = json.loads(req.content)
@@ -358,16 +359,19 @@ def test_busy_line_waits_in_line_and_never_blocks_the_retry(env, monkeypatch):
     monkeypatch.setattr(lk, "LiveKitAPI", FakeLK)
     monkeypatch.setattr(routes_call.asyncio, "sleep", lambda *_: _real_sleep(0))
     routes_call._last_call_at = 0.0
-    seen = {}
+    seen = {"busy": True}
 
-    def busy(req):
+    def chert(req):
         seen["body"] = json.loads(req.content)
-        return httpx.Response(409, json={"error": {"code": "line_busy", "message": "Your shared line is on another call."}})
-    _chert(monkeypatch, busy)
+        if seen["busy"]:
+            return httpx.Response(409, json={"error": {"code": "line_busy",
+                                                       "message": "Your shared line is on another call."}})
+        return httpx.Response(202, json={"data": {"id": "call-9", "status": "queued"}})
+    _chert(monkeypatch, chert)
     r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})
     assert seen["body"]["when_busy"] == "queue"
     assert r.status_code == 409 and "still on another call" in r.json()["detail"]
     assert FakeLK.calls[-1][0] == "delete_room"
-    _chert(monkeypatch, lambda req: httpx.Response(202, json={"data": {"id": "call-9", "status": "queued"}}))
+    seen["busy"] = False
     r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})   # no 30 s wait
     assert r.status_code == 200 and r.json()["call_id"] == "call-9"
