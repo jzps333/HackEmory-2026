@@ -959,8 +959,8 @@ class PluginAgent(ScanSafeAgent):
     async def write_step(self, context: RunContext, text: str) -> str:
         """Write the next step of the lesson on the caller's screen, numbered: one idea in one
         short line (under 140 characters). Write math in plain text with Unicode, like x², √x, ∫,
-        π, ≤, → or ((x+h)²−x²)/h. Call it BEFORE you explain that step out loud, one step at a
-        time, never several in a row."""
+        π, ≤, → or ((x+h)²−x²)/h. Call it FIRST, without saying anything before it; you explain
+        the step once, after it returns. One step at a time, never several in a row."""
         refused, p = self._board()
         if refused:
             return refused
@@ -970,8 +970,9 @@ class PluginAgent(ScanSafeAgent):
         n = self.call.video.board_step(line) if self.call is not None else None
         self._note_for_session(p, f"Step {n}: {line}" if n else line)
         step = f"Step {n}" if n else "The step"
-        return (f"{step} is being written on their screen now. Explain it out loud in one or two "
-                "short sentences, in plain words (don't read it out word for word). Then check in, "
+        return (f"{step} is being written on their screen now. Say it ONCE: one or two short "
+                "sentences in plain words (they can see the line, so don't read it out, and never "
+                "repeat something you already said this turn). Then check in, "
                 "in your own words each time: ask whether they're following or stuck on anything "
                 "(like \"Does that make sense, or is anything tripping you up?\"), and wait for "
                 "their answer. Don't write the next step until they say they're with you.")

@@ -66,9 +66,9 @@ STICKY, STICKY_FOLD, STICKY_SHADOW = (254, 240, 138), (234, 206, 84), (224, 218,
 NOTE_INK, NOTE_LABEL_INK = (150, 38, 26), (156, 86, 8)              # dark red, brown
 WHITE = (255, 255, 255)
 
-MARGIN_X = 92                 # the red margin line; step numbers sit left of it
-NUM_X = 46
-TEXT_X, TEXT_R = 120, W - 34  # step text column
+MARGIN_X = 82                 # the red margin line; step numbers sit left of it
+NUM_X = 41
+TEXT_X, TEXT_R = 108, W - 26  # step text column
 NOTE_X0, NOTE_X1 = TEXT_X - 6, W - 28
 NOTE_TEXT_X = NOTE_X0 + 18
 NOTE_TEXT_W = NOTE_X1 - 22 - NOTE_TEXT_X
@@ -77,9 +77,9 @@ BOTTOM = H - 96               # steps never go below this (the hint sits under i
 STEP_GAP, NOTE_GAP, MORE_H = 16, 10, 46
 EDGE = 22                     # soft edge of the ink being written, in px
 INK_PAD = 14                  # room around a line's ink for the wobble, descenders and overhangs
-GRAPH_H, GRAPH_H_DONE, GRAPH_MIN_H = 330, 220, 170   # a graph under the current / an earlier step
+GRAPH_H, GRAPH_H_DONE, GRAPH_MIN_H = 350, 230, 110
 
-TITLE_SIZE, TITLE_LINE = 74, 70
+TITLE_SIZE, TITLE_LINE = 82, 76
 BASELINE_K = 0.27             # a line's baseline sits this many sizes below its middle
 WOBBLE_PX = 1.7               # most a character leaves the baseline (at size ~46)
 WORD_SIZE_K = 0.03            # each word is up to this much bigger or smaller
@@ -97,10 +97,10 @@ class _Style:
     lines: int
 
 
-CUR = _Style(50, 54, 10, 12, 6)          # the step being explained
-DONE = _Style(42, 44, 4, 4, 3)           # steps above it (2 lines when the page is full)
-NOTE_CUR = _Style(42, 44, 12, 14, 5)
-NOTE_DONE = _Style(38, 40, 8, 10, 2)
+CUR = _Style(56, 60, 10, 12, 6)          # the step being explained
+DONE = _Style(46, 48, 4, 4, 3)           # steps above it (2 lines when the page is full)
+NOTE_CUR = _Style(46, 48, 12, 14, 5)
+NOTE_DONE = _Style(40, 42, 8, 10, 2)
 
 
 @lru_cache(maxsize=128)
