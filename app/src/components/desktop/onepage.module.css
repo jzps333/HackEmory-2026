@@ -1,0 +1,94 @@
+/* One long page: each band is full width and at least a screen tall, with a 3D background behind it. */
+.section { position: relative; min-height: 100vh; display: flex; align-items: center; overflow: hidden; border-top: 1px solid #111; }
+.bg, .fill { position: absolute; inset: 0; }
+.bg { z-index: 0; }
+/* Content lets the mouse through to the 3D scene, except where there is something to use or read. */
+.inner { position: relative; z-index: 1; width: 100%; max-width: 1200px; margin: 0 auto; padding: 7rem 2rem; pointer-events: none; }
+.inner :is(a, button, input, form, ul, ol, .panel, :global(.notice)) { pointer-events: auto; }
+.interactive .inner { pointer-events: auto; }
+
+.hero .inner { padding-top: 5rem; }
+.eyebrow {
+  display: inline-block; margin: 0 0 1.25rem; padding: 0.35rem 0.85rem;
+  border: 1px solid #154a24; border-radius: 999px; background: rgb(0 0 0 / 60%);
+  color: #abff84; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.04em;
+}
+.title { font-size: clamp(3rem, 6vw, 5.2rem); line-height: 1.02; letter-spacing: -0.035em; margin: 0 0 1.25rem; color: #fff; max-width: 900px; }
+.sub { font-size: 1.3rem; color: #d0d0d0; max-width: 600px; margin-bottom: 2rem; }
+
+.form { display: flex; gap: 0.75rem; align-items: stretch; max-width: 720px; }
+.input {
+  flex: 1; min-width: 0; margin: 0; padding: 1.05rem 1.25rem; font: inherit; font-size: 1.05rem;
+  color: #fff; background: rgb(0 0 0 / 75%); border: 1px solid #3a3a3a; border-radius: 12px;
+}
+.input::placeholder { color: #8c8c8c; }
+.input:focus { border-color: #0ae448; outline: none; box-shadow: 0 0 0 3px rgb(10 228 68 / 30%); }
+.checkBtn { font-weight: 700; font-size: 1.05rem; white-space: nowrap; cursor: pointer; }
+.checkBtn:disabled { cursor: not-allowed; opacity: 0.6; }
+
+.panel { max-width: 900px; padding: 3rem; border: 1px solid #1f1f1f; border-radius: 28px; background: rgb(0 0 0 / 60%); backdrop-filter: blur(6px); }
+.kicker { margin: 0 0 0.5rem; color: #0ae448; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; font-size: 0.85rem; }
+.h2 { display: flex; align-items: center; gap: 0.6rem; font-size: clamp(2.2rem, 4vw, 3.4rem) !important; line-height: 1.05 !important; letter-spacing: -0.025em; margin: 0 0 1.25rem !important; color: #fff; }
+.h3 { font-size: 1.25rem; margin: 0.9rem 0 0.5rem; }
+.lead { color: #c8c8c8; font-size: 1.2rem; max-width: 720px; }
+.reveal { font-size: clamp(1.4rem, 2.3vw, 1.9rem); line-height: 1.4; font-weight: 600; color: #fff; }
+
+.chips { list-style: none; padding: 0; margin: 1.75rem 0 0; display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.chip { padding: 0.5rem 1rem; border: 1px solid #2c2c2c; border-radius: 999px; color: #e6e6e6; background: rgb(0 0 0 / 60%); }
+
+.steps { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+.step { border: 1px solid #1f1f1f; border-radius: 20px; padding: 1.75rem; background: rgb(0 0 0 / 70%); backdrop-filter: blur(6px); }
+.step p { color: #c0c0c0; margin: 0; }
+.stepNum { display: inline-grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #0ae448; color: #000; font-weight: 800; }
+
+/* Map: MapClient's own title and intro are replaced by the section heading; its pin list stays for screen readers only. */
+.mapArea { margin-top: 1.5rem; }
+.mapArea > h1, .mapArea > h1 + p { display: none; }
+.mapArea :global(.map-wrap) { position: relative; height: 68vh; min-height: 460px; border: 1px solid #2c2c2c; border-radius: 20px; overflow: hidden; }
+.mapArea :global(.map-wrap) > * { height: 100%; }
+.mapArea > h2:last-of-type, .mapArea > h2:last-of-type + p, .mapArea :global(.pin-list) {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+.mapLocked :global(.map-wrap) > * { pointer-events: none; }
+.mapLocked :global(.map-wrap)::after {
+  content: "Click to explore the map"; position: absolute; left: 50%; bottom: 1.25rem; transform: translateX(-50%); z-index: 1000;
+  padding: 0.55rem 1.1rem; border-radius: 999px; background: rgb(0 0 0 / 85%); border: 1px solid #154a24;
+  color: #abff84; font-weight: 700; pointer-events: none;
+}
+.mapLocked :global(.map-wrap) { cursor: pointer; }
+
+.dashboard { margin-top: 1.5rem; }
+.dashboard > h1, .dashboard > h1 + p, .dashboard > section[aria-labelledby="tiles-h"] { display: none; }
+.dashboard :global(.card) { background: rgb(0 0 0 / 75%); backdrop-filter: blur(6px); }
+/* The scan search can list hundreds of checks: it scrolls inside its card instead of stretching the page. */
+.dashboard :global(.scan-hits) { max-height: 55vh; overflow: auto; overscroll-behavior: contain; }
+
+.features { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.feature { height: 100%; border: 1px solid #1f1f1f; }
+.feature p { color: #c0c0c0; margin: 0 0 0.75rem; }
+.featureIcon { display: inline-grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: #07170c; color: #0ae448; border: 1px solid #154a24; }
+.by { color: #abff84 !important; font-size: 0.9rem; font-weight: 700; margin: 0 !important; }
+
+.checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.75rem; font-size: 1.2rem; }
+.checks li { padding: 1rem 1.25rem; border: 1px solid #1f1f1f; border-left: 4px solid #0ae448; border-radius: 12px; background: rgb(0 0 0 / 70%); }
+
+.closing .inner { text-align: center; }
+.closingTitle { font-size: clamp(2.8rem, 6vw, 5rem) !important; line-height: 1.02 !important; letter-spacing: -0.035em; margin: 0 0 1rem !important; color: #fff; }
+.closing .lead { margin: 0 auto; }
+.ctaRow { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 2rem; }
+.cta { font-weight: 700; font-size: 1.1rem; text-decoration: none; }
+.ctaGhost { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.5rem; border: 1px solid #3a3a3a; border-radius: 12px; color: #fff; text-decoration: none; font-weight: 700; background: rgb(0 0 0 / 60%); }
+.ctaGhost:hover { border-color: #0ae448; color: #abff84; }
+
+.flow { max-width: 760px; margin: 0 auto 4rem; padding: 6rem 2rem 0; }
+
+.footer { max-width: 1200px; margin: 0 auto; padding: 3rem 2rem 4rem; color: #9a9a9a; border-top: 1px solid #1a1a1a; }
+.footer a { color: #0ae448; }
+.note { font-size: 0.9rem; }
+
+@media (max-width: 1000px) {
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .features { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form { flex-direction: column; }
+  .panel { padding: 2rem; }
+}

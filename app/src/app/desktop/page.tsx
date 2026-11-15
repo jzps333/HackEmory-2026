@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import DeskHome from "@/components/desktop/DeskHome";
+import DeskOnePage from "@/components/desktop/DeskOnePage";
 
 export const metadata: Metadata = { title: "ScanSafe" };
 
-export default function DesktopHomePage() {
-  return <DeskHome />;
+export default function DesktopPage() {
+  return <DeskOnePage />;
 }

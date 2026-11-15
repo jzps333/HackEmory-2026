@@ -1,8 +1,5 @@
-declare module "vanta/dist/vanta.net.min" {
-  interface VantaEffect {
-    destroy: () => void;
-    resize?: () => void;
-  }
-  const NET: (options: Record<string, unknown>) => VantaEffect;
-  export default NET;
+// Vanta's UMD builds (vanta/dist/vanta.<effect>.min.js) export one effect function each.
+declare module "vanta/dist/*" {
+  const effect: (options: Record<string, unknown>) => { destroy: () => void };
+  export default effect;
 }

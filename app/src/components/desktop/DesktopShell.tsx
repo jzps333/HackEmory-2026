@@ -1,40 +1,48 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ReactLenis, useLenis, type LenisRef } from "lenis/react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import "lenis/dist/lenis.css";
 import PillNav from "@/components/reactbits/PillNav/PillNav";
 import { Icon } from "@/components/onboarding/Icon";
-import { publicPath } from "@/lib/view";
+import { sectionFor } from "@/lib/view";
 import { usePrefersReducedMotion } from "./motion";
 
 gsap.registerPlugin(ScrollTrigger);
 
 const ITEMS = [
-  { label: "Home", href: "/" },
-  { label: "Map", href: "/map" },
-  { label: "Stats", href: "/dashboard" },
-  { label: "About", href: "/about" },
+  { label: "Home", href: "#top" },
+  { label: "Map", href: "#map" },
+  { label: "Stats", href: "#stats" },
+  { label: "About", href: "#about" },
 ];
 
-/** Keeps GSAP ScrollTrigger in step with Lenis and starts each page at the top. */
-function ScrollSync({ path }: { path: string }) {
-  const lenis = useLenis(() => ScrollTrigger.update());
-  useEffect(() => {
-    lenis?.scrollTo(0, { immediate: true });
-    ScrollTrigger.refresh();
-  }, [path, lenis]);
+/** Keeps GSAP ScrollTrigger in step with Lenis. */
+function ScrollSync() {
+  useLenis(() => ScrollTrigger.update());
   return null;
 }
 
+/** The nav item for the section crossing the middle of the screen. */
+function useActiveSection(): string {
+  const [active, setActive] = useState("#top");
+  useEffect(() => {
+    const els = ITEMS.map((i) => document.getElementById(i.href.slice(1))).filter((el): el is HTMLElement => !!el);
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) setActive(`#${e.target.id}`);
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+  return active;
+}
+
 export default function DesktopShell({ children }: { children: ReactNode }) {
-  const path = publicPath(usePathname());
   const reduced = usePrefersReducedMotion();
   const lenisRef = useRef<LenisRef>(null);
+  const active = useActiveSection();
 
   // Lenis runs on GSAP's ticker (the setup from the Lenis README) so scroll animations stay in sync.
   useEffect(() => {
@@ -45,21 +53,32 @@ export default function DesktopShell({ children }: { children: ReactNode }) {
     return () => gsap.ticker.remove(update);
   }, [reduced]);
 
+  // /map, /dashboard and /about open the one page at their section.
+  useEffect(() => {
+    const target = sectionFor(window.location.pathname);
+    if (target === "top") return;
+    const t = window.setTimeout(() => {
+      const lenis = lenisRef.current?.lenis;
+      if (lenis) lenis.scrollTo(`#${target}`);
+      else document.getElementById(target)?.scrollIntoView();
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, []);
+
   return (
     <>
       {!reduced && (
-        <ReactLenis root options={{ autoRaf: false }} ref={lenisRef}>
-          <ScrollSync path={path} />
+        <ReactLenis root options={{ autoRaf: false, anchors: true, prevent: (node) => !!node.closest(".scan-hits") }} ref={lenisRef}>
+          <ScrollSync />
         </ReactLenis>
       )}
       <header className="desk-header">
         <PillNav
           logo={<Icon name="shield" size={22} />}
-          logoAlt="ScanSafe home"
-          logoHref="/"
+          logoAlt="ScanSafe, back to top"
+          logoHref="#top"
           items={ITEMS}
-          activeHref={path}
-          linkComponent={Link}
+          activeHref={active}
           theme="dark"
           highlightColor="#0ae448"
           highlightTextColor="#000000"

@@ -55,13 +55,16 @@ main:has(> .desk) { max-width: none; padding: 0; }
 .desk .btn-safe:hover { background: #abff84; border-color: #abff84; }
 
 .desk-header {
-  position: sticky; top: 0; z-index: 1000;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
   display: flex; justify-content: center;
   padding: 1rem 2rem;
-  background: linear-gradient(#000 60%, rgb(0 0 0 / 0%));
+  pointer-events: none;
 }
+.desk-header > * { pointer-events: auto; }
 
-.desk-body { max-width: 1200px; margin: 0 auto; padding: 0 2rem 6rem; }
+/* Sections are full width; each one centers its own content. */
+.desk-body { padding: 0; }
+.desk [id] { scroll-margin-top: 0; }
 
 .desk-page-title { margin-top: 2rem; }
 

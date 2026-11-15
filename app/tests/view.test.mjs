@@ -1,7 +1,7 @@
 // Run: cd app && node --test tests/   (Node 22.18+ strips the TypeScript types in view.ts)
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pickView, publicPath, DESKTOP_PATHS } from "../src/lib/view.ts";
+import { pickView, sectionFor, DESKTOP_PATHS } from "../src/lib/view.ts";
 
 const UA = {
   iphone: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
@@ -45,14 +45,15 @@ test("junk query or cookie values are ignored", () => {
   assert.equal(v(UA.mac, "", "x"), "desktop");
 });
 
-test("public paths map to desktop paths", () => {
-  assert.deepEqual(DESKTOP_PATHS, { "/": "/desktop", "/map": "/desktop/map", "/dashboard": "/desktop/stats", "/about": "/desktop/about" });
+test("every public path opens the one desktop page", () => {
+  assert.deepEqual(DESKTOP_PATHS, { "/": "/desktop", "/map": "/desktop", "/dashboard": "/desktop", "/about": "/desktop" });
 });
 
-test("publicPath turns desktop paths back into public ones", () => {
-  assert.equal(publicPath("/desktop"), "/");
-  assert.equal(publicPath("/desktop/map"), "/map");
-  assert.equal(publicPath("/desktop/stats"), "/dashboard");
-  assert.equal(publicPath("/desktop/about"), "/about");
-  assert.equal(publicPath("/map"), "/map");
+test("sectionFor picks the section a public path should scroll to", () => {
+  assert.equal(sectionFor("/"), "top");
+  assert.equal(sectionFor("/map"), "map");
+  assert.equal(sectionFor("/dashboard"), "stats");
+  assert.equal(sectionFor("/about"), "about");
+  assert.equal(sectionFor("/desktop"), "top");
+  assert.equal(sectionFor("/nope"), "top");
 });
