@@ -80,6 +80,14 @@ def _conn():
     return conn
 
 
+def _cols(row, *names) -> tuple:
+    """A row as a tuple in ``names`` order. Tiger's connection returns dicts (row_factory=dict_row);
+    unpacking a dict gives its KEYS, which made every read fail and fall back to memory."""
+    if isinstance(row, dict):
+        return tuple(row[n] for n in names)
+    return tuple(row)
+
+
 def _check(key: str, data: dict) -> str:
     if not isinstance(key, str) or not KEY_RE.fullmatch(key):
         raise MemoryError_("key must be 1-80 characters of letters, digits and : _ . -")
@@ -120,12 +128,15 @@ def list_records(plugin_id: str, owner: str, prefix: str = "", limit: int = 50) 
         try:
             with _conn() as conn:
                 rows = conn.execute(
-                    "SELECT key, data, extract(epoch from updated_at) FROM plugin_records "
+                    "SELECT key, data, extract(epoch from updated_at) AS t FROM plugin_records "
                     "WHERE plugin_id = %s AND owner = %s AND key LIKE %s "
                     "ORDER BY updated_at DESC LIMIT %s",
                     (plugin_id, owner, prefix.replace("%", "").replace("_", r"\_") + "%", limit)).fetchall()
-            return [{"key": k, "data": d if isinstance(d, dict) else json.loads(d), "updated_at": int(t)}
-                    for k, d, t in rows]
+            out = []
+            for r in rows:
+                k, d, t = _cols(r, "key", "data", "t")
+                out.append({"key": k, "data": d if isinstance(d, dict) else json.loads(d), "updated_at": int(t)})
+            return out
         except Exception as e:  # noqa: BLE001
             _tiger_failed("read", e)
     with _lock:
@@ -140,9 +151,10 @@ def apps_for(owner: str) -> list[dict]:
         try:
             with _conn() as conn:
                 rows = conn.execute(
-                    "SELECT plugin_id, count(*), extract(epoch from max(updated_at)) FROM plugin_records "
+                    "SELECT plugin_id, count(*) AS n, extract(epoch from max(updated_at)) AS t FROM plugin_records "
                     "WHERE owner = %s GROUP BY plugin_id ORDER BY max(updated_at) DESC", (owner,)).fetchall()
-            return [{"plugin_id": p, "records": int(n), "updated_at": int(t)} for p, n, t in rows]
+            return [{"plugin_id": p, "records": int(n), "updated_at": int(t)}
+                    for p, n, t in (_cols(r, "plugin_id", "n", "t") for r in rows)]
         except Exception as e:  # noqa: BLE001
             _tiger_failed("read", e)
     with _lock:

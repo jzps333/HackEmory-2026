@@ -95,3 +95,31 @@ def test_my_apps_needs_sign_in_and_shows_only_my_data(client, monkeypatch):
     assert one["flashcards"] is None
     deck = client.get("/me/apps/study-buddy").json()
     assert deck["flashcards"]["total"] == 1 and deck["records"] == []
+
+
+def test_tiger_reads_work_with_dict_rows(monkeypatch):
+    """Tiger's connection hands rows back as dicts (row_factory=dict_row): reads must use column
+    names, or every read fails and the app data silently falls back to this process's memory."""
+    from data import plugin_memory as m
+    m.reset()
+    rows = {
+        "records": [{"key": "session:1", "data": {"topic": "derivatives"}, "t": 1763190000.5}],
+        "apps": [{"plugin_id": "tutor", "n": 3, "t": 1763190000.9}],
+    }
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, sql, params=None):
+            kind = "apps" if "GROUP BY" in sql else "records"
+            return type("R", (), {"fetchall": lambda _self: rows[kind]})()
+    monkeypatch.setattr(m.tiger_store, "is_configured", lambda: True)
+    monkeypatch.setattr(m, "_conn", lambda: Conn())
+    assert m.list_records("tutor", "owner1") == [{"key": "session:1", "data": {"topic": "derivatives"},
+                                                  "updated_at": 1763190000}]
+    assert m.apps_for("owner1") == [{"plugin_id": "tutor", "records": 3, "updated_at": 1763190000}]
+    assert m._tiger_down_until == 0.0                      # no failure, no fallback
