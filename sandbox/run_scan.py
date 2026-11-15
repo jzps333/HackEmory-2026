@@ -1359,6 +1359,19 @@ def _pm_pick_state(page, refused: list) -> bool:
     """Add vehicle screen (real, signed in, 2026-11-14): Country / License plate / State/province /
     Nickname, then "Add vehicle" (disabled until the state is set). Sets State/province only."""
     code, name = PM_PLATE_STATE
+    # Real markup (probed 2026-11-14): button [data-testid=vehicle-form-state-select] opens an
+    # action sheet whose options are [data-testid=vehicle-form-state-select-option-<CODE>].
+    trigger = page.locator('[data-testid="vehicle-form-state-select"]').filter(visible=True)
+    if trigger.count():
+        pm_click(trigger.first, refused)
+        opt = page.locator(f'[data-testid="vehicle-form-state-select-option-{code}"]')
+        try:
+            opt.first.wait_for(state="visible", timeout=5000)
+        except Exception:   # noqa: BLE001 - sheet didn't open: fall through to the generic ways
+            page.keyboard.press("Escape")
+        else:
+            pm_click(opt.first, refused)
+            return True
     # A native <select> (often styled, label drawn on top): the one listing the US states.
     for sel in page.locator("select").all()[:6]:
         try:
