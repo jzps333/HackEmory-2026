@@ -1,7 +1,7 @@
 id: vercel
 name: "Vercel"
 summary: "Ask \"how's my site?\" on FaceTime: hear your latest Vercel deploys (did it work, when, which commit), and redeploy one when you say \"yes, redeploy\"."
-author: scansafe-team
+author: toolstone
 version: 1
 kind: live
 runs_on: server

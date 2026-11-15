@@ -1,6 +1,6 @@
 {
   "form-filler": {
-    "sha256": "92e2e42eabbce5727367a6486dbee64d6f979d5819d7e1efb6a4b9257cb3d797",
+    "sha256": "4128d7439d0f717321fb2b20567b0cad025be7b08941b761ebed73d3574aa78a",
     "by": "jzps333"
   },
   "parking": {
@@ -36,7 +36,7 @@
     "by": "jzps333"
   },
   "vercel": {
-    "sha256": "1d5c16a607a24c429c81408bf8653486093d02ff500fb64334cf6a70a6b597d0",
+    "sha256": "3860a1256a2898e2cc24f7ae2e89fc4bc243cc2502bba09880e1b61f4e050dc5",
     "by": "jzps333"
   }
 }

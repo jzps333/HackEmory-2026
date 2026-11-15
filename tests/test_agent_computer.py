@@ -136,7 +136,7 @@ def test_computer_tool_is_verified_only_and_both_plugins_ship_on():
     plugins = starter()
     for pid, name in (("form-filler", "Form filler"), ("vercel", "Vercel")):
         p = by_id(plugins, pid)
-        assert p["name"] == name and p["verified"] is True and p["author"] == "scansafe-team"
+        assert p["name"] == name and p["verified"] is True and p["author"] == "toolstone"
         assert p["effective_tools"] == ["speak", "screen", "computer"]
         assert not community.is_builtin(p)
         assert "fill_form" in community.functions_for(community.clean_list([p])[0])
