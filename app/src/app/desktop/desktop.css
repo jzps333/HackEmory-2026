@@ -38,6 +38,8 @@
   --brand: var(--purple);
   --card: var(--surface);
 
+  --font: var(--font-body), system-ui, sans-serif;
+  font-family: var(--font);
   min-height: 100vh;
   background: var(--page);
   color: var(--ink);
@@ -83,3 +85,18 @@ main:has(> .desk) { max-width: none; padding: 0; }
 .desk .leaflet-popup-content-wrapper, .desk .leaflet-popup-tip { background: #0b0b0b; color: #fff; border: 1px solid #2c2c2c; }
 .desk .leaflet-control-attribution { background: rgb(0 0 0 / 70%) !important; color: #8c8c8c; }
 .desk .leaflet-control-attribution a { color: #abff84; }
+
+/* Type: Hubot Sans Expanded for headlines, Mona Sans for text, Departure Mono for labels and numbers. */
+.desk :is(h1, h2, h3, [role="heading"], .scroll-float-text, .glitch, .split-parent) {
+  font-family: var(--font-display), var(--font-body), sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.desk :is(input, button, textarea, select) { font-family: inherit; }
+.desk :is(.pill-nav, .counter, .text-type, .logoloop, .tile .lbl, .chart-axis, .legend, .demo-badge, .hint, label),
+.desk [class*="kicker"], .desk [class*="eyebrow"], .desk [class*="chip"], .desk [class*="stepNum"], .desk [class*="__by"],
+.desk [class*="typing"], .desk [class*="label"], .desk [class*="num"], .desk footer {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  letter-spacing: 0.02em;
+}
+.desk svg text { font-family: var(--font-mono), ui-monospace, monospace; }
