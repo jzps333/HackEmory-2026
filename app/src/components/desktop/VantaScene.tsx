@@ -24,7 +24,7 @@ function unwrap(mod: unknown): Create {
 }
 
 /**
- * A Vanta.js effect filling its positioned parent. Runs only while on (or near) the screen and is destroyed when
+ * A Vanta.js effect filling its positioned parent. Runs only while on the screen and is destroyed when
  * scrolled away, so several scenes on one page don't all hold a WebGL context. Nothing under reduced motion.
  */
 export default function VantaScene({ effect, options, className }: { effect: VantaEffectName; options: Record<string, unknown>; className?: string }) {
@@ -71,7 +71,7 @@ export default function VantaScene({ effect, options, className }: { effect: Van
       visible = entry.isIntersecting;
       if (visible) void start();
       else stop();
-    }, { rootMargin: "200px 0px" });
+    }, { rootMargin: "0px" });
     io.observe(el);
     return () => {
       alive = false;
