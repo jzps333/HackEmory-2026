@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { usePrefersReducedMotion } from "./motion";
+import { releaseVanta } from "./vantaRelease";
 
 export type VantaEffectName = "net" | "waves" | "dots" | "globe" | "rings" | "birds";
 
@@ -59,11 +60,7 @@ export default function VantaScene({ effect, options, className }: { effect: Van
       }
     };
     const stop = () => {
-      try {
-        instance?.destroy();
-      } catch {
-        // An effect whose init failed has no canvas to remove.
-      }
+      releaseVanta(instance);
       instance = null;
     };
 

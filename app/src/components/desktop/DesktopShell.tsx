@@ -53,6 +53,25 @@ export default function DesktopShell({ children }: { children: ReactNode }) {
     return () => gsap.ticker.remove(update);
   }, [reduced]);
 
+  // ScrollTrigger measures section positions once; the map, stats and scan list load later and push the lower
+  // sections down (and a check hides the whole page). Re-measure whenever the page's height changes, or the
+  // open/close scenes would run at the wrong scroll positions.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let t = 0;
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => ScrollTrigger.refresh(), 150);
+    });
+    ro.observe(body);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
+  }, []);
+
   // /map, /dashboard and /about open the one page at their section.
   useEffect(() => {
     const target = sectionFor(window.location.pathname);
@@ -85,7 +104,7 @@ export default function DesktopShell({ children }: { children: ReactNode }) {
           ariaLabel="Main"
         />
       </header>
-      <div className="desk-body">{children}</div>
+      <div className="desk-body" ref={bodyRef}>{children}</div>
     </>
   );
 }
