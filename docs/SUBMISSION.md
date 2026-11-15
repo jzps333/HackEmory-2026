@@ -52,19 +52,20 @@ Selected Portion". Audio doesn't matter (it gets muted).
 | 12 | Mac | Google AI Studio / Cloud billing | Gemini usage or the budget cap (optional, Google Cloud track) | ~6 s |
 | 13 | Voice memo | after the clips | read the voice-over below, calmly | ~70 s |
 
-### Edit (0:00-2:00)
+### Edit (0:00-2:00), following the voice-over
 
 | Time | On screen | Voice-over |
 |---|---|---|
-| 0:00-0:06 | Title over clip 6 | "Chert gives AI agents a FaceTime line. Toolstone gives them skills." |
-| 0:06-0:50 | Clips 1, 2, 3, 4a-c as four phones across, sped up, caption strip under each | "Out of the box, Chert just talks. With the Tutor skill, it writes handwritten notes on my screen and checks in after every step. Out of the box, it can't research. With the Research skill, it hangs up, reads published studies on its own, texts me a cited report and calls me back." |
-| 0:50-1:15 | Clip 5 (QR, live locked-down browser, warning) | "And for security: hold up a QR code, and ScanSafe opens it in a throwaway browser on a Vultr VM, so the scam never touches your phone." |
-| 1:15-1:30 | Clips 6, 7 | "Anyone can publish a skill. Typesense powers the search, and a skill is only verified by its fingerprint: edit it and it's unverified, and unverified skills can't touch money, research or your computer." |
-| 1:30-1:52 | Grid of clips 8-12, 3-4 s each | "Under the hood: Tiger Data holds skill memory and research, Gemini on Google Cloud runs the agent with spend caps, Vultr runs it all, Coder is where you write a skill, and the Parking skill pays on Solana devnet only after you say yes, pay." |
-| 1:52-2:00 | End card | "Toolstone. Skills for Chert." |
+| 0:00-0:10 | Title over clip 6 (Community plugins page) | "Chert gives AI agents a FaceTime line. Toolstone is an open-source skill library for it: anyone can build a skill, and every Chert agent can use it." |
+| 0:10-0:40 | Clips 1, 2, 3, 4a-c as four phones across, sped up, caption strip under each | "Here's the difference. Out of the box, Chert just talks. With community skills, it tutors with handwritten notes, and it researches published studies on its own and calls you back." |
+| 0:40-1:00 | Clip 7 (GitHub `plugins/`), then clip 6 (search "tutor", Verified badges) | "A skill is just a short recipe in a public GitHub repo: plain instructions and a list of allowed tools. Send a pull request, and it shows up on the Community plugins page, searchable with Typesense." |
+| 1:00-1:12 | Clip 7 (`verified.json`), clip 6 (Needs verification badge) | "Because skills come from strangers, they're verified by fingerprint. Edit one and it's unverified again, and unverified skills can't touch money, research, or your computer." |
+| 1:12-1:32 | Clip 5 (QR, live locked-down browser, warning) | "Our security skill shows why that matters: hold up a QR code, and ScanSafe opens it in a throwaway browser on a Vultr VM, so the scam never touches your phone." |
+| 1:32-1:52 | Grid of clips 8-12, 3-4 s each | "Under the hood: Tiger Data stores each skill's memory and research, Gemini on Google Cloud runs the agent with spend caps, Coder gives you a ready workspace to write a skill, and the Parking skill pays on Solana devnet only after you say yes, pay." |
+| 1:52-2:00 | End card | "Toolstone. Skills for Chert, built by everyone." |
 
-YouTube chapters: 0:00 Intro · 0:06 Tutor and Research, with vs without · 0:50 ScanSafe · 1:15 Verified
-skills · 1:30 Under the hood.
+YouTube chapters: 0:00 Intro · 0:10 With vs without skills · 0:40 Anyone can build a skill · 1:12
+ScanSafe · 1:32 Under the hood.
 
 ## 3b. Live pitch to Chert (they've already seen the project)
 
