@@ -973,6 +973,11 @@ async def entrypoint(ctx: JobContext) -> None:
         # Chert is about to FaceTime the person (/call-me waits for our audio+video first).
         # Our own room has no chert_bridge_ready signal, so poll the call instead.
         call.caller_phone = out.get("phone") or call.caller_phone
+        # The person may hold up the very code this call is about (it's often on another screen):
+        # skip it from the start, before FaceTime connects, so no second scan races this call.
+        for code in (out.get("scan_url"), (pm_job or {}).get("scan_url"), (meter or {}).get("scan_url")):
+            if code:
+                call.ignore_codes.add(code)
         log.info("outbound call: audio published early: %s", await prepublish_audio(session))
         log.info("outbound call: waiting for the person to answer")
         if not await wait_for_outbound_answer(ctx.room):
