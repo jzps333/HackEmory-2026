@@ -185,33 +185,65 @@ def send_followup(recipient: str, result: Mapping[str, Any], *,
     API (POST console.trychert.com/api/v1/attachments -> PUT bytes -> chats/{id}/messages with a
     {"type": "media", "attachment_id": ...} part), which uses a different signing secret.
     """
+    # Same scan + same person -> same key, so a retry can't double-text them.
+    return _send(recipient, lambda: followup_text(result),
+                 lambda phone: f"scansafe-{result.get('scan_id') or uuid.uuid4().hex}-{phone.lstrip('+')}",
+                 client=client, timeout=20)
+
+
+def _send(recipient: str, text, key, *, client: Optional[httpx.Client], timeout: float,
+          quiet: bool = False) -> dict:
+    """POST one text to Chert's shared-messages endpoint. ``text()`` builds the body, ``key(phone)``
+    the idempotency key. ``quiet``: log only the status (never the reply, which may echo the
+    phone or the body). Never raises."""
     if not os.getenv("CHERT_API_KEY") or not os.getenv("CHERT_PROJECT_ID"):
         return {"ok": False, "status": None, "error": "CHERT_API_KEY / CHERT_PROJECT_ID not set"}
-    if not recipient or not PHONE_RE.match(recipient.strip()):
+    if not isinstance(recipient, str) or not PHONE_RE.match(recipient.strip()):
         return {"ok": False, "status": None, "error": "recipient must be an E.164 phone number"}
-    c = client or httpx.Client(timeout=20)
+    c = client or httpx.Client(timeout=timeout)
     try:
         line_id = get_line_id(c)
         if not line_id:
             return {"ok": False, "status": None, "error": "no Chert line id"}
-        # Same scan + same person -> same key, so a retry can't double-text them.
-        key = f"scansafe-{result.get('scan_id') or uuid.uuid4().hex}-{recipient.strip().lstrip('+')}"[:200]
-        body = {"line_id": line_id, "recipient": recipient.strip(), "text": followup_text(result)}
-        r = c.post(f"{CHERT_API_BASE}/shared-messages", headers=_headers(key), json=body)
+        phone = recipient.strip()
+        body = {"line_id": line_id, "recipient": phone, "text": text()}
+        r = c.post(f"{CHERT_API_BASE}/shared-messages", headers=_headers(key(phone)[:200]), json=body)
         try:
             payload: Any = r.json()
         except ValueError:
             payload = r.text[:500]
         ok = 200 <= r.status_code < 300
         if not ok:
-            log.warning("chert: send failed %s %s", r.status_code, payload)
+            if quiet:
+                log.warning("chert: text failed %s", r.status_code)
+            else:
+                log.warning("chert: send failed %s %s", r.status_code, payload)
         return {"ok": ok, "status": r.status_code, "response": payload}
     except httpx.HTTPError as e:
-        log.warning("chert: send error: %s", e)
+        if quiet:
+            log.warning("chert: text error: %s", type(e).__name__)
+        else:
+            log.warning("chert: send error: %s", e)
         return {"ok": False, "status": None, "error": str(e)[:300]}
     finally:
         if client is None:
             c.close()
+
+
+def send_text(recipient: str, body: str, *, client: Optional[httpx.Client] = None,
+              timeout: float = 10.0) -> bool:
+    """Text plain ``body`` to ``recipient`` (E.164) through Chert, the same way as send_followup.
+    True when Chert accepted it. Never raises, and never logs the phone or the body."""
+    try:
+        text = _clean(body, MAX_TEXT)
+        if not text:
+            return False
+        out = _send(recipient, lambda: text, lambda _phone: f"scansafe-text-{uuid.uuid4().hex}",
+                    client=client, timeout=timeout, quiet=True)
+        return out.get("ok") is True
+    except Exception as e:   # noqa: BLE001 - a text must never break a call
+        log.warning("chert: text error: %s", type(e).__name__)
+        return False
 
 
 # --- Webhook -----------------------------------------------------------------------------------

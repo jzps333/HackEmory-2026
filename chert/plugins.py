@@ -16,9 +16,11 @@ No LiveKit imports here (unit-testable).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
+from collections import Counter
 from typing import Any, Optional
 
 import httpx
@@ -28,14 +30,16 @@ from chert.scansafe_tools import api_url
 log = logging.getLogger("scansafe.plugins")
 
 # The same allowlist as api/plugins_index.py (not imported: the agent box needn't have PyYAML).
-TOOLS = frozenset({"camera", "speak", "screen", "memory", "safe_browser", "scam_check",
-                   "plugin_search", "solana_pay", "parking"})
+TOOLS = frozenset({"camera", "speak", "screen", "memory", "flashcards", "safe_browser",
+                   "scam_check", "plugin_search", "solana_pay", "parking"})
 MONEY_TOOLS = frozenset({"solana_pay", "parking"})
 # With plugins loaded but none on, the agent is plain ScanSafe: QR checks and the page picture.
 BASE_TOOLS = frozenset({"camera", "speak", "screen", "scam_check", "safe_browser"})
 # Which of our agent functions each tool unlocks (named for the model while a plugin is on).
 FUNCTIONS = {"scam_check": ("check_qr_code",), "screen": ("show_website", "coach_cue"),
-             "plugin_search": ("find_plugin",)}
+             "plugin_search": ("find_plugin",),
+             "memory": ("remember", "recall", "finish_session"),
+             "flashcards": ("add_card", "next_card", "grade_card")}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,39}$")
 LIMITS = {"name": 60, "summary": 200, "permissions": 300, "instructions": 2000}
 MAX_PHRASES, PHRASE_CHARS, MAX_PLUGINS = 8, 60, 20
@@ -133,6 +137,243 @@ async def search_plugins(query: str, timeout: float = 3.0, *,
     """The public plugin library, best match first (GET /plugins/search?q=). [] on any error."""
     q = clean(query, 100)
     return await _get_plugins("/plugins/search", {"q": q}, timeout, transport) if q else []
+
+
+# --- Plugin memory + flashcards (POST /plugins/{id}/memory/*, /plugins/{id}/flashcards/*) --------
+# The server hashes the phone. Nothing here logs the phone, a note or a card: only the path kind
+# and the HTTP status. Every helper returns None / [] on any error and never raises.
+
+MEMORY_TIMEOUT_S = 3.0
+MAX_KEY, MAX_DATA_BYTES = 80, 4096
+MY_APPS_DEFAULT = "https://chert-community-plugins.vercel.app/apps"
+SESSION_SUMMARY_CHARS = 400
+
+
+def my_apps_url() -> str:
+    """Where the caller sees their plugin history (texted after a coaching session)."""
+    return (os.getenv("SCANSAFE_MY_APPS_URL") or "").strip() or MY_APPS_DEFAULT
+
+
+def _phone_ok(phone: Any) -> bool:
+    return isinstance(phone, str) and 0 < len(phone.strip()) <= 40
+
+
+def data_size(data: Any) -> int:
+    """Bytes the API counts for ``data`` (default json.dumps is the longest usual encoding)."""
+    return len(json.dumps(data).encode())
+
+
+async def _post(plugin_id: str, path: str, body: dict, timeout: float,
+                transport: Optional[httpx.AsyncBaseTransport]) -> Optional[dict]:
+    """POST {api}/plugins/{plugin_id}/{path} with the agent key. The JSON reply, or None on a bad
+    id, a timeout, a non-2xx status, a non-object body or {"ok": false}."""
+    if not isinstance(plugin_id, str) or not ID_RE.fullmatch(plugin_id):
+        return None
+
+    async def post() -> httpx.Response:
+        async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+            return await client.post(f"{api_url()}/plugins/{plugin_id}/{path}", json=body,
+                                     headers=_headers())
+    try:
+        r = await asyncio.wait_for(post(), timeout)
+        if not 200 <= r.status_code < 300:
+            log.info("plugin %s: HTTP %s", path, r.status_code)
+            return None
+        data = r.json()
+    except Exception as e:   # noqa: BLE001 - memory must never break a call
+        log.info("plugin %s unavailable: %s", path, type(e).__name__)
+        return None
+    if not isinstance(data, dict) or data.get("ok") is False:
+        return None
+    return data
+
+
+async def memory_put(plugin_id: str, phone: str, key: str, data: dict, *,
+                     timeout: float = MEMORY_TIMEOUT_S,
+                     transport: Optional[httpx.AsyncBaseTransport] = None) -> Optional[dict]:
+    """Save ``data`` (a JSON object, at most 4 KB) at ``key`` for this caller. {"ok": True} or None."""
+    if (not _phone_ok(phone) or not isinstance(key, str) or not 0 < len(key) <= MAX_KEY
+            or not isinstance(data, dict)):
+        return None
+    try:
+        if data_size(data) > MAX_DATA_BYTES:
+            return None
+    except (TypeError, ValueError):
+        return None
+    out = await _post(plugin_id, "memory/put", {"phone": phone.strip(), "key": key, "data": data},
+                      timeout, transport)
+    return out if out is not None and out.get("ok") is True else None
+
+
+async def memory_list(plugin_id: str, phone: str, prefix: str = "", limit: int = 10, *,
+                      timeout: float = MEMORY_TIMEOUT_S,
+                      transport: Optional[httpx.AsyncBaseTransport] = None) -> list[dict]:
+    """This caller's records for the plugin, newest first: [{"key", "data", "updated_at"}]. [] on error."""
+    if not _phone_ok(phone):
+        return []
+    try:
+        limit = max(1, min(100, int(limit)))
+    except (TypeError, ValueError):
+        limit = 10
+    prefix = prefix[:MAX_KEY] if isinstance(prefix, str) else ""
+    out = await _post(plugin_id, "memory/list", {"phone": phone.strip(), "prefix": prefix,
+                                                 "limit": limit}, timeout, transport)
+    raw = out.get("records") if out is not None else None
+    records = []
+    for r in raw if isinstance(raw, list) else []:
+        if (isinstance(r, dict) and isinstance(r.get("key"), str)
+                and isinstance(r.get("updated_at"), (int, float)) and not isinstance(r["updated_at"], bool)):
+            records.append({"key": r["key"], "data": r.get("data"), "updated_at": r["updated_at"]})
+    return records[:limit]
+
+
+def _num(v: Any) -> Optional[float]:
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _card(raw: Any) -> Optional[dict]:
+    if not isinstance(raw, dict):
+        return None
+    cid = raw.get("id")
+    if isinstance(cid, bool) or not isinstance(cid, (str, int)) or cid == "":
+        return None
+    return {"id": cid, "front": raw.get("front") if isinstance(raw.get("front"), str) else "",
+            "back": raw.get("back") if isinstance(raw.get("back"), str) else "",
+            "due_at": _num(raw.get("due_at")), "interval_s": _num(raw.get("interval_s")),
+            "reps": _num(raw.get("reps"))}
+
+
+def _deck(out: Optional[dict], card_required: bool) -> Optional[dict]:
+    """{"card": card or None, "due": int, "total": int} from a flashcards reply, or None."""
+    if out is None:
+        return None
+    card = _card(out.get("card"))
+    if card_required and card is None:
+        return None
+    if out.get("card") is not None and card is None:
+        return None
+    due, total = _num(out.get("due")), _num(out.get("total"))
+    return {"card": card, "due": int(due or 0), "total": int(total or 0)}
+
+
+async def flashcards_add(plugin_id: str, phone: str, front: str, back: str, *,
+                         timeout: float = MEMORY_TIMEOUT_S,
+                         transport: Optional[httpx.AsyncBaseTransport] = None) -> Optional[dict]:
+    if not _phone_ok(phone) or not (isinstance(front, str) and front.strip()
+                                    and isinstance(back, str) and back.strip()):
+        return None
+    out = await _post(plugin_id, "flashcards/add", {"phone": phone.strip(), "front": front,
+                                                    "back": back}, timeout, transport)
+    return _deck(out, card_required=True)
+
+
+async def flashcards_next(plugin_id: str, phone: str, *, timeout: float = MEMORY_TIMEOUT_S,
+                          transport: Optional[httpx.AsyncBaseTransport] = None) -> Optional[dict]:
+    """The next DUE card ({"card": None, ...} when none is due), or None on error."""
+    if not _phone_ok(phone):
+        return None
+    out = await _post(plugin_id, "flashcards/next", {"phone": phone.strip()}, timeout, transport)
+    return _deck(out, card_required=False)
+
+
+async def flashcards_grade(plugin_id: str, phone: str, card_id: Any, correct: bool, *,
+                           timeout: float = MEMORY_TIMEOUT_S,
+                           transport: Optional[httpx.AsyncBaseTransport] = None) -> Optional[dict]:
+    if not _phone_ok(phone) or isinstance(card_id, bool) or not isinstance(card_id, (str, int)):
+        return None
+    out = await _post(plugin_id, "flashcards/grade", {"phone": phone.strip(), "card_id": card_id,
+                                                      "correct": correct is True}, timeout, transport)
+    return _deck(out, card_required=True)
+
+
+def in_words(seconds: Any) -> str:
+    """A review delay the way you'd say it: "10 minutes", "3 hours", "1 day"."""
+    s = max(0.0, float(_num(seconds) or 0))
+    if round(s / 60) < 60:
+        n, unit = max(1, round(s / 60)), "minute"
+    elif round(s / 3600) < 24:
+        n, unit = round(s / 3600), "hour"
+    else:
+        n, unit = round(s / 86400), "day"
+    return f"{n} {unit}" + ("" if n == 1 else "s")
+
+
+def ago(ts: Any, now: float) -> str:
+    s = max(0.0, now - float(_num(ts) or now))
+    if s < 3600:
+        return "just now" if s < 120 else f"{round(s / 60)} minutes ago"
+    if s < 86400:
+        h = round(s / 3600)
+        return f"{h} hour{'s' if h != 1 else ''} ago"
+    d = round(s / 86400)
+    return "yesterday" if d == 1 else f"{d} days ago"
+
+
+def record_line(record: dict, now: float) -> str:
+    """One saved record as a short line of data (cleaned: no angle brackets, so it can't close
+    the <plugin_memory> fence)."""
+    data, key = record.get("data"), record.get("key", "")
+    when = ago(record.get("updated_at"), now)
+    if isinstance(data, dict) and isinstance(data.get("note"), str):
+        text = "note: " + data["note"]
+    elif isinstance(data, dict) and isinstance(data.get("summary"), str):
+        cues = data.get("cues") if isinstance(data.get("cues"), list) else []
+        text = f"session ({len(cues)} cues): " + data["summary"]
+    else:
+        try:
+            text = f"{key}: " + json.dumps(data, ensure_ascii=False)
+        except (TypeError, ValueError):
+            text = str(key)
+    return f"- {when}, {clean(text, 300)}"
+
+
+class CallMemory:
+    """What the memory and flashcards tools keep for one call (the phone stays on the call)."""
+
+    MAX_CUES = 200
+
+    def __init__(self) -> None:
+        self.cues: dict[str, dict] = {}       # plugin id -> {"name", "camera", "cues": [...]}
+        self.card: Optional[tuple[str, Any]] = None   # (plugin id, card id) being asked now
+        self.finished = False                 # a session was saved this call (once per call)
+        self.texted = False                   # the after-session text went (once per call)
+        self.tasks: set[asyncio.Task] = set() # texts still sending (the shutdown hook waits)
+        self.ending: Optional[asyncio.Future] = None   # the call-end save, once started
+        self.last_note_ms = 0                 # note keys stay unique within a call
+
+    def add_cue(self, plugin: dict, cue: str) -> None:
+        rec = self.cues.setdefault(plugin["id"], {"name": plugin["name"], "cues": [],
+                                                  "camera": "camera" in plugin["effective_tools"]})
+        rec["cues"].append(cue)
+        del rec["cues"][: -self.MAX_CUES]
+
+    def cues_of(self, plugin_id: str) -> list[str]:
+        return list(self.cues.get(plugin_id, {}).get("cues", []))
+
+
+def auto_summary(cues: list[str]) -> str:
+    """"Most common cue: Knees out (5 of 12). 12 cues this session." ("" with no cues)."""
+    if not cues:
+        return ""
+    counts = Counter(normalize(c) or c for c in cues)
+    top, n = counts.most_common(1)[0]
+    shown = next(c for c in reversed(cues) if (normalize(c) or c) == top)
+    total = len(cues)
+    return (f"Most common cue: {shown} ({n} of {total}). "
+            f"{total} cue{'s' if total != 1 else ''} this session.")
+
+
+def session_data(cues: list[str], summary: str, at: int) -> dict:
+    """The session record, newest cues kept when they don't all fit in 4 KB."""
+    data = {"cues": list(cues), "summary": clean(summary, SESSION_SUMMARY_CHARS), "at": at}
+    while data["cues"] and data_size(data) > MAX_DATA_BYTES - 96:
+        data["cues"] = data["cues"][max(1, len(data["cues"]) // 8):]
+    return data
+
+
+def session_text(plugin_name: str, summary: str) -> str:
+    """The after-session text: "Squat coach: <summary> Your history: <url>"."""
+    return f"{plugin_name}: {clean(summary, SESSION_SUMMARY_CHARS)} Your history: {my_apps_url()}"
 
 
 class PluginSession:
