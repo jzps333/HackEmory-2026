@@ -39,8 +39,33 @@ def demo_plate() -> str:
     return p if _PLATE_RE.fullmatch(p) else DEFAULT_PLATE
 
 
+def e164(raw: Any) -> Optional[str]:
+    """'+1 (404) 555-0123' / '404-555-0123' / '0014045550123' -> '+14045550123'; None if not a phone."""
+    if not isinstance(raw, str):
+        return None
+    s = re.sub(r"[\s().-]", "", raw.strip())
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    if s.startswith("+"):
+        digits = s[1:]
+    elif len(s) == 10:
+        digits = "1" + s                     # a US number without the country code
+    elif len(s) == 11 and s.startswith("1"):
+        digits = s
+    else:
+        return None
+    return "+" + digits if digits.isdigit() and 8 <= len(digits) <= 15 else None
+
+
+def is_session_owner(phone: Any) -> bool:
+    """True only when the phone being called is PARKMOBILE_OWNER_PHONE (both in E.164). The saved
+    ParkMobile session belongs to that one person; everyone else gets a guest run."""
+    owner = e164(os.getenv("PARKMOBILE_OWNER_PHONE") or "")
+    return owner is not None and e164(phone) == owner
+
+
 def parkmobile_job(job: Any) -> Optional[dict]:
-    """{"url", "scan_url", "zone", "plate", "minutes"} when an outbound job's scan_url is an
+    """{"url", "scan_url", "zone", "plate", "minutes", "use_session"} when an outbound job's scan_url is an
     https://app.parkmobile.io link naming a zone (?zone=NNNN, or a zone-details ?areaNo= page).
     None otherwise (the call is an ordinary walkthrough)."""
     if not isinstance(job, dict):
@@ -65,7 +90,7 @@ def parkmobile_job(job: Any) -> Optional[dict]:
         return None
     entry = f"https://{PM_HOST}{ZONE_DETAILS_PATH}?areaNo={area}" if area else ENTRY_URL
     return {"url": entry, "scan_url": url, "zone": zone, "plate": demo_plate(),
-            "minutes": DEFAULT_MINUTES}
+            "minutes": DEFAULT_MINUTES, "use_session": is_session_owner(job.get("phone"))}
 
 
 def _say_safe(s: Any, limit: int) -> str:

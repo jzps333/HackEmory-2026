@@ -20,6 +20,7 @@ It is tightly fenced, separately from scanning (scanning still never types anyth
 """
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -575,13 +576,13 @@ PM_STOPPED_AT = {
     "unsupported": "ParkMobile says this zone isn't supported on the web",
     "space_number": "ParkMobile asks for a space number",
     "verification": "a ParkMobile verification-code screen (the saved sign-in is gone)",
-    "pay_button": "ParkMobile's pay button (refused), with the price on screen",
+    "price": "ParkMobile's checkout with the price on screen, before any payment step",
 }
 
 
 def pm_status(screen: str) -> str:
     """Final status for the screen the run stopped on."""
-    return {"payment": "ready_to_pay", "review": "ready_to_pay", "pay_button": "ready_to_pay",
+    return {"payment": "ready_to_pay", "review": "ready_to_pay", "price": "ready_to_pay",
             "sign_in": "needs_sign_in", "robot_check": "robot_check",
             "verification": "needs_verification"}.get(screen, "failed")
 
@@ -648,11 +649,93 @@ def pm_filter_state(state: object) -> dict | None:
         return None
     cookies = [c for c in state.get("cookies") or []
                if isinstance(c, dict) and _pm_domain_ok(c.get("domain")) and c.get("name")]
-    origins = [o for o in state.get("origins") or []
+    origins = [{k: o[k] for k in ("origin", "localStorage", "indexedDB") if k in o}
+               for o in state.get("origins") or []
                if isinstance(o, dict) and _pm_origin_ok(o.get("origin"))]
     if not cookies and not origins:
         return None
     return {"cookies": cookies, "origins": origins}
+
+
+PM_SESSION_ORIGIN = "https://app.parkmobile.io"
+PM_MAX_SESSION_ITEMS = 200
+PM_MAX_SESSION_VALUE = 100_000
+
+
+def pm_session_items(state: object) -> list[dict]:
+    """sessionStorage items saved for exactly https://app.parkmobile.io (top-level
+    "sessionStorage": [{"origin", "items": [{"name", "value"}]}]); strings only, bounded."""
+    items: list[dict] = []
+    if not isinstance(state, dict):
+        return items
+    for entry in state.get("sessionStorage") or []:
+        if not isinstance(entry, dict) or entry.get("origin") != PM_SESSION_ORIGIN:
+            continue
+        for it in entry.get("items") or []:
+            if (isinstance(it, dict) and isinstance(it.get("name"), str) and isinstance(it.get("value"), str)
+                    and 0 < len(it["name"]) <= 200 and len(it["value"]) <= PM_MAX_SESSION_VALUE):
+                items.append({"name": it["name"], "value": it["value"]})
+    return items[:PM_MAX_SESSION_ITEMS]
+
+
+def pm_session_script(items: list) -> str:
+    """Init script that puts ``items`` into sessionStorage on https://app.parkmobile.io only. The
+    items travel as DATA: a JS string literal holding JSON (json.dumps twice, ASCII-escaped),
+    parsed with JSON.parse at run time. No code is ever built from a name or value."""
+    data = json.dumps(json.dumps([{"name": str(i["name"]), "value": str(i["value"])} for i in items]))
+    return ("(() => { if (location.origin !== " + json.dumps(PM_SESSION_ORIGIN) + ") return; try { "
+            "const items = JSON.parse(" + data + "); "
+            "for (const it of items) { if (typeof it.name === 'string' && typeof it.value === 'string' "
+            "&& sessionStorage.getItem(it.name) === null) sessionStorage.setItem(it.name, it.value); } "
+            "} catch (e) {} })();")
+
+
+# --- the payment fence (fix B) ---------------------------------------------------------------------
+
+PM_SAVED_CARD_TEXT = re.compile(r"\b(visa|mastercard|master card|amex|american express|discover)\b"
+                                r"|ending in \d{4}|[•*]{2,}\s?\d{4}", re.I)
+PM_FORWARD_OK = re.compile(r"^(continue|next)$", re.I)
+
+
+def pm_price_visible(facts: object) -> bool:
+    """A price, a payment step or a saved payment method is on screen: from here on nothing
+    else is clicked (no forward button, no vehicle or plate)."""
+    if not isinstance(facts, dict):
+        return False
+    text = str(facts.get("text") or "")
+    return bool(PM_PRICE_RE.search(text) or PM_PAYMENT_TEXT.search(text)
+                or PM_SAVED_CARD_TEXT.search(text) or pm_has_card_fields(facts))
+
+
+def pm_forward_ok(info: object) -> bool:
+    """The only forward buttons ever tapped: exactly "Continue" or "Next" (trimmed, any case)
+    in both its text and its accessible name, whichever are set."""
+    if not isinstance(info, dict):
+        return False
+    labels = [re.sub(r"\s+", " ", str(info.get(k) or "")).strip() for k in ("text", "aria")]
+    labels = [x for x in labels if x]
+    return bool(labels) and all(PM_FORWARD_OK.fullmatch(x) for x in labels)
+
+
+PM_PAY_PATH_WORDS = re.compile(r"start|extend|purchase|checkout|payment|pay|order|charge|transaction"
+                               r"|session|park", re.I)
+PM_SAFE_PATH_WORDS = re.compile(r"search|quote", re.I)
+
+
+def pm_request_blocked(method: object, url: object) -> bool:
+    """Every non-GET request to *.parkmobile.io whose path looks like it starts, extends or pays
+    for parking (start / extend / purchase / checkout / payment / pay / order / charge /
+    transaction / session / park...), unless it's a search or a quote. Blocked in on_route."""
+    if str(method or "GET").upper() in ("GET", "HEAD", "OPTIONS"):
+        return False
+    try:
+        parts = urlsplit(str(url or ""))
+    except ValueError:
+        return True
+    if not _pm_domain_ok(parts.hostname):
+        return False
+    path = re.sub(r"parkmobile", "", unquote(parts.path).lower())
+    return bool(PM_PAY_PATH_WORDS.search(path)) and not PM_SAFE_PATH_WORDS.search(path)
 
 
 def pm_redact_urls(text: object) -> str:

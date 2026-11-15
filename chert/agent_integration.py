@@ -399,6 +399,7 @@ class ScanSafeCall:
                 on_nav=lambda u: showing() and self.video.note_nav(u),
                 on_step=lambda text, _id: showing() and self.video.note_step(text),
                 should_stop=stop,
+                use_session=job.get("use_session") is True,
             )
         return await self._live_view(job["url"], 0, 0.0, run, meter=False)
 

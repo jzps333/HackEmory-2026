@@ -361,14 +361,17 @@ def parkmobile_stream(url: str, zone: Optional[str], plate: str, minutes: int,
                       on_step: Optional[Callable[[str, str], Any]] = None,
                       should_stop: Optional[Callable[[], bool]] = None,
                       *, client: Optional[httpx.Client] = None,
-                      timeout: float = PARKMOBILE_TIMEOUT_S) -> Optional[dict]:
+                      timeout: float = PARKMOBILE_TIMEOUT_S, use_session: bool = False) -> Optional[dict]:
     """POST {SANDBOX_URL}/operate/stream {"adapter": "parkmobile", url, zone, plate, minutes}: the
     sandbox fills in the real ParkMobile web app and stops at the first sign-in / contact-details /
     payment / price screen. Returns its result ({"status": "ready_to_pay" | "needs_sign_in" |
     "needs_verification" | "robot_check" | "failed", "price_text"?, "zone_name"?, "stopped_at",
     "session", ...}), None if
-    ``should_stop()`` turned True, operate_failed(why) on any failure. Never raises, never pays."""
-    body = {"adapter": "parkmobile", "url": url, "zone": zone, "plate": plate, "minutes": int(minutes)}
+    ``should_stop()`` turned True, operate_failed(why) on any failure. Never raises, never pays.
+    ``use_session``: ask for the saved signed-in session (only for its owner, see
+    chert/parkmobile.is_session_owner); otherwise a guest run."""
+    body = {"adapter": "parkmobile", "url": url, "zone": zone, "plate": plate, "minutes": int(minutes),
+            "use_session": use_session is True}
     return operate_stream(url, plate, 0, on_frame, on_nav, on_step, should_stop, client=client,
                           timeout=timeout, payload=body, statuses=PARKMOBILE_STATUSES)
 

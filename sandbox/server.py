@@ -63,6 +63,7 @@ class OperateRequest(BaseModel):
     adapter: Any = None    # None = Dogwood (unchanged); "parkmobile" = the real ParkMobile web app
     zone: Any = None       # parkmobile only: 3-7 digits
     minutes: Any = None    # parkmobile only: instead of hours
+    use_session: Any = False   # parkmobile only: True = the agent says the callee owns the saved session
 
 
 @app.get("/health")
@@ -87,9 +88,10 @@ PARKMOBILE_STATE_IN_CONTAINER = "/run/pm_state.json"     # operate.PM_STATE_PATH
 
 
 def _parkmobile_mounts() -> tuple:
-    """The saved ParkMobile session (the person's own account, captured on the Mac), mounted
-    read-only, for adapter "parkmobile" runs only and only if the file exists. Path from
-    PARKMOBILE_STATE_FILE. No file: () and the run stays a guest run."""
+    """The saved ParkMobile session (one person's own account, captured on the Mac), mounted
+    read-only, for adapter "parkmobile" runs that ask for it (use_session is True: the agent
+    checked the callee is PARKMOBILE_OWNER_PHONE) and only if the file exists. Path from
+    PARKMOBILE_STATE_FILE. Otherwise () and the run stays a guest run."""
     path = os.environ.get("PARKMOBILE_STATE_FILE") or PARKMOBILE_STATE_DEFAULT
     if not os.path.isabs(path) or any(c in path for c in ",:\n") or not os.path.isfile(path):
         return ()
@@ -157,7 +159,7 @@ def _operate_parkmobile(req: OperateRequest) -> StreamingResponse:
     name = f"scansafe-pm-{uuid.uuid4().hex[:12]}"
     cmd = _container_cmd(name, "--operate-parkmobile", req.url, clean_zone(req.zone) or "-",
                          clean_plate(req.plate), str(pm_minutes(req.hours, req.minutes)),
-                         mounts=_parkmobile_mounts())
+                         mounts=_parkmobile_mounts() if req.use_session is True else ())
     return _stream_container(name, cmd, PARKMOBILE_TIMEOUT_S, MAX_OPERATE_OUTPUT, "parkmobile")
 
 

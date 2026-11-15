@@ -47,9 +47,10 @@ from operate import SEL as OP_SEL
 from operate import (PM_ENTRY_URL, PM_FACTS_JS, PM_SEL, PM_STATE_PATH, PM_STOPPED_AT,
                      check_parkmobile_request, clean_zone, parkmobile_request_allowed,
                      pm_area_from_url, pm_clean_url, pm_click_refused, pm_duration_patterns,
-                     pm_filter_state, pm_has_card_fields, pm_minutes, pm_price_text, pm_redact_urls,
-                     pm_result_selector, pm_screen, pm_status, pm_step_text, pm_type_refused,
-                     pm_type_value_ok, pm_zone_info)
+                     pm_filter_state, pm_forward_ok, pm_minutes, pm_price_text, pm_price_visible,
+                     pm_redact_urls, pm_request_blocked, pm_result_selector, pm_screen,
+                     pm_session_items, pm_session_script, pm_status, pm_step_text,
+                     pm_type_refused, pm_type_value_ok, pm_zone_info)
 
 MAX_TEXT = 4000            # page_text characters
 MAX_HIDDEN = 1500          # hidden_text characters
@@ -1210,10 +1211,11 @@ PM_OPTIONS_JS = "el => [...el.options].slice(0, 100).map(o => (o.label || o.text
 PM_PICKED_JS = r"""
 el => ['aria-checked', 'aria-selected', 'aria-pressed'].some(a => el.getAttribute(a) === 'true')
 """
-# The forward button. Pay-like labels are in here on purpose: pm_click refuses them, and a refused
-# forward button means the run has reached ParkMobile's pay step (stop: pay_button).
-PM_FORWARD = re.compile(r"^\s*(continue|next|done|save( vehicle)?|review|start parking|park now"
-                        r"|pay( now)?|purchase|checkout|confirm)\b", re.I)
+# The forward button: an exact allowlist (pm_forward_ok), only while no price is on screen.
+PM_FORWARD = re.compile(r"^\s*(continue|next)\s*$", re.I)
+PM_BUTTON_JS = r"""
+el => ({text: (el.innerText || '').trim().slice(0, 80), aria: (el.getAttribute('aria-label') || '').trim().slice(0, 80)})
+"""
 PM_VEHICLE_OPENER = re.compile(r"^\s*(add (a )?(new )?vehicle|select (a )?vehicle|choose (a )?vehicle"
                                r"|change vehicle|vehicle)\b", re.I)
 PM_HARD_STOPS = ("robot_check", "verification", "sign_in", "unsupported", "space_number")
@@ -1248,20 +1250,21 @@ def pm_type(locator, value: str, zone: str | None, plate: str | None, refused: l
     locator.press_sequentially(value, delay=TYPE_DELAY_MS, timeout=timeout)
 
 
-def load_pm_state(path: str | None = None) -> tuple[dict | None, str]:
-    """The saved ParkMobile session server.py mounted read-only, filtered to *.parkmobile.io:
-    (state, "loaded"), or (None, "none" | "unreadable" | "unusable"). Its contents are never
-    printed, and it is never written back."""
+def load_pm_state(path: str | None = None) -> tuple[dict | None, list, str]:
+    """The saved ParkMobile session server.py mounted read-only: (storage_state with cookies +
+    origins incl. indexedDB, filtered to *.parkmobile.io; sessionStorage items for
+    https://app.parkmobile.io; "loaded"), or (None, [], "none" | "unreadable" | "unusable").
+    Its contents are never printed, and it is never written back."""
     path = path or PM_STATE_PATH
     if not os.path.exists(path):
-        return None, "none"
+        return None, [], "none"
     try:
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
     except (OSError, ValueError):
-        return None, "unreadable"
-    state = pm_filter_state(raw)
-    return (state, "loaded") if state else (None, "unusable")
+        return None, [], "unreadable"
+    state, items = pm_filter_state(raw), pm_session_items(raw)
+    return (state, items, "loaded") if state or items else (None, [], "unusable")
 
 
 def _pm_norm(s: object) -> str:
@@ -1282,7 +1285,7 @@ def _pm_shows(page, pats: list) -> bool:
     return any(p.search(line) for line in page.evaluate(PM_LINES_JS) for p in pats)
 
 
-def _pm_set_duration(page, minutes: int, refused: list) -> bool:
+def _pm_set_duration(page, minutes: int, refused: list, fence=lambda: False) -> bool:
     """Pick ``minutes`` on whatever duration control is showing (all guarded): a chip / option /
     radio with that duration, a <select> (or an hours <select>), or a "+" stepper tapped until the
     page shows it. False if there's no such control. UNVERIFIED on the signed-in site."""
@@ -1313,6 +1316,8 @@ def _pm_set_duration(page, minutes: int, refused: list) -> bool:
         for _ in range(PM_STEPPER_MAX + 1):
             if _pm_shows(page, pats):
                 return True
+            if fence():                                 # a price showed up: no more taps
+                return False
             pm_click(plus.first, refused)
             page.wait_for_timeout(250)
     return False
@@ -1347,12 +1352,13 @@ def _pm_set_plate(page, plate: str, zone: str | None, refused: list) -> str | No
 
 
 def _pm_continue(page, refused: list) -> bool:
-    """Tap the forward button (guarded). GuardRefused = it's a pay button."""
-    loc = page.get_by_role("button", name=PM_FORWARD).filter(visible=True)
-    if not loc.count():
-        return False
-    pm_click(loc.first, refused)
-    return True
+    """Tap a button labelled exactly Continue or Next (pm_forward_ok, then pm_click). Only called
+    while no price is on screen."""
+    for b in page.get_by_role("button", name=PM_FORWARD).filter(visible=True).all()[:4]:
+        if pm_forward_ok(b.evaluate(PM_BUTTON_JS)):
+            pm_click(b, refused)
+            return True
+    return False
 
 
 def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | None) -> dict:
@@ -1361,7 +1367,8 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
            "zone": None, "plate": None, "minutes": None, "status": "failed", "paid": False,
            "session": "none", "stopped_at": None, "price_text": None, "zone_name": None,
            "operator": None, "duration_set": False, "plate_set": False, "steps": [],
-           "refused": [], "error": None, "blocked_requests": [], "screenshots": [], "timings": {}}
+           "refused": [], "error": None, "blocked_requests": [], "fenced_requests": [],
+           "screenshots": [], "timings": {}}
     ok, why = check_parkmobile_request(url, zone, plate, minutes=minutes)
     if not ok:
         out["error"] = f"blocked: {why}"
@@ -1376,7 +1383,7 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
         out["error"] = f"blocked: {why}"
         out["timings"]["total_ms"] = _now_ms(t0)
         return out
-    state, out["session"] = load_pm_state()
+    state, session_items, out["session"] = load_pm_state()
     counters = {"requests": 0}
     done: list[str] = out["steps"]
     refused: list = out["refused"]
@@ -1385,7 +1392,8 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
     def block(route, req_url: str, why: str, stay: bool) -> None:
         if len(out["blocked_requests"]) < MAX_BLOCKED:
             out["blocked_requests"].append({"url": pm_clean_url(req_url)[:120], "reason": why,
-                                            "type": route.request.resource_type})
+                                            "type": route.request.resource_type,
+                                            "method": route.request.method})
         if stay:
             route.fulfill(status=204, body="")
         else:
@@ -1402,6 +1410,14 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
             top_nav = req.is_navigation_request() and req.frame.parent_frame is None
         except Exception:
             top_nav = False
+        if pm_request_blocked(req.method, req.url):      # never start, extend or pay for parking
+            if len(out["fenced_requests"]) < MAX_BLOCKED:    # own list: analytics can't crowd it out
+                out["fenced_requests"].append({"method": req.method, "url": pm_clean_url(req.url)[:120]})
+            if top_nav:
+                route.fulfill(status=204, body="")
+            else:
+                route.abort("blockedbyclient")
+            return None
         allowed, why = parkmobile_request_allowed(req.url, top_nav)
         if allowed:
             allowed, why = guard.check(req.url)
@@ -1432,7 +1448,9 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
         if state:
             opts["storage_state"] = state               # read-only copy; never saved back
         browser, context = _launch(p, on_route, **opts)
-        state = None
+        if session_items:     # sessionStorage for https://app.parkmobile.io, passed as JSON data
+            context.add_init_script(script=pm_session_script(session_items))
+        state = session_items = None
         page = context.new_page()
         out["timings"]["browser_ready_ms"] = _now_ms(t0)
         start_screencast(context, page, t0, {"gap": STREAM_MIN_GAP_S, "max": PM_MAX_FRAMES})
@@ -1480,23 +1498,46 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                 say_step("park_here")
                 pm_click(page.locator(PM_SEL["continue"]).first, refused)
                 mark("park_here")
+            def fenced() -> bool:
+                """Look again; True (and stop) if a stop screen, a price or a payment method is
+                showing. After that nothing else is clicked."""
+                nonlocal screen, facts
+                page.wait_for_timeout(400)
+                s2, f2 = look(page)
+                if s2 in PM_HARD_STOPS or pm_price_visible(f2):
+                    screen = s2 if s2 in PM_HARD_STOPS + ("payment", "review") else "price"
+                    facts = f2
+                    return True
+                return False
+
+            def fence_quick() -> bool:
+                try:
+                    return pm_price_visible(page.evaluate(PM_FACTS_JS))
+                except Exception:
+                    return True
+
             for _ in range(PM_ROUNDS):
                 page.wait_for_timeout(PM_SETTLE_MS)
                 screen, facts = look(page)
                 if screen in PM_HARD_STOPS:
                     break
-                if pm_has_card_fields(facts):                     # never act on a card form
-                    screen = "payment"
+                if pm_price_visible(facts):                       # hard stop: price / payment
+                    if screen not in ("payment", "review"):
+                        screen = "price"
                     break
                 acted = False
                 try:
-                    if not out["duration_set"] and _pm_set_duration(page, mins, refused):
+                    if not out["duration_set"] and _pm_set_duration(page, mins, refused, fence_quick):
                         out["duration_set"] = acted = True
                         say_step("duration")
                         mark("duration")
+                        if fenced():
+                            break
                     if not out["plate_set"]:
                         how = _pm_set_plate(page, clean, z, refused)
                         if how == "opened":
+                            if fenced():
+                                break
                             continue                              # the chooser: look again
                         if how in ("picked", "typed", "shown"):
                             out["plate_set"] = True
@@ -1504,19 +1545,24 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                                 acted = True
                                 say_step("vehicle" if how == "picked" else "plate")
                                 mark("plate")
-                    if screen in ("payment", "review"):
-                        if acted:
-                            continue                              # look again: updated price
-                        break
+                                if fenced():
+                                    break
                     if acted or (out["duration_set"] and out["plate_set"]):
                         page.wait_for_timeout(500)
+                        if fenced():
+                            break
                         _pm_continue(page, refused)
-                except GuardRefused:
-                    screen, facts = look(page)
-                    if screen not in PM_HARD_STOPS:
-                        screen = "pay_button"     # the only way on is a pay-like button: stop here
+                except GuardRefused as e:
+                    s2, f2 = look(page)
+                    facts = f2
+                    if s2 in PM_HARD_STOPS + ("payment", "review"):
+                        screen = s2
+                    elif pm_price_visible(f2):
+                        screen = "price"
+                    else:
+                        screen, out["error"] = "refused", str(e)
                     break
-            if screen in ("payment", "review", "pay_button"):
+            if screen in ("payment", "review", "price"):
                 out["price_text"] = pm_price_text(facts.get("text"))
                 say_step("stop_pay")
             elif screen in ("sign_in", "verification") and out["session"] == "loaded":
@@ -1528,7 +1574,9 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
             out["stopped_at"] = PM_STOPPED_AT.get(screen, f"an unexpected ParkMobile screen ({screen})")
             if screen == "sign_in" and out["session"] == "loaded":
                 out["stopped_at"] = "ParkMobile's sign-in screen: the saved sign-in was signed out"
-            if screen not in PM_STOPPED_AT:
+            if screen == "refused":
+                out["stopped_at"] = "a button or field the guard refused"
+            elif screen not in PM_STOPPED_AT:
                 out["error"] = "couldn't reach the price or sign-in screen"
             page.wait_for_timeout(1200)                           # last screen reaches the stream
         except GuardRefused as e:
