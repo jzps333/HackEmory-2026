@@ -1351,6 +1351,54 @@ def _pm_set_plate(page, plate: str, zone: str | None, refused: list) -> str | No
     return None
 
 
+PM_PLATE_STATE = ("GA", "Georgia")        # the demo zone is in Atlanta
+PM_ADD_VEHICLE = re.compile(r"^\s*add vehicle\s*$", re.I)
+
+
+def _pm_pick_state(page, refused: list) -> bool:
+    """Add vehicle screen (real, signed in, 2026-11-14): Country / License plate / State/province /
+    Nickname, then "Add vehicle" (disabled until the state is set). Sets State/province only."""
+    code, name = PM_PLATE_STATE
+    for sel in page.locator("select:visible").all()[:4]:
+        if re.search(r"state|province", sel.evaluate(PM_LABEL_JS) or "", re.I):
+            for opt in ({"value": code}, {"label": name}, {"label": code}):
+                try:
+                    sel.select_option(**opt, timeout=3000)
+                    return True
+                except Exception:   # noqa: BLE001 - try the next form of the option
+                    pass
+    box = page.get_by_role("combobox", name=re.compile(r"state|province", re.I)).filter(visible=True)
+    if not box.count():
+        box = page.get_by_text(re.compile(r"^\s*State\s*/\s*province\s*$", re.I)).filter(visible=True)
+    if not box.count():
+        return False
+    pm_click(box.first, refused)
+    page.wait_for_timeout(600)
+    want = re.compile(rf"^\s*({name}|{code})(\s*\(?{code}\)?)?\s*$", re.I)
+    for opt in (page.get_by_role("option", name=want), page.get_by_text(want)):
+        opt = opt.filter(visible=True)
+        if opt.count():
+            pm_click(opt.first, refused)
+            return True
+    page.keyboard.press("Escape")
+    return False
+
+
+def _pm_add_vehicle(page, refused: list) -> bool:
+    """On ParkMobile's Add vehicle screen, after the plate is typed: pick the state, then tap the
+    exact "Add vehicle" button once it is enabled. Saves the plate to the person's own account
+    (no payment). Returns True if "Add vehicle" was tapped."""
+    if "/add-vehicle" not in (urlparse(page.url).path or ""):
+        return False
+    _pm_pick_state(page, refused)
+    page.wait_for_timeout(400)
+    btn = page.get_by_role("button", name=PM_ADD_VEHICLE).filter(visible=True)
+    if btn.count() and btn.first.is_enabled():
+        pm_click(btn.first, refused)
+        return True
+    return False
+
+
 def _pm_continue(page, refused: list) -> bool:
     """Tap a button labelled exactly Continue or Next (pm_forward_ok, then pm_click). Only called
     while no price is on screen."""
@@ -1547,6 +1595,11 @@ def operate_parkmobile(url: str, zone: str | None, plate: str, minutes: int | No
                                 mark("plate")
                                 if fenced():
                                     break
+                            if how == "typed" and _pm_add_vehicle(page, refused):
+                                mark("add_vehicle")
+                                if fenced():
+                                    break
+                                continue                          # vehicle saved: look again
                     if acted or (out["duration_set"] and out["plate_set"]):
                         page.wait_for_timeout(500)
                         if fenced():

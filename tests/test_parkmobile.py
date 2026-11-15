@@ -894,3 +894,10 @@ def test_saved_card_needs_masked_digits_but_real_payment_screens_still_stop():
     assert op.pm_price_visible(facts(text="Total $4.35"))
     assert op.pm_price_visible(facts(text="Accepted payment methods\nAdd a card"))     # still a payment step
     assert op.pm_screen(facts(text="Accepted payment methods\nPayment method\nAdd card")) == "payment"
+
+
+def test_zone_name_skips_the_accepted_payment_methods_box():
+    lines = ["Parking location", "P", "91987", "Atlanta, GA - Off St Operator", "Surface lot", "•",
+             "Park Tavern", "Accepted payment methods", "Park here"]
+    info = op.pm_zone_info(lines, "91987")
+    assert info["zone_name"] == "Park Tavern" and info["operator"] == "Atlanta, GA - Off St Operator"

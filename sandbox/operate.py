@@ -557,8 +557,8 @@ def pm_zone_info(lines: object, zone: str | None) -> dict:
     out["zone"] = ls[idx]
     rest = []
     for x in ls[idx + 1: idx + 8]:
-        if re.fullmatch(r"park here|privacy policy", x, re.I):
-            break
+        if re.fullmatch(r"park here|privacy policy", x, re.I) or PM_INFO_TEXT.search(x):
+            break                                       # "Accepted payment methods" box (signed in)
         if x not in ("•", "·", "-"):
             rest.append(x)
     if rest:
