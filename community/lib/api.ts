@@ -1,4 +1,5 @@
-// Client for the ScanSafe plugins API (api/routes_plugins.py). No credentials are sent.
+// Client for the ScanSafe plugins API (api/routes_plugins.py). No cookies are sent; only the "My apps"
+// calls (lib/auth.ts, lib/apps.ts) add an Authorization header.
 // Everything that comes back is rendered as React text, never as HTML.
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "https://api.scansafe.nyc").replace(/\/+$/, "");
@@ -57,8 +58,8 @@ export class ApiError extends Error {
   }
 }
 
-const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
-const strList = (v: unknown): string[] => (Array.isArray(v) ? v.map(str) : []);
+export const str = (v: unknown): string => (typeof v === "string" ? v : v == null ? "" : String(v));
+export const strList = (v: unknown): string[] => (Array.isArray(v) ? v.map(str) : []);
 
 /** Coerce whatever the API sent into the shape the UI expects. */
 export function normalizePlugin(raw: unknown): Plugin {
@@ -89,20 +90,25 @@ export function normalizePlugin(raw: unknown): Plugin {
   };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** `what` names the API in error messages, e.g. "plugins API" or "sign-in API". */
+export async function request<T>(
+  path: string,
+  init?: Omit<RequestInit, "headers"> & { headers?: Record<string, string> },
+  what = "plugins API",
+): Promise<T> {
   let res: Response;
   try {
     res = await fetch(API_URL + path, {
       ...init,
       credentials: "omit",
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: { Accept: "application/json", ...init?.headers },
     });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     throw new ApiError(
       0,
-      `Couldn't reach the plugins API at ${API_URL}. It may be down, or this site isn't on its CORS list.`,
+      `Couldn't reach the ${what} at ${API_URL}. It may be down, or this site isn't on its CORS list.`,
       "network",
     );
   }
@@ -121,14 +127,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       message =
         res.status === 404
           ? "That plugin doesn't exist (404)."
-          : `The plugins API answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""}.`;
+          : `The ${what} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""}.`;
     }
     throw new ApiError(res.status, message.slice(0, 300), code);
   }
   try {
     return (await res.json()) as T;
   } catch {
-    throw new ApiError(res.status, "The plugins API sent a reply that isn't JSON.");
+    throw new ApiError(res.status, `The ${what} sent a reply that isn't JSON.`);
   }
 }
 

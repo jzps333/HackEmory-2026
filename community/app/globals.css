@@ -1134,6 +1134,536 @@ p {
   font-size: 12.5px;
 }
 
+/* ---------- My apps ---------- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+.spin-icon {
+  flex: none;
+  animation: spin 0.9s linear infinite;
+}
+
+.signed-in-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 14px;
+  color: var(--muted);
+}
+
+.signed-in-row .mono {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.signin-card {
+  max-width: 600px;
+  padding: 26px 28px;
+}
+
+.signin-skeleton {
+  height: 260px;
+}
+
+.signin-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.signin-explain {
+  margin-top: 6px;
+  max-width: 520px;
+}
+
+.signin-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+.signin-notice svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.signin-form {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-label {
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.signin-row {
+  display: flex;
+  gap: 8px;
+}
+
+.phone-input {
+  flex: 1 1 auto;
+  height: 38px;
+}
+
+.phone-input input {
+  font-family: var(--mono);
+  font-size: 15px;
+}
+
+.signin-row .btn {
+  height: 38px;
+}
+
+.signin-code-step {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.signin-lead {
+  color: #3d3d39;
+}
+
+.signin-code {
+  font-size: 48px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.16em;
+  padding: 18px 22px 18px 26px;
+  background: var(--side);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  user-select: all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+.signin-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.line-number-select {
+  color: var(--text);
+  font-weight: 500;
+  user-select: all;
+  -webkit-user-select: all;
+  white-space: nowrap;
+}
+
+.signin-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.signin-wait.trouble {
+  color: var(--amber);
+}
+
+.signin-stopped {
+  margin: 0;
+  align-self: stretch;
+}
+
+.badge-kind {
+  background: var(--link-bg);
+  color: var(--link);
+}
+
+.app-card {
+  min-height: 0;
+}
+
+.how-to {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  color: #3d3d39;
+  max-width: 460px;
+}
+
+.how-to li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.how-to svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.say {
+  font-family: var(--serif);
+  font-size: 1.05em;
+  color: var(--text);
+}
+
+.app-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-sections .card + .card {
+  margin-top: 0;
+}
+
+.apps-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.cue-chart {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cue-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-areas:
+    "label label"
+    "track count";
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.cue-label {
+  grid-area: label;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.cue-track {
+  grid-area: track;
+  height: 12px;
+  border-radius: 4px;
+  background: var(--side);
+  overflow: hidden;
+}
+
+.cue-bar {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 4px;
+  background: var(--blue);
+}
+
+.cue-row:first-child .cue-bar {
+  background: var(--orange);
+}
+
+.cue-count {
+  grid-area: count;
+  font-size: 13px;
+  text-align: right;
+}
+
+.chart-note {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.record-row {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 14px;
+  padding: 11px 0;
+  border-top: 1px solid var(--border);
+}
+
+.record-row:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+.note-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+
+.record-date {
+  font-size: 12px;
+  color: var(--muted);
+  padding-top: 1px;
+}
+
+.record-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.record-text {
+  overflow-wrap: anywhere;
+}
+
+.note-text {
+  white-space: pre-wrap;
+}
+
+.record-sub {
+  overflow-wrap: anywhere;
+}
+
+.pill-neutral {
+  background: var(--side);
+  border: 1px solid var(--border);
+  color: #4a4a45;
+  white-space: nowrap;
+}
+
+.mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.mini-stat {
+  padding: 16px 20px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.mini-stat:first-child {
+  border-left: 0;
+}
+
+.mini-stat .stat-value {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.stat-value.due,
+.card-due.due {
+  color: var(--orange);
+}
+
+.card-due.due {
+  font-weight: 500;
+}
+
+.cards-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.cards-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--muted);
+  padding: 0 12px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.cards-table th:nth-child(1) {
+  width: 34%;
+}
+
+.cards-table th:nth-child(3) {
+  width: 130px;
+}
+
+.cards-table th:nth-child(4) {
+  width: 56px;
+}
+
+.cards-table td {
+  padding: 10px 12px 10px 0;
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.cards-table tbody tr:first-child td {
+  border-top: 0;
+}
+
+.cards-table .num {
+  text-align: right;
+  padding-right: 0;
+}
+
+.card-front {
+  font-weight: 500;
+}
+
+.reps-unit {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.empty.compact {
+  padding: 24px 12px;
+}
+
+@media (max-width: 1024px) {
+  .apps-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .signin-card {
+    padding: 20px 18px;
+  }
+  .signin-row {
+    flex-direction: column;
+  }
+  .signin-row .btn {
+    width: 100%;
+  }
+  .signin-code {
+    align-self: stretch;
+    text-align: center;
+    font-size: 40px;
+    letter-spacing: 0.12em;
+    padding: 14px 16px 14px 20px;
+  }
+  .signin-code-step .signin-actions {
+    align-self: stretch;
+  }
+  .signin-code-step .signin-actions .btn-primary {
+    width: 100%;
+  }
+  .record-row,
+  .note-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .record-date {
+    grid-column: 1 / -1;
+  }
+  .note-row .record-text {
+    grid-column: 1 / -1;
+  }
+  .mini-stat {
+    padding: 12px 14px;
+  }
+  .mini-stat .stat-value {
+    font-size: 22px;
+  }
+  .cards-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .cards-table,
+  .cards-table tbody {
+    display: block;
+  }
+  .cards-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--border);
+  }
+  .cards-table tbody tr:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .cards-table td {
+    padding: 0;
+    border: 0;
+  }
+  .cards-table .card-front {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .cards-table .card-due {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+  .cards-table .card-back {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .cards-table .num {
+    grid-column: 2;
+    grid-row: 2;
+    color: var(--muted);
+  }
+  .cards-table .reps-unit {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+  }
+}
+
 /* ---------- Narrow screens: sidebar becomes a drawer ---------- */
 
 @media (max-width: 1024px) {
