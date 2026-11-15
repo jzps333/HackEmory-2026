@@ -604,6 +604,7 @@ TEXT_TIMEOUT_S = 8.0       # finish_session's text (in the background)
 SHUTDOWN_TEXT_TIMEOUT_S = 2.0   # per Chert request at call end
 
 
+NO_AUTO_SWITCH = frozenset({"solana_pay", "parking"})
 RESEARCH_HANGUP_S = 9.0    # after start_research: time for the one-sentence goodbye, then hang up
 
 
@@ -707,7 +708,9 @@ class ScanSafeAgent(Agent):
         if s.allows(tool):
             return None
         p = s.provider_plugin(tool)
-        if p is not None and getattr(self, "auto_switch", True):
+        # Never auto-switch into payments: those only start from the app's parking flow. Every other
+        # action that changes something still needs its own spoken "yes, ..." inside the tool.
+        if p is not None and tool not in NO_AUTO_SWITCH and getattr(self, "auto_switch", True):
             # The caller asked for something an enabled skill does: switch to it silently (the owner
             # turned it on in Community plugins, which is the consent) and go ahead.
             s.activate(p)

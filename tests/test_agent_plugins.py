@@ -400,3 +400,11 @@ def test_tools_switch_to_the_enabled_skill_on_their_own(monkeypatch):
     assert agent._refusal("whiteboard") is None
     assert call.plugins.active is not None and "whiteboard" in call.plugins.active["effective_tools"]
     assert agent._refusal("no_such_tool") is not None          # nothing provides it: still refused
+
+
+def test_payment_tools_never_auto_switch(monkeypatch):
+    ai = agent_mod(monkeypatch)
+    call = make_call(ai, starter())
+    agent, _ = plugin_agent(ai, call)
+    agent.auto_switch = True
+    assert agent._refusal("solana_pay") is not None and call.plugins.active is None
