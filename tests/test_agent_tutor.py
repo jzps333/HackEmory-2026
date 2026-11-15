@@ -384,3 +384,15 @@ def test_draw_graph_tool(monkeypatch):
         assert "Nothing was drawn" in bad and "import" not in bad and "rm" not in bad
         assert "Graph on step 1: y = x²" in ai.memory_of(call).cues_of("tutor")
     asyncio.run(go())
+
+
+def test_graph_with_huge_values_is_refused_not_crashing():
+    from chert import whiteboard as wb
+    import pytest as _pt
+    for expr in ("exp(exp(x))", "10^(10^x)"):
+        try:
+            wb.graph(expr, -5, 5)          # either a clean GraphError or a finite figure, never a crash
+        except wb.GraphError:
+            pass
+    with _pt.raises(wb.GraphError):
+        wb.graph("x*0 + exp(800)", -1, 1)

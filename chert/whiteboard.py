@@ -603,7 +603,7 @@ def graph(expression: str, x_min=-5.0, x_max=5.0, mark_x=None, label: str = "") 
     if x1 - x0 < 1e-6:
         raise GraphError("x_max has to be bigger than x_min")
     pts = tuple((x0 + (x1 - x0) * k / SAMPLES, f(x0 + (x1 - x0) * k / SAMPLES)) for k in range(SAMPLES + 1))
-    ys = sorted(y for _, y in pts if not math.isnan(y))
+    ys = sorted(y for _, y in pts if math.isfinite(y) and abs(y) < 1e12)
     if len(ys) < 2:
         raise GraphError("it isn't defined anywhere from x_min to x_max: try another range")
     lo, hi = ys[0], ys[-1]
@@ -611,15 +611,20 @@ def graph(expression: str, x_min=-5.0, x_max=5.0, mark_x=None, label: str = "") 
     if qhi - qlo > 0 and hi - lo > 6 * (qhi - qlo):            # an asymptote: keep the middle
         q = qhi - qlo
         lo, hi = max(lo, qlo - 1.5 * q), min(hi, qhi + 1.5 * q)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi < lo:
+        raise GraphError("its values are too large to draw: try a smaller range")
     span = hi - lo
-    if span < 1e-9:
-        lo, hi, span = lo - 1, hi + 1, 2.0
+    if span <= max(1e-9, abs(lo) * 1e-9):
+        d = max(1.0, abs(lo) * 1e-3)
+        lo, hi, span = lo - d, hi + d, 2 * d
     if 0 < lo < 0.3 * span:                                    # show the x-axis when it's near
         lo = 0.0
     elif -0.3 * span < hi < 0:
         hi = 0.0
     span = hi - lo
     lo, hi = lo - 0.08 * span, hi + 0.08 * span
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        raise GraphError("its values are too large to draw: try a smaller range")
     mark = None
     if mark_x is not None:
         a = _num(mark_x)

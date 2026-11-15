@@ -34,6 +34,7 @@ the first frame a waiting screen; end_live puts a tick where the spinner was.
 """
 from __future__ import annotations
 
+import logging
 import asyncio
 import base64
 import io
@@ -47,6 +48,8 @@ from livekit import rtc
 from PIL import Image, ImageDraw, ImageFont
 
 from chert import whiteboard
+
+log = logging.getLogger("scansafe.video")
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
 
@@ -696,7 +699,17 @@ class StatusVideo:
 
     async def _loop(self) -> None:
         while True:
-            data = await asyncio.to_thread(self._draw)   # keep drawing off the audio loop
+            try:
+                data = await asyncio.to_thread(self._draw)   # keep drawing off the audio loop
+                self._last_good = data
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - a drawing bug must never stop the video
+                log.warning("video frame failed (%s); showing the last good frame", type(e).__name__)
+                data = getattr(self, "_last_good", None)
+                if data is None:
+                    await asyncio.sleep(1 / self.FPS)
+                    continue
             self.source.capture_frame(rtc.VideoFrame(self.W, self.H, rtc.VideoBufferType.RGBA, data))
             await asyncio.sleep(1 / self.FPS)
 
