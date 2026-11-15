@@ -50,7 +50,8 @@ FUNCTIONS = {"scam_check": ("check_qr_code",), "screen": ("show_website", "coach
              "plugin_search": ("find_plugin",),
              "memory": ("remember", "recall", "finish_session"),
              "flashcards": ("add_card", "next_card", "grade_card"),
-             "whiteboard": ("whiteboard_title", "write_step", "write_note", "clear_whiteboard"),
+             "whiteboard": ("whiteboard_title", "write_step", "write_note", "draw_graph",
+                            "clear_whiteboard"),
              "research": ("start_research", "search_research"),
              "computer": ("fill_form", "submit_form", "vercel_status", "vercel_redeploy",
                           "list_connections")}

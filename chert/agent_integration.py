@@ -812,7 +812,7 @@ class MeterPayAgent(ScanSafeAgent):
 class PluginAgent(ScanSafeAgent):
     """Ordinary calls with community plugins enabled (chert/plugins.py): ScanSafeAgent plus
     use_plugin, coach_cue, find_plugin, Tutor's whiteboard tools (whiteboard_title, write_step,
-    write_note, clear_whiteboard) and the rest. All tools are registered once at call start (no
+    write_note, draw_graph, clear_whiteboard) and the rest. All tools are registered once at call start (no
     mid-call tool swaps); use_plugin only changes the instructions, and each tool checks that the
     plugin that is on lists it. Calls without plugins get the plain ScanSafeAgent, as before."""
 
@@ -942,9 +942,11 @@ class PluginAgent(ScanSafeAgent):
         n = self.call.video.board_step(line) if self.call is not None else None
         self._note_for_session(p, f"Step {n}: {line}" if n else line)
         step = f"Step {n}" if n else "The step"
-        return (f"{step} is being written on their screen now. Explain it out loud in a sentence or "
-                "two, in plain words (don't read it out word for word). Then ask: Does that step "
-                "make sense? and wait for their answer. Don't write the next step until they say yes.")
+        return (f"{step} is being written on their screen now. Explain it out loud in one or two "
+                "short sentences, in plain words (don't read it out word for word). Then check in, "
+                "in your own words each time: ask whether they're following or stuck on anything "
+                "(like \"Does that make sense, or is anything tripping you up?\"), and wait for "
+                "their answer. Don't write the next step until they say they're with you.")
 
     @function_tool
     async def write_note(self, context: RunContext, text: str) -> str:
@@ -965,6 +967,30 @@ class PluginAgent(ScanSafeAgent):
         self._note_for_session(p, f"Note on step {n}: {line}" if n else f"Note: {line}")
         return ("The note is on their screen under the step. Say it in your own words if you haven't "
                 "yet, then ask if the step makes sense now. Once they say yes, go on with write_step.")
+
+    @function_tool
+    async def draw_graph(self, context: RunContext, expression: str, x_min: float = -5.0,
+                         x_max: float = 5.0, mark_x: Optional[float] = None, label: str = "") -> str:
+        """Draw a small graph of y = expression under the newest step on the caller's screen, when
+        a picture helps (a function's shape, a slope). The expression uses only x, numbers,
+        + - * / ^, parentheses, sin cos tan exp log sqrt abs, pi and e, like "x^2 - 3*x + 2" or
+        "sin(x)". x_min and x_max: the x range shown. mark_x: a dot on the curve there, with its
+        tangent line and slope. label: a short caption (default "y = …")."""
+        refused, p = self._board()
+        if refused:
+            return refused
+        try:
+            g = whiteboard.graph(expression, x_min, x_max, mark_x, label)
+        except whiteboard.GraphError as e:
+            return f"Nothing was drawn: {e}. Fix it and call draw_graph again, or skip the picture."
+        n = None
+        if self.call is not None:
+            n = self.call.video.board_graph(g)
+            if n is None:
+                return "There's no step on their screen yet. Write the step it belongs to with write_step first."
+        self._note_for_session(p, f"Graph on step {n}: {g.label}" if n else f"Graph: {g.label}")
+        return ("The graph is being drawn under the step. Say in a sentence what to notice in it, "
+                "then ask whether it makes sense, and wait for their answer.")
 
     @function_tool
     async def clear_whiteboard(self, context: RunContext) -> str:
