@@ -22,8 +22,13 @@ BOLD = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
 REG = "/System/Library/Fonts/Supplemental/Arial.ttf"
 
 # Voice-over pieces (seconds in voiceover_final.m4a) and where each starts in the video.
-VO_PARTS = [(0.0, 10.5, 0.3), (10.5, 28.8, 11.3), (28.8, 38.2, 43.3), (38.2, 56.2, 55.3),
-            (56.2, 60.1, 74.3), (60.1, 76.6, 88.3)]
+VO2 = HERE / "voiceover_diagram.m4a"                   # "Here's how a skill actually runs..." (16.25 s)
+TIGER_S = 17.0                                         # the walkthrough section, 74.0-91.0
+# (file, start, end, where it starts in the video)
+VO_PARTS = [(VO, 0.0, 10.5, 0.3), (VO, 10.5, 28.8, 11.3), (VO, 28.8, 38.2, 43.3), (VO, 38.2, 56.2, 55.3),
+            (VO2, 0.0, 16.25, 74.3), (VO, 60.1, 76.6, 74.0 + TIGER_S + 0.3)]
+# When each diagram box lights (seconds into the walkthrough): as the narration names it.
+DIAGRAM_CUES = [2.9, 5.7, 7.2, 8.7, 13.1, 14.4, 16.2]
 
 # Four-phone row (11.0-43.0 in the video): panel, label, clip, [start, end] seconds in the clip, captions.
 ROW_S = 32.0
@@ -292,8 +297,8 @@ def tiger() -> Path:                                   # 74-88: how the Research
         elif n.startswith("Searched"):
             continue
         keep.append(p)
-    secs, fps = 14.0, 15
-    reveal = 10.5                                      # all lines are in by then
+    secs, fps = TIGER_S, 15
+    reveal = 15.5                                      # all lines are in by then
     fr = TMP / "tiger"
     fr.mkdir(exist_ok=True)
     f_small, f_title, f_mono, f_monob = font(BOLD, 28), font(BOLD, 58), ImageFont.truetype(MONO, 25), \
@@ -321,14 +326,9 @@ def tiger() -> Path:                                   # 74-88: how the Research
             d.text((x0 + 24, y), at, font=f_mono, fill=GREY)
             d.text((x0 + 170, y), note, font=f_mono, fill=color)
             y += 40
-        lit = 3 + (1 if shown > first_search else 0) + (1 if shown >= 1 else 0)
-        if shown == len(keep):
-            lit = len(FLOW)
         bx0, bx1, by, bh, gap = 1260, 1860, 190, 92, 22
         for i, name in enumerate(FLOW):
-            on = i < lit if i != 4 else shown >= 1
-            if i == 3:
-                on = shown > first_search
+            on = t >= DIAGRAM_CUES[i]
             top = by + i * (bh + gap)
             d.rounded_rectangle((bx0, top, bx1, top + bh), 16, fill=((10, 60, 28) if on else (24, 24, 28)),
                                 outline=(GREEN if on else (60, 60, 68)), width=3)
@@ -358,8 +358,8 @@ def main() -> None:
     TMP.mkdir(parents=True, exist_ok=True)
     video = concat([intro(), row(), scansafe(), open_source(), tiger(), hood()], TMP / "video.mp4")
     inputs, chains, labels = ["-i", video], [], []
-    for i, (a, b, at) in enumerate(VO_PARTS):
-        inputs += ["-i", VO]
+    for i, (src, a, b, at) in enumerate(VO_PARTS):
+        inputs += ["-i", src]
         ms = int(at * 1000)
         chains.append(f"[{i + 1}:a]atrim={a}:{b},asetpts=PTS-STARTPTS,adelay={ms}|{ms}[v{i}]")
         labels.append(f"[v{i}]")
