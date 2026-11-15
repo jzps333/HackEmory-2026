@@ -37,6 +37,7 @@ router = APIRouter()
 
 PHONE_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 CALL_MIN_GAP_S = float(os.getenv("CALL_MIN_GAP_S", "30"))
+LINE_BUSY_TRIES, LINE_BUSY_RETRY_S = 7, 3.0   # a busy shared line: retry for about 20 s
 AGENT_READY_TIMEOUT_S = 20.0
 BRIDGE_TOKEN_TTL = timedelta(hours=1)
 CHERT_FACETIME_API = os.getenv("CHERT_FACETIME_API", "https://facetime.trychert.com/api/v1").rstrip("/")
@@ -495,12 +496,17 @@ async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict
             "livekit_url": os.getenv("LIVEKIT_URL"),
             "participant_token": bridge_token(room, bridge_identity),
             "remote_participant_identity": agent_identity,
-            # The shared line takes one call at a time and stays busy for a moment after a call
-            # ends: wait in Chert's line (up to 2 minutes) instead of refusing.
-            "when_busy": os.getenv("CHERT_WHEN_BUSY", "queue"),
         }
+        # No when_busy "queue": Chert answers a queued call without a call id, and the leftover
+        # queue entry then blocks every other call for minutes. We retry a busy line ourselves.
+        if os.getenv("CHERT_WHEN_BUSY"):
+            body["when_busy"] = os.getenv("CHERT_WHEN_BUSY")
         async with httpx.AsyncClient(timeout=40, follow_redirects=True) as c:
-            r = await c.post(f"{CHERT_FACETIME_API}/calls", json=body, headers=_chert_headers(uuid.uuid4().hex))
+            for attempt in range(LINE_BUSY_TRIES):
+                r = await c.post(f"{CHERT_FACETIME_API}/calls", json=body, headers=_chert_headers(uuid.uuid4().hex))
+                if not (r.status_code == 409 and "line_busy" in r.text) or attempt == LINE_BUSY_TRIES - 1:
+                    break
+                await asyncio.sleep(LINE_BUSY_RETRY_S)   # the line frees a few seconds after a call ends
         if not 200 <= r.status_code < 300:
             log.warning("chert create call failed: HTTP %s %s", r.status_code, r.text[:300])
             if r.status_code == 409 and "line_busy" in r.text:
@@ -511,7 +517,7 @@ async def place_call(url: str, phone: str, extra: Optional[dict] = None) -> dict
         data = r.json().get("data", r.json())
         call_id = data.get("id")
         if not call_id:
-            raise HTTPException(status_code=502, detail="Chert didn't return a call id")
+            raise NotPlaced(status_code=502, detail="Chert didn't return a call id")
         await lkapi.room.update_room_metadata(lk.UpdateRoomMetadataRequest(
             room=room, metadata=json.dumps({"chert_call_id": call_id})))
         _our_calls.add(str(call_id))

@@ -359,17 +359,19 @@ def test_busy_line_waits_in_line_and_never_blocks_the_retry(env, monkeypatch):
     monkeypatch.setattr(lk, "LiveKitAPI", FakeLK)
     monkeypatch.setattr(routes_call.asyncio, "sleep", lambda *_: _real_sleep(0))
     routes_call._last_call_at = 0.0
-    seen = {"busy": True}
+    seen = {"busy": True, "posts": 0}
 
     def chert(req):
         seen["body"] = json.loads(req.content)
+        seen["posts"] += 1
         if seen["busy"]:
             return httpx.Response(409, json={"error": {"code": "line_busy",
                                                        "message": "Your shared line is on another call."}})
         return httpx.Response(202, json={"data": {"id": "call-9", "status": "queued"}})
     _chert(monkeypatch, chert)
     r = client.post("/call-me", json={"url": "https://example.com", "phone": PHONE})
-    assert seen["body"]["when_busy"] == "queue"
+    assert "when_busy" not in seen["body"]                      # no Chert queue (it leaves stale entries)
+    assert seen["posts"] == routes_call.LINE_BUSY_TRIES          # we retried the busy line ourselves
     assert r.status_code == 409 and "still on another call" in r.json()["detail"]
     assert FakeLK.calls[-1][0] == "delete_room"
     seen["busy"] = False
